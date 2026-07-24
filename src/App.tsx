@@ -11,24 +11,159 @@ import ShiftManagementTab from './components/ShiftManagementTab';
 import FuelStockTab from './components/FuelStockTab';
 import DailySalesTab from './components/DailySalesTab';
 import EmployeesTab from './components/EmployeesTab';
-import SettingsTab from './components/SettingsTab';
+import AdminControlTab from './components/AdminControlTab';
 import PriceManagementTab from './components/PriceManagementTab';
-import { Employee, FuelTank, Shift, StockDelivery, PriceSchedule } from './types';
+import LoginPage from './components/LoginPage';
+import { AuthUser, Employee, FuelTank, Pump, Shift, StockDelivery, PriceSchedule, resolveUserRole } from './types';
 import { supabase, getTanksTableName, setTanksTableName } from './lib/supabase';
 
+const defaultEmps: Employee[] = [
+  { id: 'emp-101', name: 'Samantha Silva', role: 'Supervisor', phone: '0771234567', status: 'Active', avatarColor: 'bg-blue-500' },
+  { id: 'emp-102', name: 'Roshan Perera', role: 'Pumper', phone: '0712345678', status: 'Active', avatarColor: 'bg-emerald-500' },
+  { id: 'emp-103', name: 'Nimal Fernando', role: 'Pumper', phone: '0753456789', status: 'Active', avatarColor: 'bg-purple-500' },
+  { id: 'emp-104', name: 'Priyantha Bandara', role: 'Pumper', phone: '0724567890', status: 'Active', avatarColor: 'bg-amber-500' }
+];
 
+const defaultTanks: FuelTank[] = [
+  { id: 'tank-petrol92', fuelType: 'Petrol 92', name: 'Tank 01 - Petrol 92', capacity: 15000, currentLevel: 9200, pricePerLiter: 355 },
+  { id: 'tank-petrol95', fuelType: 'Petrol 95', name: 'Tank 02 - Petrol 95', capacity: 15000, currentLevel: 12500, pricePerLiter: 410 },
+  { id: 'tank-autodiesel', fuelType: 'Auto Diesel', name: 'Tank 03 - Auto Diesel', capacity: 20000, currentLevel: 7400, pricePerLiter: 317 },
+  { id: 'tank-superdiesel', fuelType: 'Super Diesel', name: 'Tank 04 - Super Diesel', capacity: 10000, currentLevel: 3200, pricePerLiter: 343 }
+];
+
+export const defaultPumps: Pump[] = [
+  { id: 'pump-101', name: 'Pump 01', fuelType: 'Petrol 92', tankId: 'tank-petrol92', status: 'Active' },
+  { id: 'pump-102', name: 'Pump 02', fuelType: 'Petrol 92', tankId: 'tank-petrol92', status: 'Active' },
+  { id: 'pump-103', name: 'Pump 03', fuelType: 'Petrol 95', tankId: 'tank-petrol95', status: 'Active' },
+  { id: 'pump-104', name: 'Pump 04', fuelType: 'Petrol 95', tankId: 'tank-petrol95', status: 'Active' },
+  { id: 'pump-105', name: 'Pump 05', fuelType: 'Auto Diesel', tankId: 'tank-autodiesel', status: 'Active' },
+  { id: 'pump-106', name: 'Pump 06', fuelType: 'Auto Diesel', tankId: 'tank-autodiesel', status: 'Active' },
+  { id: 'pump-107', name: 'Pump 07', fuelType: 'Super Diesel', tankId: 'tank-superdiesel', status: 'Active' },
+  { id: 'pump-108', name: 'Pump 08', fuelType: 'Super Diesel', tankId: 'tank-superdiesel', status: 'Active' }
+];
 
 export default function App() {
+  // Auth state & session guard
+  const [user, setUser] = useState<AuthUser | null>(() => {
+    try {
+      const stored = localStorage.getItem('fms_user');
+      if (stored) return JSON.parse(stored);
+    } catch (_) {}
+    return null;
+  });
+
   // Navigation active tab
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [dbError, setDbError] = useState<string | null>(null);
   const [isRlsActive, setIsRlsActive] = useState<boolean>(false);
   const isInitialLoad = useRef(true);
 
-  // CORE PERSISTED STATES
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [tanks, setTanks] = useState<FuelTank[]>([]);
-  const [activeShift, setActiveShift] = useState<Shift | null>(null);
+  // Sync Supabase Auth session if configured
+  useEffect(() => {
+    const checkSession = async () => {
+      const isConfigured = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
+      if (isConfigured) {
+        try {
+          const { data } = await supabase.auth.getSession();
+          if (data?.session?.user) {
+            const u = data.session.user;
+            const userEmail = u.email || 'admin@fuelflow.lk';
+            const { roleTitle } = resolveUserRole(userEmail, u.user_metadata?.role);
+
+            const authUser: AuthUser = {
+              id: u.id,
+              email: userEmail,
+              name: u.user_metadata?.full_name || u.user_metadata?.name || (roleTitle === 'System Admin' ? 'Rumesh Anjana' : 'Station User'),
+              role: roleTitle,
+              avatarColor: roleTitle === 'System Admin' ? 'bg-blue-600' : 'bg-purple-600',
+            };
+            setUser(authUser);
+            localStorage.setItem('fms_user', JSON.stringify(authUser));
+          }
+        } catch (err) {
+          console.warn("Supabase auth session check notice:", err);
+        }
+      }
+    };
+
+    checkSession();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        const u = session.user;
+        const userEmail = u.email || 'admin@fuelflow.lk';
+        const { roleTitle } = resolveUserRole(userEmail, u.user_metadata?.role);
+
+        const authUser: AuthUser = {
+          id: u.id,
+          email: userEmail,
+          name: u.user_metadata?.full_name || u.user_metadata?.name || (roleTitle === 'System Admin' ? 'Rumesh Anjana' : 'Station User'),
+          role: roleTitle,
+          avatarColor: roleTitle === 'System Admin' ? 'bg-blue-600' : 'bg-purple-600',
+        };
+        setUser(authUser);
+        localStorage.setItem('fms_user', JSON.stringify(authUser));
+      }
+    });
+
+    return () => {
+      authListener?.subscription?.unsubscribe();
+    };
+  }, []);
+
+  // Redirect non-admin users away from 'admin' tab if attempted
+  useEffect(() => {
+    if (user) {
+      const { role } = resolveUserRole(user.email, user.role);
+      if (role !== 'admin' && activeTab === 'admin') {
+        setActiveTab('dashboard');
+      }
+    }
+  }, [user, activeTab]);
+
+  const handleLoginSuccess = (signedInUser: AuthUser) => {
+    setUser(signedInUser);
+    try {
+      localStorage.setItem('fms_user', JSON.stringify(signedInUser));
+    } catch (_) {}
+  };
+
+  const handleLogout = async () => {
+    try {
+      const isConfigured = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
+      if (isConfigured) {
+        await supabase.auth.signOut();
+      }
+    } catch (_) {}
+    setUser(null);
+    try {
+      localStorage.removeItem('fms_user');
+    } catch (_) {}
+  };
+
+  // Core persisted states
+  const [employees, setEmployees] = useState<Employee[]>(defaultEmps);
+  const [tanks, setTanks] = useState<FuelTank[]>(defaultTanks);
+  const [pumps, setPumps] = useState<Pump[]>(() => {
+    try {
+      const stored = localStorage.getItem('fms_pumps');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (_) {}
+    return defaultPumps;
+  });
+  const [activeShift, setActiveShift] = useState<Shift | null>(() => {
+    try {
+      const stored = localStorage.getItem('fms_activeShift') || localStorage.getItem('active_shift_data');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed && (parsed.isActive || parsed.isactive)) return parsed;
+      }
+    } catch (_) {}
+    return null;
+  });
   const [shiftHistory, setShiftHistory] = useState<Shift[]>([]);
   const [deliveries, setDeliveries] = useState<StockDelivery[]>([]);
   const [priceSchedules, setPriceSchedules] = useState<PriceSchedule[]>([]);
@@ -74,20 +209,41 @@ export default function App() {
         try {
           const storedEmps = localStorage.getItem('fms_employees');
           const storedTanks = localStorage.getItem('fms_tanks');
-          const storedActiveShift = localStorage.getItem('fms_activeShift');
+          const storedPumps = localStorage.getItem('fms_pumps');
           const storedHistory = localStorage.getItem('fms_shiftHistory');
           const storedDeliveries = localStorage.getItem('fms_deliveries');
           const storedSchedules = localStorage.getItem('fms_priceSchedules');
 
-          if (storedEmps) setEmployees(JSON.parse(storedEmps));
-          else setEmployees(defaultEmps);
+          if (storedEmps !== null) {
+            try { setEmployees(JSON.parse(storedEmps)); } catch (_) { setEmployees([]); }
+          } else {
+            setEmployees(defaultEmps);
+          }
 
-          if (storedTanks) setTanks(JSON.parse(storedTanks));
-          else setTanks(defaultTanks);
+          if (storedTanks !== null) {
+            try { setTanks(JSON.parse(storedTanks)); } catch (_) { setTanks([]); }
+          } else {
+            setTanks(defaultTanks);
+          }
 
+          if (storedPumps !== null) {
+            try { 
+              const parsed = JSON.parse(storedPumps);
+              setPumps(Array.isArray(parsed) && parsed.length > 0 ? parsed : defaultPumps); 
+            } catch (_) { 
+              setPumps(defaultPumps); 
+            }
+          } else {
+            setPumps(defaultPumps);
+          }
+
+          const storedActiveShift = localStorage.getItem('fms_activeShift') || localStorage.getItem('active_shift_data');
           if (storedActiveShift) {
             try {
-              setActiveShift(JSON.parse(storedActiveShift));
+              const parsed = JSON.parse(storedActiveShift);
+              if (parsed && (parsed.isActive || parsed.isactive)) {
+                setActiveShift(parsed);
+              }
             } catch (_) {}
           }
           if (storedHistory) {
@@ -146,19 +302,11 @@ export default function App() {
         const { data: employeesData, error: empError } = await supabase.from('employees').select('*');
         if (empError) handleSupabaseError(empError);
 
-        if (employeesData && employeesData.length > 0) {
+        if (employeesData) {
           const mappedEmps = employeesData.map(e => ({
             id: e.id, name: e.name, role: e.role, phone: e.phone, status: e.status, avatarColor: e.avatarcolor
           }));
           setEmployees(mappedEmps as Employee[]);
-        } else {
-          // Empty database - seed
-          setEmployees(defaultEmps);
-          const dbPayload = defaultEmps.map(e => ({
-            id: e.id, name: e.name, role: e.role, phone: e.phone, status: e.status, avatarcolor: e.avatarColor
-          }));
-          const { error: seedError } = await supabase.from('employees').insert(dbPayload);
-          if (seedError) handleSupabaseError(seedError);
         }
 
         // Probe and fetch fuel tanks dynamically (supports plural/singular database configurations)
@@ -180,19 +328,37 @@ export default function App() {
         const { data: tanksData, error: tankError } = await supabase.from(targetTbl).select('*');
         if (tankError) handleSupabaseError(tankError);
 
-        if (tanksData && tanksData.length > 0) {
+        if (tanksData) {
           const mappedTanks = tanksData.map(t => ({
             id: t.id, fuelType: t.fueltype, name: t.name, capacity: t.capacity, currentLevel: t.currentlevel, pricePerLiter: t.priceperliter
           }));
           setTanks(mappedTanks as FuelTank[]);
-        } else {
-          // Empty database - seed
-          setTanks(defaultTanks);
-          const dbPayload = defaultTanks.map(t => ({
-            id: t.id, fueltype: t.fuelType, name: t.name, capacity: t.capacity, currentlevel: t.currentLevel, priceperliter: t.pricePerLiter
+        }
+
+        // Fetch pumps table
+        const { data: pumpsData } = await supabase.from('pumps').select('*');
+        if (pumpsData && pumpsData.length > 0) {
+          const mappedPumps = pumpsData.map(p => ({
+            id: p.id,
+            name: p.name,
+            fuelType: p.fueltype,
+            tankId: p.tankid || undefined,
+            status: p.status || 'Active'
           }));
-          const { error: seedError } = await supabase.from(getTanksTableName()).insert(dbPayload);
-          if (seedError) handleSupabaseError(seedError);
+          setPumps(mappedPumps as Pump[]);
+        } else {
+          // Fallback if pumps table in Supabase is empty
+          const storedPumps = localStorage.getItem('fms_pumps');
+          if (storedPumps) {
+            try {
+              const parsed = JSON.parse(storedPumps);
+              setPumps(Array.isArray(parsed) && parsed.length > 0 ? parsed : defaultPumps);
+            } catch (_) {
+              setPumps(defaultPumps);
+            }
+          } else {
+            setPumps(defaultPumps);
+          }
         }
 
         // Fetch shifts with pump readings
@@ -210,25 +376,84 @@ export default function App() {
             startTime: s.starttime,
             endTime: s.endtime,
             isActive: s.isactive,
-            totalFuelSold: s.totalfuelsold,
-            totalNetSold: s.totalnetsold,
-            totalNetSales: s.totalnetsales,
+            totalFuelSold: Number(s.totalfuelsold) || 0,
+            totalNetSold: Number(s.totalnetsold) || 0,
+            totalNetSales: Number(s.totalnetsales) || 0,
+            initialPumperCash: Number(s.initialpumpercash || s.initialPumperCash) || 0,
+            replacementPumperCash: Number(s.replacementpumpercash || s.replacementPumperCash) || 0,
+            totalPhysicalCash: Number(s.totalphysicalcash || s.totalPhysicalCash) || 0,
+            cashVariance: s.cashvariance,
+            handoverNotes: s.handovernotes || '',
+            replacementPumperId: s.replacementpumperid || '',
             pumpReadings: (s.pumpReadings || []).map((r: any) => ({
-              pumpId: r.pumpid,
-              pumpName: r.pumpname,
-              fuelType: r.fueltype,
-              assignedPumperId: r.assignedpumperid,
-              startMeter: r.startmeter,
-              endMeter: r.endmeter,
-              testingQty: r.testingqty,
-              status: r.status,
-              isLocked: r.islocked,
-              unitPrice: r.unitprice
+              pumpId: r.pumpid || r.pumpId,
+              pumpName: r.pumpname || r.pumpName,
+              fuelType: r.fueltype || r.fuelType,
+              tankId: r.tankid || r.tankId || (r.fueltype === 'Petrol 92' ? 'tank-petrol92' : r.fueltype === 'Petrol 95' ? 'tank-petrol95' : r.fueltype === 'Auto Diesel' ? 'tank-autodiesel' : 'tank-superdiesel'),
+              assignedPumperId: r.assignedpumperid || r.assignedPumperId || null,
+              replacementPumperId: r.replacementpumperid || r.replacementPumperId || null,
+              initialPumperCash: Number(r.initialpumpercash || r.initialPumperCash) || 0,
+              handoverMeter: Number(r.handovermeter || r.handoverMeter) || 0,
+              handoverNotes: r.handovernotes || r.handoverNotes || '',
+              startMeter: Number(r.startmeter !== undefined ? r.startmeter : r.startMeter) || 0,
+              endMeter: Number(r.endmeter !== undefined ? r.endmeter : r.endMeter) || 0,
+              testingQty: Number(r.testingqty !== undefined ? r.testingqty : r.testingQty) || 0,
+              status: r.status || 'Idle',
+              isLocked: r.islocked !== undefined ? r.islocked : r.isLocked,
+              unitPrice: Number(r.unitprice || r.unitPrice) || 0
             }))
           }));
-          const active = mappedShifts.find(s => s.isActive);
+
+          const dbActive = mappedShifts.find(s => s.isActive);
           const history = mappedShifts.filter(s => !s.isActive);
-          setActiveShift(active as unknown as Shift || null);
+
+          const storedActiveStr = localStorage.getItem('fms_activeShift') || localStorage.getItem('active_shift_data');
+          let localActive: Shift | null = null;
+          if (storedActiveStr) {
+            try { localActive = JSON.parse(storedActiveStr); } catch (_) {}
+          }
+
+          if (dbActive) {
+            const mergedReadings = dbActive.pumpReadings.map(dpr => {
+              const lpr = localActive?.pumpReadings?.find(r => r.pumpId === dpr.pumpId);
+              if (lpr) {
+                return {
+                  ...dpr,
+                  startMeter: lpr.startMeter !== undefined ? lpr.startMeter : dpr.startMeter,
+                  endMeter: lpr.endMeter !== undefined ? lpr.endMeter : dpr.endMeter,
+                  testingQty: lpr.testingQty !== undefined ? lpr.testingQty : dpr.testingQty,
+                  assignedPumperId: lpr.assignedPumperId || dpr.assignedPumperId || null,
+                  replacementPumperId: lpr.replacementPumperId || dpr.replacementPumperId || null,
+                  initialPumperCash: lpr.initialPumperCash || dpr.initialPumperCash || 0,
+                  handoverMeter: lpr.handoverMeter || dpr.handoverMeter || 0,
+                  handoverNotes: lpr.handoverNotes || dpr.handoverNotes || '',
+                  status: lpr.status || dpr.status || 'Idle',
+                  isLocked: lpr.isLocked !== undefined ? lpr.isLocked : dpr.isLocked,
+                  unitPrice: lpr.unitPrice || dpr.unitPrice || 0
+                };
+              }
+              return dpr;
+            });
+
+            if (localActive && localActive.pumpReadings) {
+              localActive.pumpReadings.forEach(lpr => {
+                if (!mergedReadings.some(dpr => dpr.pumpId === lpr.pumpId)) {
+                  mergedReadings.push(lpr);
+                }
+              });
+            }
+
+            setActiveShift({
+              ...dbActive,
+              supervisorId: localActive?.supervisorId || dbActive.supervisorId,
+              name: localActive?.name || dbActive.name,
+              startTime: localActive?.startTime || dbActive.startTime,
+              pumpReadings: mergedReadings
+            } as unknown as Shift);
+          } else if (localActive && (localActive.isActive || (localActive as any).isactive)) {
+            setActiveShift(localActive);
+          }
+
           setShiftHistory(history as unknown as Shift[]);
         }
 
@@ -238,7 +463,7 @@ export default function App() {
 
         if (deliveriesData) {
           const mappedDeliveries = deliveriesData.map(d => ({
-            id: d.id, date: d.date, fuelType: d.fueltype, quantity: d.quantity, supplier: d.supplier, cost: d.cost
+            id: d.id, date: d.date, fuelType: d.fueltype, tankId: d.tankid, quantity: d.quantity, supplier: d.supplier, cost: d.cost
           }));
           setDeliveries(mappedDeliveries as StockDelivery[]);
         }
@@ -322,6 +547,35 @@ export default function App() {
   useEffect(() => {
     const isConfigured = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
     
+    // Always persist pumps array to localStorage
+    localStorage.setItem('fms_pumps', JSON.stringify(pumps));
+
+    if (!isConfigured || isInitialLoad.current || dbError || isRlsActive) return;
+
+    if (pumps.length > 0) {
+      const dbPayload = pumps.map(p => {
+        const item: any = { id: p.id, name: p.name, fueltype: p.fuelType, status: p.status };
+        if (p.tankId) item.tankid = p.tankId;
+        return item;
+      });
+      supabase.from('pumps').upsert(dbPayload).then(async ({ error }) => {
+        if (error && (error.message?.includes('tankid') || error.code === '42703' || error.message?.includes('schema cache'))) {
+          // Fallback without tankid if column missing in Supabase schema cache
+          const fallbackPayload = pumps.map(p => ({
+            id: p.id, name: p.name, fueltype: p.fuelType, status: p.status
+          }));
+          const { error: fbErr } = await supabase.from('pumps').upsert(fallbackPayload);
+          if (fbErr) handleSyncWriteError(fbErr);
+        } else if (error) {
+          handleSyncWriteError(error);
+        }
+      });
+    }
+  }, [pumps, dbError, isRlsActive]);
+
+  useEffect(() => {
+    const isConfigured = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
+    
     if (activeShift) {
       localStorage.setItem('fms_activeShift', JSON.stringify(activeShift));
     } else {
@@ -334,18 +588,87 @@ export default function App() {
       if (activeShift) {
         const { pumpReadings, ...shiftData } = activeShift;
         const { error: shiftErr } = await supabase.from('shifts').upsert({
-          id: shiftData.id, name: shiftData.name, supervisorid: shiftData.supervisorId, starttime: shiftData.startTime, endtime: shiftData.endTime, isactive: shiftData.isActive, totalfuelsold: shiftData.totalFuelSold, totalnetsold: shiftData.totalNetSold, totalnetsales: shiftData.totalNetSales
+          id: shiftData.id,
+          name: shiftData.name,
+          supervisorid: shiftData.supervisorId,
+          starttime: shiftData.startTime,
+          endtime: shiftData.endTime || null,
+          isactive: shiftData.isActive,
+          totalfuelsold: shiftData.totalFuelSold || 0,
+          totalnetsold: shiftData.totalNetSold || 0,
+          totalnetsales: shiftData.totalNetSales || 0,
+          initialpumpercash: shiftData.initialPumperCash || 0,
+          replacementpumpercash: shiftData.replacementPumperCash || 0,
+          totalphysicalcash: shiftData.totalPhysicalCash || 0,
+          cashvariance: shiftData.cashVariance || 0,
+          handovernotes: shiftData.handoverNotes || '',
+          replacementpumperid: shiftData.replacementPumperId || null
         });
+
         if (shiftErr) {
-          handleSyncWriteError(shiftErr);
-          return;
+          if (shiftErr.code === '42703' || shiftErr.message?.includes('column')) {
+            await supabase.from('shifts').upsert({
+              id: shiftData.id,
+              name: shiftData.name,
+              supervisorid: shiftData.supervisorId,
+              starttime: shiftData.startTime,
+              endtime: shiftData.endTime || null,
+              isactive: shiftData.isActive,
+              totalfuelsold: shiftData.totalFuelSold || 0,
+              totalnetsold: shiftData.totalNetSold || 0,
+              totalnetsales: shiftData.totalNetSales || 0
+            });
+          } else {
+            handleSyncWriteError(shiftErr);
+            return;
+          }
         }
+
         if (pumpReadings && pumpReadings.length > 0) {
           const readingsToUpsert = pumpReadings.map(r => ({
-            id: (r as any).id, shift_id: activeShift.id, pumpid: r.pumpId, pumpname: r.pumpName, fueltype: r.fuelType, assignedpumperid: r.assignedPumperId, startmeter: r.startMeter, endmeter: r.endMeter, testingqty: r.testingQty, status: r.status, islocked: r.isLocked, unitprice: r.unitPrice
+            id: (r as any).id || `${activeShift.id}_${r.pumpId}`,
+            shift_id: activeShift.id,
+            pumpid: r.pumpId,
+            pumpname: r.pumpName,
+            fueltype: r.fuelType,
+            tankid: r.tankId || (r.fuelType === 'Petrol 92' ? 'tank-petrol92' : r.fuelType === 'Petrol 95' ? 'tank-petrol95' : r.fuelType === 'Auto Diesel' ? 'tank-autodiesel' : 'tank-superdiesel'),
+            assignedpumperid: r.assignedPumperId || null,
+            replacementpumperid: r.replacementPumperId || null,
+            initialpumpercash: r.initialPumperCash || 0,
+            handovermeter: r.handoverMeter || 0,
+            handovernotes: r.handoverNotes || '',
+            startmeter: r.startMeter || 0,
+            endmeter: r.endMeter || 0,
+            testingqty: r.testingQty || 0,
+            status: r.status,
+            islocked: r.isLocked || false,
+            unitprice: r.unitPrice || 0
           }));
+
           const { error: readingsErr } = await supabase.from('pump_readings').upsert(readingsToUpsert);
-          if (readingsErr) handleSyncWriteError(readingsErr);
+          if (readingsErr) {
+            if (readingsErr.code === '42703' || readingsErr.message?.includes('column')) {
+              const basicReadings = pumpReadings.map(r => ({
+                id: (r as any).id || `${activeShift.id}_${r.pumpId}`,
+                shift_id: activeShift.id,
+                pumpid: r.pumpId,
+                pumpname: r.pumpName,
+                fueltype: r.fuelType,
+                tankid: r.tankId,
+                assignedpumperid: r.assignedPumperId || null,
+                startmeter: r.startMeter || 0,
+                endmeter: r.endMeter || 0,
+                testingqty: r.testingQty || 0,
+                status: r.status,
+                islocked: r.isLocked || false,
+                unitprice: r.unitPrice || 0
+              }));
+              const { error: basicErr } = await supabase.from('pump_readings').upsert(basicReadings);
+              if (basicErr) handleSyncWriteError(basicErr);
+            } else {
+              handleSyncWriteError(readingsErr);
+            }
+          }
         }
       }
     };
@@ -461,11 +784,107 @@ export default function App() {
 
   // Action: Close operational shift and update stock levels automatically
   const handleCloseShift = (closedShift: Shift) => {
-    // 1. Add shift to completed history list
+    // 1. Deduct Net Sold volume from fuel tanks (testing quantity is returned to underground tanks so 0 deduction for test fuel)
+    const netSoldByTank: Record<string, number> = {};
+    const netSoldByFuelType: Record<string, number> = {};
+
+    closedShift.pumpReadings.forEach(r => {
+      const gross = Math.max(0, r.endMeter - r.startMeter);
+      const net = Math.max(0, gross - (r.testingQty || 0)); // Net Sold excludes testing quantity
+      
+      if (r.tankId) {
+        netSoldByTank[r.tankId] = (netSoldByTank[r.tankId] || 0) + net;
+      }
+      if (r.fuelType) {
+        netSoldByFuelType[r.fuelType] = (netSoldByFuelType[r.fuelType] || 0) + net;
+      }
+    });
+
+    const updatedTanks = tanks.map(tank => {
+      const netSold = netSoldByTank[tank.id] ?? netSoldByFuelType[tank.fuelType] ?? 0;
+      if (netSold > 0) {
+        const newLevel = Math.max(0, tank.currentLevel - netSold);
+        return {
+          ...tank,
+          currentLevel: newLevel
+        };
+      }
+      return tank;
+    });
+
+    setTanks(updatedTanks);
+    try {
+      localStorage.setItem('fms_tanks', JSON.stringify(updatedTanks));
+    } catch (_) {}
+
+    // Persist updated tank levels directly to Supabase fuel_tanks table
+    const isConfigured = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
+    if (isConfigured && !dbError && !isRlsActive) {
+      const tankPayload = updatedTanks.map(t => ({
+        id: t.id,
+        fueltype: t.fuelType,
+        name: t.name,
+        capacity: t.capacity,
+        currentlevel: t.currentLevel,
+        priceperliter: t.pricePerLiter
+      }));
+      supabase.from(getTanksTableName()).upsert(tankPayload).then(({ error }) => {
+        if (error) console.warn("Supabase tank level deduction update notice:", error?.message || error);
+      });
+    }
+
+    // 2. Add shift to completed history list
     const updatedHistory = [closedShift, ...shiftHistory];
     setShiftHistory(updatedHistory);
 
-    // 2. Reset assigned pumper states in the employees directory back to Active/Off-duty
+    // Explicitly update closed shift and completed pump readings in Supabase
+    if (isConfigured && !dbError && !isRlsActive) {
+      const { pumpReadings, ...shiftData } = closedShift;
+      const closedTime = shiftData.endTime || new Date().toISOString();
+      
+      supabase.from('shifts').upsert({
+        id: shiftData.id,
+        name: shiftData.name,
+        supervisorid: shiftData.supervisorId,
+        starttime: shiftData.startTime,
+        endtime: closedTime,
+        isactive: false,
+        totalfuelsold: shiftData.totalFuelSold || 0,
+        totalnetsold: shiftData.totalNetSold || 0,
+        totalnetsales: shiftData.totalNetSales || 0,
+        initialpumpercash: shiftData.initialPumperCash || 0,
+        replacementpumpercash: shiftData.replacementPumperCash || 0,
+        totalphysicalcash: shiftData.totalPhysicalCash || 0,
+        cashvariance: shiftData.cashVariance || 0,
+        handovernotes: shiftData.handoverNotes || '',
+        replacementpumperid: shiftData.replacementPumperId || null
+      }).then(({ error: sErr }) => {
+        if (sErr) console.warn("Supabase shift close notice:", sErr?.message || sErr);
+      });
+
+      if (pumpReadings && pumpReadings.length > 0) {
+        const readingsToUpsert = pumpReadings.map(r => ({
+          id: (r as any).id,
+          shift_id: closedShift.id,
+          pumpid: r.pumpId,
+          pumpname: r.pumpName,
+          fueltype: r.fuelType,
+          tankid: r.tankId || (r.fuelType === 'Petrol 92' ? 'tank-petrol92' : r.fuelType === 'Petrol 95' ? 'tank-petrol95' : r.fuelType === 'Auto Diesel' ? 'tank-autodiesel' : 'tank-superdiesel'),
+          assignedpumperid: r.assignedPumperId,
+          startmeter: r.startMeter,
+          endmeter: r.endMeter,
+          testingqty: r.testingQty || 0,
+          status: 'Completed',
+          islocked: true,
+          unitprice: r.unitPrice
+        }));
+        supabase.from('pump_readings').upsert(readingsToUpsert).then(({ error: prErr }) => {
+          if (prErr) console.warn("Supabase pump_readings close notice:", prErr?.message || prErr);
+        });
+      }
+    }
+
+    // 3. Reset assigned pumper states in the employees directory back to Active/Off-duty
     const updatedEmployees = employees.map(emp => {
       if (emp.status === 'On Shift') {
         return {
@@ -477,7 +896,7 @@ export default function App() {
     });
     setEmployees(updatedEmployees);
 
-    // 3. Set active shift to null
+    // 4. Set active shift to null
     setActiveShift(null);
   };
 
@@ -521,10 +940,32 @@ export default function App() {
     console.log('Cleared all offline local caches to pull fresh from Supabase.');
   };
 
+  const handleDeleteShift = async (shiftId: string) => {
+    if (confirm(`Are you sure you want to delete shift record ${shiftId}? This will remove the shift and its associated pump readings.`)) {
+      const isConfigured = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
+      if (isConfigured) {
+        try {
+          await supabase.from('pump_readings').delete().eq('shift_id', shiftId);
+          const { error } = await supabase.from('shifts').delete().eq('id', shiftId);
+          if (error) console.warn("Supabase shift delete error:", error.message);
+        } catch (err) {
+          console.warn("Shift delete error:", err);
+        }
+      }
+      const updated = shiftHistory.filter(s => s.id !== shiftId);
+      setShiftHistory(updated);
+      localStorage.setItem('fms_shiftHistory', JSON.stringify(updated));
+    }
+  };
+
+  if (!user) {
+    return <LoginPage onLoginSuccess={handleLoginSuccess} />;
+  }
+
   return (
     <div id="app-root-layout" className="flex min-h-screen bg-[#F4F7F6] text-[#1C1C1C] font-sans antialiased tabular-nums">
       {/* Sidebar - fixed left panel */}
-      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
+      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} user={user} onLogout={handleLogout} />
 
       {/* Main Panel Content Area */}
       <div id="main-content-panel" className="flex-1 ml-64 p-8 min-h-screen overflow-x-hidden">
@@ -594,6 +1035,7 @@ export default function App() {
               <DashboardTab
                 employees={employees}
                 tanks={tanks}
+                pumps={pumps}
                 activeShift={activeShift}
                 shiftHistory={shiftHistory}
                 setActiveTab={setActiveTab}
@@ -605,8 +1047,11 @@ export default function App() {
                 employees={employees}
                 tanks={tanks}
                 setTanks={setTanks}
+                pumps={pumps}
+                setPumps={setPumps}
                 activeShift={activeShift}
                 setActiveShift={setActiveShift}
+                shiftHistory={shiftHistory}
                 onCloseShift={handleCloseShift}
                 onStartShift={handleStartShift}
               />
@@ -616,6 +1061,8 @@ export default function App() {
               <FuelStockTab
                 tanks={tanks}
                 setTanks={setTanks}
+                pumps={pumps}
+                setPumps={setPumps}
                 deliveries={deliveries}
                 setDeliveries={setDeliveries}
               />
@@ -624,31 +1071,51 @@ export default function App() {
             {activeTab === 'sales' && (
               <DailySalesTab
                 shiftHistory={shiftHistory}
+                setShiftHistory={setShiftHistory}
+                onDeleteShift={handleDeleteShift}
                 employees={employees}
                 tanks={tanks}
+              />
+            )}
+
+            {activeTab === 'price' && (
+              <AdminControlTab
+                tanks={tanks}
+                setTanks={setTanks}
+                pumps={pumps}
+                setPumps={setPumps}
+                employees={employees}
+                setEmployees={setEmployees}
+                priceSchedules={priceSchedules}
+                setPriceSchedules={setPriceSchedules}
+                onResetAllData={handleResetAllData}
+              />
+            )}
+
+            {activeTab === 'admin' && (
+              <AdminControlTab
+                tanks={tanks}
+                setTanks={setTanks}
+                pumps={pumps}
+                setPumps={setPumps}
+                employees={employees}
+                setEmployees={setEmployees}
+                priceSchedules={priceSchedules}
+                setPriceSchedules={setPriceSchedules}
+                onResetAllData={handleResetAllData}
               />
             )}
 
             {activeTab === 'employees' && (
-              <EmployeesTab
+              <AdminControlTab
+                tanks={tanks}
+                setTanks={setTanks}
+                pumps={pumps}
+                setPumps={setPumps}
                 employees={employees}
                 setEmployees={setEmployees}
-              />
-            )}
-
-            
-            {activeTab === 'price' && (
-              <PriceManagementTab
-                tanks={tanks}
-                setTanks={setTanks}
                 priceSchedules={priceSchedules}
                 setPriceSchedules={setPriceSchedules}
-              />
-            )}
-            {activeTab === 'settings' && (
-              <SettingsTab
-                tanks={tanks}
-                setTanks={setTanks}
                 onResetAllData={handleResetAllData}
               />
             )}

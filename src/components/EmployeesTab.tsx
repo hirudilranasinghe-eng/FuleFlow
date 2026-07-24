@@ -129,26 +129,37 @@ export default function EmployeesTab({ employees, setEmployees }: EmployeesTabPr
   };
 
   // Remove Employee
-  const handleRemoveEmployee = (id: string) => {
+  const handleRemoveEmployee = async (id: string) => {
     const emp = employees.find(e => e.id === id);
     if (emp && emp.status === 'On Shift') {
       alert("Cannot remove an employee currently on active shift!");
       return;
     }
     if (confirm("Are you sure you want to remove this employee? This will delete them from the roster.")) {
-      setEmployees(employees.filter(e => e.id !== id));
+      const isConfigured = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
+      if (isConfigured) {
+        try {
+          const { error } = await supabase.from('employees').delete().eq('id', id);
+          if (error) console.warn("Supabase employee delete error:", error.message);
+        } catch (err) {
+          console.warn("Employee delete error:", err);
+        }
+      }
+      const updated = employees.filter(e => e.id !== id);
+      setEmployees(updated);
+      localStorage.setItem('fms_employees', JSON.stringify(updated));
     }
   };
 
   return (
-    <div id="employees-tab-root" className="space-y-6">
+    <div id="employees-tab-root" className="space-y-4">
       {/* Page Header */}
-      <div id="emp-header-section" className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div id="emp-header-section" className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-extrabold text-[#1C1C1C] tracking-tight font-sans">
+          <h1 className="text-xl sm:text-2xl font-bold text-[#1C1C1C] tracking-tight font-sans">
             Staff & Employee Roster
           </h1>
-          <p className="text-gray-500 text-sm mt-1">
+          <p className="text-gray-500 text-xs sm:text-sm mt-0.5">
             Manage station supervisors, active pumpers, duty shifts, and contact profiles
           </p>
         </div>

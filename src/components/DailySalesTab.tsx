@@ -6,17 +6,19 @@
 import React, { useState, useMemo } from 'react';
 import { 
   Search, Eye, Calendar, FileSpreadsheet, Download, 
-  ArrowUpRight, Clock, User, CheckCircle2, ChevronRight, ChevronDown, X
+  ArrowUpRight, Clock, User, CheckCircle2, ChevronRight, ChevronDown, X, Trash2
 } from 'lucide-react';
 import { Shift, Employee, FuelTank } from '../types';
 
 interface DailySalesTabProps {
   shiftHistory: Shift[];
+  setShiftHistory?: React.Dispatch<React.SetStateAction<Shift[]>>;
+  onDeleteShift?: (shiftId: string) => void;
   employees: Employee[];
   tanks?: FuelTank[];
 }
 
-export default function DailySalesTab({ shiftHistory, employees, tanks }: DailySalesTabProps) {
+export default function DailySalesTab({ shiftHistory, setShiftHistory, onDeleteShift, employees, tanks }: DailySalesTabProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedShift, setSelectedShift] = useState<Shift | null>(null);
   const [expandedShiftIds, setExpandedShiftIds] = useState<Record<string, boolean>>({});
@@ -182,59 +184,59 @@ export default function DailySalesTab({ shiftHistory, employees, tanks }: DailyS
   };
 
   return (
-    <div id="daily-sales-root" className="space-y-6">
+    <div id="daily-sales-root" className="space-y-4">
       {/* Page Header */}
-      <div id="sales-header-block" className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div id="sales-header-block" className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-extrabold text-[#1C1C1C] tracking-tight font-sans">
+          <h1 className="text-xl sm:text-2xl font-bold text-[#1C1C1C] tracking-tight font-sans">
             Shift & Daily Sales History
           </h1>
-          <p className="text-gray-500 text-sm mt-1">
+          <p className="text-gray-500 text-xs sm:text-sm mt-0.5">
             Browse complete shift records, digital meter handovers, and exportable CSV reports
           </p>
         </div>
       </div>
 
       {/* Aggregate Stats Bar */}
-      <div id="sales-stats-bar" className="grid grid-cols-1 sm:grid-cols-3 gap-5 glass-panel p-5 rounded-2xl shadow-sm">
-        <div className="space-y-1 pl-2">
+      <div id="sales-stats-bar" className="grid grid-cols-1 sm:grid-cols-3 gap-4 glass-panel p-4 rounded-2xl shadow-sm">
+        <div className="space-y-0.5 pl-2">
           <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block">Cumulative Net Sales</span>
-          <span className="text-2xl font-extrabold text-[#1C1C1C] block tabular-nums font-semibold">{formatCurrency(aggregateStats.totalRevenue)}</span>
+          <span className="text-xl sm:text-2xl font-extrabold text-[#1C1C1C] block tabular-nums">{formatCurrency(aggregateStats.totalRevenue)}</span>
           <span className="text-[10px] text-gray-500 block font-sans">All historic completed shifts</span>
         </div>
-        <div className="space-y-1 border-t sm:border-t-0 sm:border-l border-gray-100 sm:pl-6 pt-3 sm:pt-0">
+        <div className="space-y-0.5 border-t sm:border-t-0 sm:border-l border-gray-100 sm:pl-5 pt-2 sm:pt-0">
           <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block">Cumulative Liters Dispensed</span>
-          <span className="text-2xl font-extrabold text-blue-600 block tabular-nums font-semibold">{formatLiters(aggregateStats.totalVolume)}</span>
+          <span className="text-xl sm:text-2xl font-extrabold text-blue-600 block tabular-nums">{formatLiters(aggregateStats.totalVolume)}</span>
           <span className="text-[10px] text-gray-500 block font-sans">Volume net of testing deductions</span>
         </div>
-        <div className="space-y-1 border-t sm:border-t-0 sm:border-l border-gray-100 sm:pl-6 pt-3 sm:pt-0">
+        <div className="space-y-0.5 border-t sm:border-t-0 sm:border-l border-gray-100 sm:pl-5 pt-2 sm:pt-0">
           <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block">Completed Shifts Closed</span>
-          <span className="text-2xl font-extrabold text-blue-600 block tabular-nums font-semibold">{aggregateStats.completedShifts} Shifts</span>
+          <span className="text-xl sm:text-2xl font-extrabold text-blue-600 block tabular-nums">{aggregateStats.completedShifts} Shifts</span>
           <span className="text-[10px] text-gray-500 block font-sans">100% data fidelity preserved</span>
         </div>
       </div>
 
       {/* Main Table Card */}
-      <div id="sales-table-card" className="glass-panel rounded-2xl overflow-hidden">
+      <div id="sales-table-card" className="glass-panel rounded-2xl overflow-hidden border border-gray-200/80 shadow-sm">
         {/* Controls */}
-        <div className="p-5 border-b border-gray-100 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 bg-gray-50">
-          <span className="text-sm font-bold text-[#1C1C1C] uppercase tracking-wider">Historical Shift Logs</span>
+        <div className="p-4 border-b border-gray-100 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 bg-gray-50/80">
+          <span className="text-xs font-bold text-[#1C1C1C] uppercase tracking-wider">Historical Shift Logs</span>
           <div className="flex flex-col sm:flex-row items-center gap-3 w-full lg:w-auto">
             <div className="relative w-full sm:w-72">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <input
                 type="text"
                 placeholder="Search by Shift ID, name or supervisor..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-4 py-2 bg-white border border-gray-200 rounded-xl text-[#1C1C1C] text-sm focus:outline-none focus:border-blue-500 transition-colors"
+                className="w-full pl-9 pr-4 py-1.5 bg-white border border-gray-200 rounded-xl text-[#1C1C1C] text-xs sm:text-sm focus:outline-none focus:border-blue-500 transition-colors"
               />
             </div>
             
             <button
               onClick={handleExportAllLogsCsv}
               disabled={shiftHistory.length === 0}
-              className="flex items-center justify-center gap-2 px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-500 hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed text-white font-extrabold text-xs rounded-xl shadow-md transition-all cursor-pointer whitespace-nowrap w-full sm:w-auto"
+              className="flex items-center justify-center gap-2 px-3.5 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-500 hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed text-white font-extrabold text-xs rounded-xl shadow-sm transition-all cursor-pointer whitespace-nowrap w-full sm:w-auto"
               title="Export all shift logs to a single master CSV file"
             >
               <FileSpreadsheet className="w-4 h-4" />
@@ -244,71 +246,94 @@ export default function DailySalesTab({ shiftHistory, employees, tanks }: DailyS
         </div>
 
         {/* History Table */}
-        <div className="overflow-auto max-h-[500px]">
+        <div className="overflow-auto max-h-[650px]">
           <table className="w-full text-left">
-            <thead className="sticky top-0 z-10 bg-white">
-              <tr className="bg-gray-100 border-b border-gray-100 text-gray-500 font-bold text-xs uppercase tracking-wider">
-                <th className="py-4 px-4 w-12 text-center"></th>
-                <th className="py-4 px-6">Shift ID</th>
-                <th className="py-4 px-6">Shift Template</th>
-                <th className="py-4 px-6">Supervisor</th>
-                <th className="py-4 px-6 text-right">Liters Sold</th>
-                <th className="py-4 px-6 text-right">Net Revenue</th>
-                <th className="py-4 px-6">Ended At</th>
-                <th className="py-4 px-6 text-center">Actions</th>
+            <thead className="sticky top-0 z-10 bg-gray-50/95 backdrop-blur-sm">
+              <tr className="border-b border-gray-200/80 text-gray-500 font-bold text-[11px] uppercase tracking-wider">
+                <th className="py-2.5 px-3 w-10 text-center"></th>
+                <th className="py-2.5 px-4">Shift ID</th>
+                <th className="py-2.5 px-4">Shift Template</th>
+                <th className="py-2.5 px-4">Supervisor</th>
+                <th className="py-2.5 px-4 text-center">Status</th>
+                <th className="py-2.5 px-4 text-right">Liters Sold</th>
+                <th className="py-2.5 px-4 text-right">Net Revenue</th>
+                <th className="py-2.5 px-4">Ended At</th>
+                <th className="py-2.5 px-4 text-center">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-white/[0.04] text-sm">
+            <tbody className="divide-y divide-gray-100 text-xs sm:text-sm">
               {filteredHistory.length > 0 ? (
                 filteredHistory.map((s) => (
                   <React.Fragment key={s.id}>
-                    <tr className="hover:bg-gray-50 transition-colors group">
-                      <td className="py-4 px-4 text-center">
+                    <tr className="hover:bg-blue-50/30 transition-colors group">
+                      <td className="py-2.5 px-3 text-center">
                         <button
                           onClick={() => toggleExpandShift(s.id)}
-                          className="p-1 hover:bg-gray-100 rounded transition-colors text-gray-500 hover:text-[#1C1C1C] cursor-pointer"
+                          className="p-1 hover:bg-gray-100 rounded transition-colors text-gray-400 hover:text-[#1C1C1C] cursor-pointer"
                           title={expandedShiftIds[s.id] ? "Collapse details" : "Expand details"}
                         >
                           {expandedShiftIds[s.id] ? (
                             <ChevronDown className="w-4 h-4 text-blue-600 stroke-[3]" />
                           ) : (
-                            <ChevronRight className="w-4 h-4 text-gray-500 stroke-[3]" />
+                            <ChevronRight className="w-4 h-4 text-gray-400 stroke-[3]" />
                           )}
                         </button>
                       </td>
-                      <td className="py-4 px-6 tabular-nums font-bold text-[#1C1C1C] group-hover:text-blue-600 transition-colors">
+                      <td className="py-2.5 px-4 tabular-nums font-bold text-[#1C1C1C] group-hover:text-blue-600 transition-colors">
                         {s.id}
                       </td>
-                      <td className="py-4 px-6 text-gray-600 font-medium">
+                      <td className="py-2.5 px-4 text-gray-600 font-medium">
                         {s.name}
                       </td>
-                      <td className="py-4 px-6 text-gray-700 font-semibold">
+                      <td className="py-2.5 px-4 text-gray-700 font-semibold">
                         {getEmployeeName(s.supervisorId)}
                       </td>
-                      <td className="py-4 px-6 text-right tabular-nums font-semibold font-medium text-gray-600">
+                      <td className="py-2.5 px-4 text-center">
+                        {s.endTime ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/60">
+                            Completed
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200/60 animate-pulse">
+                            Active
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-2.5 px-4 text-right tabular-nums font-semibold text-gray-700">
                         {formatLiters(s.totalNetSold)}
                       </td>
-                      <td className="py-4 px-6 text-right tabular-nums font-bold text-emerald-400">
+                      <td className="py-2.5 px-4 text-right tabular-nums font-extrabold text-emerald-600">
                         {formatCurrency(s.totalNetSales)}
                       </td>
-                      <td className="py-4 px-6 text-gray-500">
+                      <td className="py-2.5 px-4 text-gray-500 text-xs">
                         {s.endTime ? new Date(s.endTime).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : 'Ongoing'}
                       </td>
-                      <td className="py-4 px-6 text-center flex items-center justify-center gap-2">
-                        <button
-                          onClick={() => setSelectedShift(s)}
-                          className="p-1.5 bg-white text-gray-600 hover:text-blue-600 hover:bg-blue-500/20 border border-gray-100 rounded-lg transition-all cursor-pointer"
-                          title="View detailed pump meters"
-                        >
-                          <Eye className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleExportShiftCsv(s)}
-                          className="p-1.5 bg-white text-gray-600 hover:text-emerald-400 hover:bg-emerald-500/20 border border-gray-100 rounded-lg transition-all cursor-pointer"
-                          title="Export detailed CSV report"
-                        >
-                          <Download className="w-4 h-4" />
-                        </button>
+                      <td className="py-2.5 px-4 text-center">
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            onClick={() => setSelectedShift(s)}
+                            className="p-1 bg-white text-gray-600 hover:text-blue-600 hover:bg-blue-50 border border-gray-200 rounded-lg transition-all cursor-pointer"
+                            title="View detailed pump meters"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleExportShiftCsv(s)}
+                            className="p-1 bg-white text-gray-600 hover:text-emerald-600 hover:bg-emerald-50 border border-gray-200 rounded-lg transition-all cursor-pointer"
+                            title="Export detailed CSV report"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                          </button>
+                          {onDeleteShift && (
+                            <button
+                              onClick={() => onDeleteShift(s.id)}
+                              className="p-1 bg-white text-gray-500 hover:text-red-600 hover:bg-red-50 border border-gray-200 rounded-lg transition-all cursor-pointer"
+                              title="Delete shift record"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                     

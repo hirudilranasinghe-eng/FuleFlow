@@ -8,11 +8,12 @@ import {
   Fuel, TrendingUp, AlertTriangle, Users, ArrowUpRight, 
   Calendar, CheckCircle2, ShoppingBag, Droplet, Clock, Info
 } from 'lucide-react';
-import { Employee, FuelTank, Shift } from '../types';
+import { Employee, FuelTank, Pump, Shift } from '../types';
 
 interface DashboardTabProps {
   employees: Employee[];
   tanks: FuelTank[];
+  pumps?: Pump[];
   activeShift: Shift | null;
   shiftHistory: Shift[];
   setActiveTab: (tab: string) => void;
@@ -117,14 +118,14 @@ export default function DashboardTab({
   };
 
   return (
-    <div id="dashboard-tab-root" className="space-y-6">
+    <div id="dashboard-tab-root" className="space-y-4">
       {/* Welcome Banner */}
-      <div id="db-welcome-banner" className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div id="db-welcome-banner" className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-extrabold text-[#1C1C1C] tracking-tight font-sans">
+          <h1 className="text-xl sm:text-2xl font-bold text-[#1C1C1C] tracking-tight font-sans">
             FuelFlow Station Dashboard
           </h1>
-          <p className="text-gray-500 text-sm mt-1">
+          <p className="text-gray-500 text-xs sm:text-sm mt-0.5">
             Real-time visual summary of current sales, stocks, and team operations
           </p>
         </div>

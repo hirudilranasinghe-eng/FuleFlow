@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { FuelTank, FuelType, PriceSchedule } from '../types';
-import { Calendar, Trash2, Clock } from 'lucide-react';
-import { Tag, Edit2, Save, X } from 'lucide-react';
+import { Calendar, Trash2, Clock, Tag, Edit2, Save, X } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 
 interface PriceManagementTabProps {
   tanks: FuelTank[];
@@ -35,8 +35,19 @@ export default function PriceManagementTab({ tanks, setTanks, priceSchedules, se
     setSchedDate('');
   };
 
-  const handleCancelSchedule = (id: string) => {
-    setPriceSchedules(prev => prev.map(s => s.id === id ? { ...s, status: 'Cancelled' } : s));
+  const handleCancelSchedule = async (id: string) => {
+    const isConfigured = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
+    if (isConfigured) {
+      try {
+        const { error } = await supabase.from('price_schedules').delete().eq('id', id);
+        if (error) console.warn("Supabase schedule delete error:", error.message);
+      } catch (err) {
+        console.warn("Schedule delete error:", err);
+      }
+    }
+    const updated = priceSchedules.filter(s => s.id !== id);
+    setPriceSchedules(updated);
+    localStorage.setItem('fms_priceSchedules', JSON.stringify(updated));
   };
 
 
@@ -73,14 +84,14 @@ export default function PriceManagementTab({ tanks, setTanks, priceSchedules, se
   const fuelTypes = Array.from(new Set(tanks.map(t => t.fuelType)));
 
   return (
-    <div id="price-management-root" className="space-y-6 w-full max-w-6xl mx-auto animate-fade-in pb-12">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
+    <div id="price-management-root" className="space-y-4 w-full max-w-6xl mx-auto animate-fade-in pb-12">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white p-4 sm:p-5 rounded-2xl border border-gray-100 shadow-sm">
         <div>
-          <h1 className="text-2xl font-bold text-[#1C1C1C] tracking-tight">Price Management</h1>
-          <p className="text-sm text-gray-500 mt-1">Manage global board prices per liter for all fuel products.</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-[#1C1C1C] tracking-tight">Price Management</h1>
+          <p className="text-xs sm:text-sm text-gray-500 mt-0.5">Manage global board prices per liter for all fuel products.</p>
         </div>
-        <div className="w-12 h-12 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600">
-          <Tag className="w-6 h-6" />
+        <div className="w-10 h-10 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600 flex-shrink-0">
+          <Tag className="w-5 h-5" />
         </div>
       </div>
 

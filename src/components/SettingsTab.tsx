@@ -117,14 +117,14 @@ export default function SettingsTab({ tanks, setTanks, onResetAllData }: Setting
   };
 
   return (
-    <div id="settings-tab-root" className="space-y-6 max-w-4xl">
+    <div id="settings-tab-root" className="space-y-4 max-w-4xl">
       {/* Page Header */}
       <div id="settings-header" className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-extrabold text-[#1C1C1C] tracking-tight font-sans">
+          <h1 className="text-xl sm:text-2xl font-bold text-[#1C1C1C] tracking-tight font-sans">
             Station Settings
           </h1>
-          <p className="text-gray-500 text-sm mt-1">
+          <p className="text-gray-500 text-xs sm:text-sm mt-0.5">
             Configure default fuel pricing boards, local currencies, station identities, and diagnostic reset controls
           </p>
         </div>

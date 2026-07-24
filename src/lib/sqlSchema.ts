@@ -26,6 +26,7 @@ CREATE TABLE pumps (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     fueltype TEXT NOT NULL,
+    tankid TEXT,
     status TEXT NOT NULL CHECK (status IN ('Active', 'Idle', 'Maintenance'))
 );
 
@@ -49,6 +50,7 @@ CREATE TABLE pump_readings (
     pumpid TEXT NOT NULL,
     pumpname TEXT NOT NULL,
     fueltype TEXT NOT NULL,
+    tankid TEXT,
     assignedpumperid TEXT REFERENCES employees(id),
     startmeter NUMERIC NOT NULL,
     endmeter NUMERIC NOT NULL,
@@ -63,6 +65,7 @@ CREATE TABLE stock_deliveries (
     id TEXT PRIMARY KEY,
     date TIMESTAMPTZ NOT NULL,
     fueltype TEXT NOT NULL,
+    tankid TEXT,
     quantity NUMERIC NOT NULL,
     supplier TEXT NOT NULL,
     cost NUMERIC NOT NULL
@@ -85,6 +88,9 @@ ALTER TABLE shifts DISABLE ROW LEVEL SECURITY;
 ALTER TABLE pump_readings DISABLE ROW LEVEL SECURITY;
 ALTER TABLE stock_deliveries DISABLE ROW LEVEL SECURITY;
 ALTER TABLE price_schedules DISABLE ROW LEVEL SECURITY;
+
+-- Ensure tankid column exists on pumps table
+ALTER TABLE pumps ADD COLUMN IF NOT EXISTS tankid TEXT;
 
 -- Disable RLS for fuel_tank if it exists
 DO $$

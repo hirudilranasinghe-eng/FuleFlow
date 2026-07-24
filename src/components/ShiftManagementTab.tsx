@@ -10,24 +10,42 @@ import {
   ShieldCheck, Check, Save, AlertTriangle, TrendingUp, RefreshCw,
   Lock, Unlock, Edit2, ArrowLeft
 } from 'lucide-react';
-import { Employee, FuelTank, PumpReading, Shift } from '../types';
+import { supabase } from '../lib/supabase';
+import { Employee, FuelTank, Pump, PumpReading, Shift } from '../types';
 
 interface ShiftManagementTabProps {
   employees: Employee[];
   tanks: FuelTank[];
   setTanks?: React.Dispatch<React.SetStateAction<FuelTank[]>>;
+  pumps?: Pump[];
+  setPumps?: React.Dispatch<React.SetStateAction<Pump[]>>;
   activeShift: Shift | null;
   setActiveShift: React.Dispatch<React.SetStateAction<Shift | null>>;
+  shiftHistory?: Shift[];
   onCloseShift: (closingShift: Shift) => void;
   onStartShift: (newShift: Omit<Shift, 'totalFuelSold' | 'totalNetSold' | 'totalNetSales'>) => void;
 }
+
+const defaultPumpsList: Pump[] = [
+  { id: 'pump-101', name: 'Pump 01', fuelType: 'Petrol 92', tankId: 'tank-petrol92', status: 'Active' },
+  { id: 'pump-102', name: 'Pump 02', fuelType: 'Petrol 92', tankId: 'tank-petrol92', status: 'Active' },
+  { id: 'pump-103', name: 'Pump 03', fuelType: 'Petrol 95', tankId: 'tank-petrol95', status: 'Active' },
+  { id: 'pump-104', name: 'Pump 04', fuelType: 'Petrol 95', tankId: 'tank-petrol95', status: 'Active' },
+  { id: 'pump-105', name: 'Pump 05', fuelType: 'Auto Diesel', tankId: 'tank-autodiesel', status: 'Active' },
+  { id: 'pump-106', name: 'Pump 06', fuelType: 'Auto Diesel', tankId: 'tank-autodiesel', status: 'Active' },
+  { id: 'pump-107', name: 'Pump 07', fuelType: 'Super Diesel', tankId: 'tank-superdiesel', status: 'Active' },
+  { id: 'pump-108', name: 'Pump 08', fuelType: 'Super Diesel', tankId: 'tank-superdiesel', status: 'Active' }
+];
 
 export default function ShiftManagementTab({
   employees,
   tanks,
   setTanks,
+  pumps,
+  setPumps,
   activeShift,
   setActiveShift,
+  shiftHistory,
   onCloseShift,
   onStartShift,
 }: ShiftManagementTabProps) {
@@ -52,6 +70,98 @@ export default function ShiftManagementTab({
   const [draftShiftName, setDraftShiftName] = useState('');
   const [draftStartTime, setDraftStartTime] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Mid-Shift Handover & Cash Collection state
+  const [initialPumperCash, setInitialPumperCash] = useState<number | ''>(0);
+  const [replacementPumperCash, setReplacementPumperCash] = useState<number | ''>(0);
+  const [replacementPumperId, setReplacementPumperId] = useState<string>('');
+  const [handoverNotes, setHandoverNotes] = useState<string>('');
+
+  // Pump Transfer / Handover Modal State
+  const [handoverPumpModal, setHandoverPumpModal] = useState<PumpReading | null>(null);
+  const [modalHandoverMeter, setModalHandoverMeter] = useState<number | ''>(0);
+  const [modalReplacementPumperId, setModalReplacementPumperId] = useState<string>('');
+  const [modalOutgoingCash, setModalOutgoingCash] = useState<number | ''>(0);
+  const [modalHandoverNotes, setModalHandoverNotes] = useState<string>('');
+
+  // Handover Modal handlers
+  const handleOpenHandoverModal = (reading: PumpReading) => {
+    setHandoverPumpModal(reading);
+    const fuelPrice = getPriceForFuelType(reading.fuelType);
+    const currentEnd = reading.endMeter > reading.startMeter ? reading.endMeter : reading.startMeter;
+    setModalHandoverMeter(currentEnd);
+    
+    const handoverLiters = Math.max(0, currentEnd - reading.startMeter);
+    const netLiters = Math.max(0, handoverLiters - reading.testingQty);
+    const defaultCash = netLiters * fuelPrice;
+    setModalOutgoingCash(defaultCash);
+    
+    setModalReplacementPumperId(reading.replacementPumperId || '');
+    setModalHandoverNotes(reading.handoverNotes || '');
+  };
+
+  const handleConfirmHandover = () => {
+    if (!handoverPumpModal || !activeShift) return;
+
+    const hMeter = Number(modalHandoverMeter) || 0;
+    if (hMeter < handoverPumpModal.startMeter) {
+      setToastMessage(`Validation Error: Handover meter (${hMeter} L) cannot be less than Start meter (${handoverPumpModal.startMeter} L).`);
+      setTimeout(() => setToastMessage(null), 4000);
+      return;
+    }
+
+    if (!modalReplacementPumperId) {
+      setToastMessage(`Validation Error: Please select a replacement pumper.`);
+      setTimeout(() => setToastMessage(null), 4000);
+      return;
+    }
+
+    const outgoingCash = Number(modalOutgoingCash) || 0;
+
+    const updatedReadings = draftReadings.map(dr => {
+      if (dr.pumpId === handoverPumpModal.pumpId) {
+        return {
+          ...dr,
+          replacementPumperId: modalReplacementPumperId,
+          handoverMeter: hMeter,
+          initialPumperCash: outgoingCash,
+          handoverNotes: modalHandoverNotes,
+          assignedPumperId: modalReplacementPumperId
+        };
+      }
+      return dr;
+    });
+
+    setDraftReadings(updatedReadings);
+
+    let totalFuel = 0;
+    let totalNet = 0;
+    let totalSales = 0;
+
+    updatedReadings.forEach(dr => {
+      const fuel = Math.max(0, dr.endMeter - dr.startMeter);
+      const net = Math.max(0, fuel - dr.testingQty);
+      totalFuel += fuel;
+      totalNet += net;
+      totalSales += (net * getPriceForFuelType(dr.fuelType));
+    });
+
+    setActiveShift({
+      ...activeShift,
+      pumpReadings: updatedReadings,
+      totalFuelSold: totalFuel,
+      totalNetSold: totalNet,
+      totalNetSales: totalSales,
+      initialPumperCash: (activeShift.initialPumperCash || 0) + outgoingCash,
+      replacementPumperId: modalReplacementPumperId
+    });
+
+    const replacementPumperName = employees.find(e => e.id === modalReplacementPumperId)?.name || 'Replacement Pumper';
+    setToastMessage(`Mid-shift transfer recorded for ${handoverPumpModal.pumpName}! Replacement Pumper: ${replacementPumperName}`);
+    setTimeout(() => setToastMessage(null), 4000);
+
+    setHandoverPumpModal(null);
+  };
   
   // Track settled pumpers per active shift
   const [settledPumperIds, setSettledPumperIds] = useState<Record<string, boolean>>({});
@@ -59,10 +169,39 @@ export default function ShiftManagementTab({
   // Sync draft states when activeShift changes
   React.useEffect(() => {
     if (activeShift) {
-      setDraftReadings(activeShift.pumpReadings);
+      const availablePumps = (pumps && pumps.length > 0) ? pumps : defaultPumpsList;
+      const currentReadings = activeShift.pumpReadings || [];
+      const readingMap = new Map(currentReadings.map(r => [r.pumpId, r]));
+
+      const ensuredReadings: PumpReading[] = availablePumps.map(p => {
+        if (readingMap.has(p.id)) {
+          return readingMap.get(p.id)!;
+        }
+        const carryForward = getPreviousEndMeterForPump(p.id);
+        const tank = tanks.find(t => t.id === p.tankId || t.fuelType === p.fuelType);
+        return {
+          pumpId: p.id,
+          pumpName: p.name,
+          fuelType: p.fuelType,
+          tankId: p.tankId || tank?.id || '',
+          assignedPumperId: null,
+          startMeter: carryForward,
+          endMeter: 0,
+          testingQty: 0,
+          status: 'Idle',
+          isLocked: false,
+          unitPrice: tank ? tank.pricePerLiter : 355
+        };
+      });
+
+      setDraftReadings(ensuredReadings);
       setDraftSupervisorId(activeShift.supervisorId);
       setDraftShiftName(activeShift.name);
       setDraftStartTime(activeShift.startTime);
+      setInitialPumperCash(activeShift.initialPumperCash !== undefined ? activeShift.initialPumperCash : 0);
+      setReplacementPumperCash(activeShift.replacementPumperCash !== undefined ? activeShift.replacementPumperCash : 0);
+      setReplacementPumperId(activeShift.replacementPumperId || '');
+      setHandoverNotes(activeShift.handoverNotes || '');
       
       const stored = localStorage.getItem(`fuelflow_settled_pumpers_${activeShift.id}`);
       setSettledPumperIds(stored ? JSON.parse(stored) : {});
@@ -71,9 +210,189 @@ export default function ShiftManagementTab({
       setDraftSupervisorId('');
       setDraftShiftName('');
       setDraftStartTime('');
+      setInitialPumperCash(0);
+      setReplacementPumperCash(0);
+      setReplacementPumperId('');
+      setHandoverNotes('');
       setSettledPumperIds({});
     }
-  }, [activeShift]);
+  }, [activeShift, pumps, tanks]);
+
+  // Fetch latest recorded end meters for pumps from Supabase for automatic start meter carryover
+  const [supabaseLatestMeters, setSupabaseLatestMeters] = React.useState<Record<string, number>>({});
+  
+  // Closed shifts fetched from Supabase & local history for the Shift Ledger
+  const [closedLedgerShifts, setClosedLedgerShifts] = useState<any[]>([]);
+  const [isLoadingLedger, setIsLoadingLedger] = useState(false);
+
+  React.useEffect(() => {
+    const fetchClosedShiftsFromSupabase = async () => {
+      setIsLoadingLedger(true);
+      const isConfigured = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
+      let fetched: any[] = [];
+
+      if (isConfigured) {
+        try {
+          const { data, error } = await supabase
+            .from('shifts')
+            .select(`
+              *,
+              pumpReadings:pump_readings(*)
+            `)
+            .eq('isactive', false)
+            .order('starttime', { ascending: false });
+
+          if (data && !error && data.length > 0) {
+            fetched = data.map((s: any) => ({
+              id: s.id,
+              name: s.name,
+              supervisorId: s.supervisorid,
+              supervisorName: employees.find(e => e.id === s.supervisorid)?.name || 'Unassigned',
+              startTime: s.starttime,
+              endTime: s.endtime,
+              isActive: s.isactive,
+              totalFuelSold: s.totalfuelsold || 0,
+              totalNetSold: s.totalnetsold || 0,
+              totalNetSales: s.totalnetsales || 0,
+              initialPumperCash: s.initialpumpercash || s.initialPumperCash || 0,
+              replacementPumperCash: s.replacementpumpercash || s.replacementPumperCash || 0,
+              totalPhysicalCash: s.totalphysicalcash || s.totalPhysicalCash || 0,
+              cashVariance: s.cashvariance !== undefined ? s.cashvariance : s.cashVariance,
+              handoverNotes: s.handovernotes || s.handoverNotes || '',
+              replacementPumperId: s.replacementpumperid || s.replacementPumperId || '',
+              pumpReadings: (s.pumpReadings || []).map((r: any) => ({
+                pumpId: r.pumpid,
+                pumpName: r.pumpname,
+                fuelType: r.fueltype,
+                tankId: r.tankid,
+                assignedPumperId: r.assignedpumperid,
+                startMeter: r.startmeter || 0,
+                endMeter: r.endmeter || 0,
+                testingQty: r.testingqty || 0,
+                status: r.status,
+                isLocked: r.islocked,
+                unitPrice: r.unitprice || 0,
+                totalDispensed: Math.max(0, (r.endmeter || 0) - (r.startmeter || 0)),
+                netSales: Math.max(0, ((r.endmeter || 0) - (r.startmeter || 0) - (r.testingqty || 0))) * (r.unitprice || 0)
+              }))
+            }));
+          }
+        } catch (err) {
+          console.warn("Notice: Error loading closed shifts from Supabase:", err);
+        }
+      }
+
+      // Merge with shiftHistory prop and local storage
+      const localHistory: any[] = (() => {
+        try {
+          return JSON.parse(localStorage.getItem('fms_shiftHistory') || localStorage.getItem('fuelflow_history') || '[]');
+        } catch (e) {
+          return [];
+        }
+      })();
+
+      const combinedMap = new Map<string, any>();
+      (shiftHistory || []).forEach(s => {
+        if (!s.isActive) combinedMap.set(s.id, s);
+      });
+      localHistory.forEach(s => {
+        if (!s.isActive && !combinedMap.has(s.id)) combinedMap.set(s.id, s);
+      });
+      fetched.forEach(s => {
+        combinedMap.set(s.id, s);
+      });
+
+      const list = Array.from(combinedMap.values()).sort((a, b) => {
+        const tA = new Date(b.startTime || b.endTime || 0).getTime();
+        const tB = new Date(a.startTime || a.endTime || 0).getTime();
+        return tA - tB;
+      });
+
+      setClosedLedgerShifts(list);
+      setIsLoadingLedger(false);
+    };
+
+    fetchClosedShiftsFromSupabase();
+  }, [activeShift, shiftHistory, employees]);
+
+  React.useEffect(() => {
+    const fetchLatestReadingsFromSupabase = async () => {
+      const isConfigured = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
+      if (!isConfigured) return;
+
+      try {
+        const { data, error } = await supabase
+          .from('pump_readings')
+          .select('pumpid, endmeter')
+          .order('id', { ascending: false });
+
+        if (data && data.length > 0) {
+          const metersMap: Record<string, number> = {};
+          data.forEach((row: any) => {
+            const pid = row.pumpid || row.pumpId;
+            const endM = row.endmeter !== undefined ? row.endmeter : row.endMeter;
+            if (pid && endM !== undefined && endM !== null && !metersMap[pid]) {
+              metersMap[pid] = Number(endM);
+            }
+          });
+          setSupabaseLatestMeters(metersMap);
+        }
+      } catch (err) {
+        console.warn("Notice: Could not fetch latest pump readings from Supabase:", err);
+      }
+    };
+
+    fetchLatestReadingsFromSupabase();
+  }, []);
+
+  // Helper: Retrieve previous shift's recorded endmeter for a given pump
+  const getPreviousEndMeterForPump = (pumpId: string): number => {
+    // 1. Check activeShift if it exists
+    if (activeShift?.pumpReadings) {
+      const reading = activeShift.pumpReadings.find(pr => pr.pumpId === pumpId);
+      if (reading && reading.endMeter > 0) {
+        return reading.endMeter;
+      }
+    }
+
+    // 2. Check supabaseLatestMeters map
+    if (supabaseLatestMeters[pumpId] !== undefined && supabaseLatestMeters[pumpId] > 0) {
+      return supabaseLatestMeters[pumpId];
+    }
+
+    // 3. Check shiftHistory array passed in props
+    const historyToSearch = shiftHistory || [];
+    for (const shift of historyToSearch) {
+      if (shift.pumpReadings) {
+        const reading = shift.pumpReadings.find(pr => pr.pumpId === pumpId);
+        if (reading && reading.endMeter !== undefined && reading.endMeter !== null && reading.endMeter > 0) {
+          return reading.endMeter;
+        }
+      }
+    }
+
+    // 4. Check fms_shiftHistory & fuelflow_history in localStorage
+    try {
+      const keys = ['fms_shiftHistory', 'fuelflow_history'];
+      for (const k of keys) {
+        const savedStr = localStorage.getItem(k);
+        if (savedStr) {
+          const history: Shift[] = JSON.parse(savedStr);
+          for (const shift of history) {
+            if (shift.pumpReadings) {
+              const reading = shift.pumpReadings.find((pr: any) => (pr.pumpId || pr.pumpid) === pumpId);
+              const endM = reading ? (reading.endMeter !== undefined ? reading.endMeter : (reading as any).endmeter) : null;
+              if (endM !== null && endM !== undefined && Number(endM) > 0) {
+                return Number(endM);
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {}
+
+    return 0;
+  };
 
   // No unsaved changes since all edits are auto-saved in real-time to activeShift
   const hasUnsavedChanges = false;
@@ -83,8 +402,17 @@ export default function ShiftManagementTab({
   const [showValidationOverlay, setShowValidationOverlay] = useState(false);
 
   // Filtered employees list
-  const supervisors = useMemo(() => employees.filter(e => e.role === 'Supervisor'), [employees]);
-  const pumpers = useMemo(() => employees.filter(e => e.role === 'Pumper'), [employees]);
+  const supervisors = useMemo(() => {
+    if (!employees || employees.length === 0) return [];
+    const filtered = employees.filter(e => e.role?.toLowerCase() === 'supervisor');
+    return filtered.length > 0 ? filtered : employees;
+  }, [employees]);
+
+  const pumpers = useMemo(() => {
+    if (!employees || employees.length === 0) return [];
+    const filtered = employees.filter(e => e.role?.toLowerCase() === 'pumper');
+    return filtered.length > 0 ? filtered : employees;
+  }, [employees]);
 
   // Read currency symbol from settings/localStorage
   // Format currency/liters helper
@@ -236,14 +564,6 @@ export default function ShiftManagementTab({
         if (r.status === 'Completed') {
           return r;
         }
-        // Block changing start meter or pumper once saved/active
-        if (r.status === 'Active' && (field === 'assignedPumperId' || field === 'startMeter')) {
-          return r;
-        }
-        // Block changing end reading/testing qty while in Idle setup mode
-        if (r.status === 'Idle' && (field === 'endMeter' || field === 'testingQty')) {
-          return r;
-        }
         
         const updated = {
           ...r,
@@ -301,11 +621,9 @@ export default function ShiftManagementTab({
 
     const updatedReadings = draftReadings.map(dr => {
       if (dr.pumpId === pumpId) {
-        // Initialize end meter from start meter if end meter is currently less
-        const initialEndVal = dr.endMeter < dr.startMeter ? dr.startMeter : dr.endMeter;
         return { 
           ...dr, 
-          endMeter: initialEndVal,
+          endMeter: dr.endMeter || 0,
           isLocked: true, 
           status: 'Active' as const 
         };
@@ -340,6 +658,63 @@ export default function ShiftManagementTab({
     setTimeout(() => setToastMessage(null), 3000);
   };
 
+  // Dynamically update a pump's target underground storage tank mapping
+  const handleUpdatePumpTankMapping = (pumpId: string, newTankId: string) => {
+    const selectedTank = tanks.find(t => t.id === newTankId);
+    if (!selectedTank) return;
+
+    const updatedReadings = draftReadings.map(dr => {
+      if (dr.pumpId === pumpId) {
+        return {
+          ...dr,
+          tankId: newTankId,
+          fuelType: selectedTank.fuelType
+        };
+      }
+      return dr;
+    });
+
+    setDraftReadings(updatedReadings);
+
+    if (activeShift) {
+      let totalFuel = 0;
+      let totalNet = 0;
+      let totalSales = 0;
+
+      updatedReadings.forEach(dr => {
+        const fuel = Math.max(0, dr.endMeter - dr.startMeter);
+        const net = Math.max(0, fuel - dr.testingQty);
+        totalFuel += fuel;
+        totalNet += net;
+        totalSales += (net * getPriceForFuelType(dr.fuelType));
+      });
+
+      setActiveShift({
+        ...activeShift,
+        pumpReadings: updatedReadings,
+        totalFuelSold: totalFuel,
+        totalNetSold: totalNet,
+        totalNetSales: totalSales
+      });
+    }
+
+    if (setPumps) {
+      setPumps(prev => prev.map(p => {
+        if (p.id === pumpId) {
+          return {
+            ...p,
+            tankId: newTankId,
+            fuelType: selectedTank.fuelType
+          };
+        }
+        return p;
+      }));
+    }
+
+    setToastMessage(`Pump ${pumpId} successfully mapped to ${selectedTank.name} (${selectedTank.fuelType})`);
+    setTimeout(() => setToastMessage(null), 3000);
+  };
+
   // Unlock single pump's starting readings for adjustment, moving it back to Setup (Idle) mode
   const handleUnlockPumpData = (pumpId: string) => {
     if (!activeShift) return;
@@ -355,13 +730,14 @@ export default function ShiftManagementTab({
 
     setDraftReadings(updatedReadings);
 
-    // Add back the stock to the corresponding tank since we are unlocking a completed shift
+    // Add back the stock to the corresponding target tank since we are unlocking a completed shift
     if (r.status === 'Completed' && setTanks) {
        const grossSold = r.endMeter - r.startMeter;
        const netSold = Math.max(0, grossSold - r.testingQty);
        if (netSold > 0) {
+         const targetTankId = r.tankId || (tanks.find(t => t.fuelType === r.fuelType)?.id);
          setTanks(prevTanks => prevTanks.map(tank => {
-           if (tank.fuelType === r.fuelType) {
+           if (tank.id === targetTankId || (!r.tankId && tank.fuelType === r.fuelType)) {
              return { ...tank, currentLevel: Math.min(tank.capacity, tank.currentLevel + netSold) };
            }
            return tank;
@@ -450,14 +826,14 @@ export default function ShiftManagementTab({
     const netSold = Math.max(0, grossSold - r.testingQty);
     
     if (setTanks && netSold > 0) {
+      const targetTankId = r.tankId || (tanks.find(t => t.fuelType === r.fuelType)?.id);
       setTanks(prevTanks => prevTanks.map(tank => {
-        if (tank.fuelType === r.fuelType) {
+        if (tank.id === targetTankId || (!r.tankId && tank.fuelType === r.fuelType)) {
           const newLevel = Math.max(0, tank.currentLevel - netSold);
-          // Show low stock warning if dropped below 15% (or some threshold)
+          // Show low stock warning if dropped below 15%
           if (newLevel <= tank.capacity * 0.15) {
-            // Note: Just using the toast for standard warning notification
             setTimeout(() => {
-              setToastMessage(`⚠️ Warning: ${tank.id} stock is running low (${newLevel.toFixed(0)} L remaining).`);
+              setToastMessage(`⚠️ Warning: ${tank.name} stock is running low (${newLevel.toFixed(0)} L remaining).`);
               setTimeout(() => setToastMessage(null), 5000);
             }, 3000);
           }
@@ -511,12 +887,16 @@ export default function ShiftManagementTab({
   // Filtered readings based on search and local draftReadings state
   const filteredReadings = useMemo(() => {
     if (!activeShift) return [];
+    if (!draftReadings || draftReadings.length === 0) return [];
+
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return draftReadings;
+
     return draftReadings.filter(r => {
       const pumperName = r.assignedPumperId 
         ? employees.find(e => e.id === r.assignedPumperId)?.name || '' 
         : 'Unassigned';
       
-      const query = searchQuery.toLowerCase();
       return (
         r.pumpName.toLowerCase().includes(query) ||
         r.fuelType.toLowerCase().includes(query) ||
@@ -531,35 +911,20 @@ export default function ShiftManagementTab({
     const randSuffix = Math.floor(10 + Math.random() * 90);
     const newShiftId = `SH-${dateStr}-${randSuffix}`;
 
-    // Get previous shift's completed readings from localStorage
-    const savedHistoryStr = localStorage.getItem('fuelflow_history');
-    const history: Shift[] = savedHistoryStr ? JSON.parse(savedHistoryStr) : [];
-    const previousReadings = activeShift?.pumpReadings || (history.length > 0 ? history[0].pumpReadings : null);
+    const pumpsList = (pumps && pumps.length > 0) ? pumps : defaultPumpsList;
 
-    const defaultPumps = [
-      { id: 'p-01', name: 'Pump 01', fuelType: 'Petrol 92' as const },
-      { id: 'p-02', name: 'Pump 02', fuelType: 'Auto Diesel' as const },
-      { id: 'p-03', name: 'Pump 03', fuelType: 'Petrol 95' as const },
-      { id: 'p-04', name: 'Pump 04', fuelType: 'Auto Diesel' as const },
-      { id: 'p-05', name: 'Pump 05', fuelType: 'Petrol 92' as const },
-      { id: 'p-06', name: 'Pump 06', fuelType: 'Petrol 95' as const },
-      { id: 'p-07', name: 'Pump 07', fuelType: 'Auto Diesel' as const },
-      { id: 'p-08', name: 'Pump 08', fuelType: 'Super Diesel' as const }
-    ];
-
-    const newPumpReadings: PumpReading[] = defaultPumps.map((pump, idx) => {
-      const prev = previousReadings?.find(pr => pr.pumpId === pump.id);
-      
-      // Carry forward previous end meter reading to start meter reading
-      const carryForwardStart = prev ? prev.endMeter : (12000 + idx * 4500);
+    const newPumpReadings: PumpReading[] = pumpsList.map((pump) => {
+      // Automatically fetch previous shift's recorded endmeter for each pump
+      const carryForwardStart = getPreviousEndMeterForPump(pump.id);
 
       return {
         pumpId: pump.id,
         pumpName: pump.name,
         fuelType: pump.fuelType,
+        tankId: pump.tankId,
         assignedPumperId: null, // start as unassigned
         startMeter: carryForwardStart,
-        endMeter: carryForwardStart, // initially same
+        endMeter: 0, // initially 0 until manually entered
         testingQty: 0,
         status: 'Idle'
       };
@@ -642,6 +1007,11 @@ export default function ShiftManagementTab({
       };
     });
 
+    const initCash = Number(initialPumperCash) || 0;
+    const replCash = Number(replacementPumperCash) || 0;
+    const physCash = initCash + replCash;
+    const variance = physCash - totalSales;
+
     const closedShift: Shift = {
       ...activeShift,
       supervisorId: draftSupervisorId,
@@ -652,7 +1022,13 @@ export default function ShiftManagementTab({
       pumpReadings: finalReadings,
       totalFuelSold: totalFuel,
       totalNetSold: totalNet,
-      totalNetSales: totalSales
+      totalNetSales: totalSales,
+      initialPumperCash: initCash,
+      replacementPumperCash: replCash,
+      totalPhysicalCash: physCash,
+      cashVariance: variance,
+      handoverNotes: handoverNotes,
+      replacementPumperId: replacementPumperId
     };
 
     onCloseShift(closedShift);
@@ -694,15 +1070,15 @@ export default function ShiftManagementTab({
   };
 
   return (
-    <div id="shift-tab-root" className="space-y-6">
+    <div id="shift-tab-root" className="space-y-4">
       
       {/* Control Header */}
-      <div id="shift-header-section" className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div id="shift-header-section" className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 id="shift-title" className="text-3xl font-extrabold text-[#1C1C1C] tracking-tight font-sans">
+          <h1 id="shift-title" className="text-xl sm:text-2xl font-bold text-[#1C1C1C] tracking-tight font-sans">
             Shift Management
           </h1>
-          <p id="shift-subtitle" className="text-gray-500 text-sm mt-1">
+          <p id="shift-subtitle" className="text-gray-500 text-xs sm:text-sm mt-0.5">
             Real-time digital ledger and active station control center
           </p>
         </div>
@@ -927,6 +1303,9 @@ export default function ShiftManagementTab({
                     ? { header: 'bg-amber-500/10 border-l-4 border-amber-500', text: 'text-amber-400' }
                     : { header: 'bg-emerald-500/10 border-l-4 border-emerald-500', text: 'text-emerald-400' };
 
+                  const initialPumper = employees.find(e => e.id === r.assignedPumperId);
+                  const replacementPumper = employees.find(e => e.id === r.replacementPumperId);
+
                   return (
                     <div 
                       key={r.pumpId} 
@@ -972,7 +1351,7 @@ export default function ShiftManagementTab({
                       </div>
 
                       {/* Card Inputs body */}
-                      <div className="p-4 space-y-4">
+                      <div className="p-4 space-y-3.5">
                         {/* Pumper Assignment Selector */}
                         <div>
                           <label className="text-[10px] font-bold text-gray-500 block mb-1 uppercase tracking-wider">
@@ -982,7 +1361,7 @@ export default function ShiftManagementTab({
                             value={r.assignedPumperId || ''}
                             disabled={r.status !== 'Idle'}
                             onChange={(e) => handleUpdateReading(r.pumpId, 'assignedPumperId', e.target.value || null)}
-                            className="w-full px-3 py-2 bg-white border border-gray-200 text-[#1C1C1C] rounded-xl text-xs focus:outline-none focus:border-blue-500 disabled:bg-gray-50 disabled:text-gray-500 disabled:border-gray-100"
+                            className="w-full px-3 py-2 bg-white border border-gray-200 text-[#1C1C1C] rounded-xl text-xs focus:outline-none focus:border-blue-500 disabled:bg-gray-50 disabled:text-gray-500 disabled:border-gray-100 font-medium"
                           >
                             <option value="">-- Unassigned (Idle) --</option>
                             {pumpers.map((p) => (
@@ -993,49 +1372,85 @@ export default function ShiftManagementTab({
                           </select>
                         </div>
 
-                        {/* Interactive Meters Grid */}
-                        <div className="grid grid-cols-3 gap-2">
-                          <div>
-                            <label className="text-[9px] font-bold text-gray-500 block mb-1 uppercase">
-                              Start Meter
-                            </label>
-                            <input
-                              type="number"
-                              step="0.01"
-                              value={r.startMeter}
-                              disabled={r.status !== 'Idle'}
-                              onChange={(e) => handleUpdateReading(r.pumpId, 'startMeter', parseFloat(e.target.value) || 0)}
-                              className="w-full px-2 py-1.5 bg-white border border-gray-200 text-[#1C1C1C] rounded-lg text-xs tabular-nums font-semibold text-center focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500 disabled:border-gray-100"
-                            />
+                        {/* Mid-shift transfer status badge if active */}
+                        {r.replacementPumperId && (
+                          <div className="p-2.5 rounded-xl bg-blue-50 border border-blue-200/80 text-[11px] space-y-1">
+                            <div className="flex justify-between items-center text-blue-900 font-bold">
+                              <span className="flex items-center gap-1 text-[10px] uppercase tracking-wide">
+                                <RefreshCw className="w-3 h-3 text-blue-600" /> Handover Transfer
+                              </span>
+                              <span className="tabular-nums text-blue-700 font-extrabold text-[10px]">
+                                Meter: {r.handoverMeter?.toFixed(2) || '0.00'} L
+                              </span>
+                            </div>
+                            <div className="text-gray-600 flex justify-between text-[10px]">
+                              <span>Outgoing Cash:</span>
+                              <span className="font-bold text-gray-800 tabular-nums">{formatCurrency(r.initialPumperCash || 0)}</span>
+                            </div>
+                            {r.handoverNotes && (
+                              <div className="text-[10px] text-gray-500 italic truncate">
+                                "{r.handoverNotes}"
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Interactive Meters Grid with enlarged, spacious input boxes & zero auto-clear */}
+                        <div className="space-y-2.5">
+                          {/* Start Meter & End Meter prominent 2-column layout for maximum digit width */}
+                          <div className="grid grid-cols-2 gap-2.5">
+                            <div>
+                              <label className="text-[10px] font-extrabold text-gray-500 block mb-1 uppercase tracking-wider flex items-center justify-between">
+                                <span>Start Meter</span>
+                                {r.status !== 'Idle' && <Lock className="w-2.5 h-2.5 text-gray-400" />}
+                              </label>
+                              <input
+                                type="number"
+                                step="any"
+                                value={r.startMeter ?? 0}
+                                disabled={r.status !== 'Idle'}
+                                onFocus={(e) => e.target.select()}
+                                onChange={(e) => handleUpdateReading(r.pumpId, 'startMeter', parseFloat(e.target.value) || 0)}
+                                className="w-full px-3 py-2 bg-white border border-gray-200 text-[#1C1C1C] rounded-xl text-xs sm:text-sm tabular-nums font-extrabold text-center focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-gray-50 disabled:text-gray-500 disabled:border-gray-200 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none min-w-0"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="text-[10px] font-extrabold text-gray-500 block mb-1 uppercase tracking-wider flex items-center justify-between">
+                                <span>End Meter</span>
+                                {r.status === 'Active' && <Edit2 className="w-2.5 h-2.5 text-blue-500" />}
+                              </label>
+                              <input
+                                type="number"
+                                step="any"
+                                value={r.endMeter ?? 0}
+                                disabled={r.status !== 'Active'}
+                                placeholder="0.000"
+                                onFocus={(e) => e.target.select()}
+                                onChange={(e) => handleUpdateReading(r.pumpId, 'endMeter', parseFloat(e.target.value) || 0)}
+                                className="w-full px-3 py-2 bg-white border border-gray-200 text-[#1C1C1C] rounded-xl text-xs sm:text-sm tabular-nums font-extrabold text-center focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-gray-50 disabled:text-gray-500 disabled:border-gray-200 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none min-w-0"
+                              />
+                            </div>
                           </div>
 
-                          <div>
-                            <label className="text-[9px] font-bold text-gray-500 block mb-1 uppercase">
-                              End Meter
-                            </label>
-                            <input
-                              type="number"
-                              step="0.01"
-                              value={r.endMeter}
-                              disabled={r.status !== 'Active'}
-                              placeholder="0.00"
-                              onChange={(e) => handleUpdateReading(r.pumpId, 'endMeter', parseFloat(e.target.value) || 0)}
-                              className="w-full px-2 py-1.5 bg-white border border-gray-200 text-[#1C1C1C] rounded-lg text-xs tabular-nums font-semibold text-center focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500 disabled:border-gray-100"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="text-[9px] font-bold text-gray-500 block mb-1 uppercase">
-                              Test (L)
-                            </label>
-                            <input
-                              type="number"
-                              step="0.1"
-                              value={r.testingQty}
-                              disabled={r.status !== 'Active'}
-                              onChange={(e) => handleUpdateReading(r.pumpId, 'testingQty', parseFloat(e.target.value) || 0)}
-                              className="w-full px-2 py-1.5 bg-white border border-gray-200 text-[#1C1C1C] rounded-lg text-xs tabular-nums font-semibold text-center focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500 disabled:border-gray-100"
-                            />
+                          {/* Calibration Test (Testing Qty) field */}
+                          <div className="flex items-center justify-between bg-gray-50/80 px-3 py-2 rounded-xl border border-gray-100 gap-2">
+                            <div className="flex-1 min-w-0">
+                              <span className="text-[10px] font-extrabold text-gray-500 uppercase tracking-wider block">
+                                Calibration Test (L)
+                              </span>
+                            </div>
+                            <div className="w-28 sm:w-32">
+                              <input
+                                type="number"
+                                step="any"
+                                value={r.testingQty ?? 0}
+                                disabled={r.status !== 'Active'}
+                                onFocus={(e) => e.target.select()}
+                                onChange={(e) => handleUpdateReading(r.pumpId, 'testingQty', parseFloat(e.target.value) || 0)}
+                                className="w-full px-2.5 py-1.5 bg-white border border-gray-200 text-[#1C1C1C] rounded-lg text-xs sm:text-sm tabular-nums font-bold text-center focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-gray-100 disabled:text-gray-400 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                              />
+                            </div>
                           </div>
                         </div>
 
@@ -1058,43 +1473,53 @@ export default function ShiftManagementTab({
                           <hr className="border-gray-100 my-1" />
                           <div className="flex justify-between font-bold text-gray-600">
                             <span>Net Sold:</span>
-                            <span className={`tabular-nums font-semibold ${r.status !== 'Idle' ? 'text-emerald-400' : 'text-gray-500'}`}>{netSold.toFixed(2)} L</span>
+                            <span className={`tabular-nums font-semibold ${r.status !== 'Idle' ? 'text-emerald-600 font-extrabold' : 'text-gray-500'}`}>{netSold.toFixed(2)} L</span>
                           </div>
                         </div>
 
-                        {/* Pump Card Saving Action Controls */}
+                        {/* Pump Card Action Controls */}
                         <div className="pt-2 border-t border-gray-100">
                           {r.status === 'Idle' ? (
                             <button
                               id={`btn-lock-${r.pumpId}`}
                               onClick={() => handleSavePumpData(r.pumpId)}
-                              className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-gradient-to-r from-blue-600 to-[#00BFFF] text-[#1C1C1C] text-xs font-extrabold rounded-xl transition-all shadow-md hover:brightness-110 cursor-pointer animate-pulse"
+                              className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-gradient-to-r from-blue-600 to-[#00BFFF] text-white text-xs font-extrabold rounded-xl transition-all shadow-md hover:brightness-110 cursor-pointer animate-pulse"
                             >
                               <Save className="w-3.5 h-3.5" />
                               <span>Save Pump Data</span>
                             </button>
                           ) : r.status === 'Active' ? (
-                            <div className="flex flex-col gap-2 w-full">
+                            <div className="flex flex-col gap-1.5 w-full">
+                              <div className="grid grid-cols-2 gap-1.5">
+                                <button
+                                  id={`btn-transfer-${r.pumpId}`}
+                                  onClick={() => handleOpenHandoverModal(r)}
+                                  className="flex items-center justify-center gap-1.5 py-1.5 px-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-[11px] font-bold rounded-xl transition-all cursor-pointer shadow-xs"
+                                >
+                                  <RefreshCw className="w-3.5 h-3.5" />
+                                  <span>Transfer Pumper</span>
+                                </button>
+                                <button
+                                  id={`btn-unlock-${r.pumpId}`}
+                                  onClick={() => handleUnlockPumpData(r.pumpId)}
+                                  className="flex items-center justify-center gap-1 py-1.5 px-2 bg-gray-50 hover:bg-gray-100 text-gray-600 hover:text-[#1C1C1C] border border-gray-200 text-[11px] font-bold rounded-xl transition-all cursor-pointer"
+                                >
+                                  <Edit2 className="w-3 h-3" />
+                                  <span>Edit Setup</span>
+                                </button>
+                              </div>
                               <button
                                 id={`btn-end-pump-${r.pumpId}`}
                                 onClick={() => handleClosePumpShift(r.pumpId)}
-                                className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-red-600/90 hover:bg-red-700 text-white text-xs font-extrabold rounded-xl transition-all shadow-md cursor-pointer"
+                                className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-red-600 hover:bg-red-700 text-white text-xs font-extrabold rounded-xl transition-all shadow-sm cursor-pointer"
                               >
                                 <ShieldCheck className="w-3.5 h-3.5" />
-                                <span>End Shift</span>
-                              </button>
-                              <button
-                                id={`btn-unlock-${r.pumpId}`}
-                                onClick={() => handleUnlockPumpData(r.pumpId)}
-                                className="w-full flex items-center justify-center gap-1 py-1.5 bg-transparent hover:bg-gray-100 text-gray-600 hover:text-[#1C1C1C] border border-gray-200 text-[10px] font-bold rounded-xl transition-all cursor-pointer"
-                              >
-                                <Edit2 className="w-3 h-3" />
-                                <span>Edit Setup / Unlock</span>
+                                <span>End Pump Shift</span>
                               </button>
                             </div>
                           ) : (
-                            <div className="w-full text-center py-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-extrabold rounded-xl flex items-center justify-center gap-1.5">
-                              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                            <div className="w-full text-center py-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 text-xs font-extrabold rounded-xl flex items-center justify-center gap-1.5">
+                              <ShieldCheck className="w-4 h-4 text-emerald-600" />
                               <span>Completed & Locked</span>
                             </div>
                           )}
@@ -1223,26 +1648,20 @@ export default function ShiftManagementTab({
             );
           }
 
-          let todaysShifts = [];
-          try {
-            const history = JSON.parse(localStorage.getItem('fuelflow_history') || '[]');
-            const today = new Date().toISOString().split('T')[0];
-            todaysShifts = history.filter(s => s.endTime && s.endTime.startsWith(today));
-          } catch (e) {
-            console.error('Failed to parse history', e);
-          }
-
-          // Compute fuel distributions
+          // Compute fuel distributions & totals for completed shifts
           const productDistribution: Record<string, number> = {};
           let totalLiters = 0;
           let totalRevenue = 0;
 
-          todaysShifts.forEach(shift => {
-            totalLiters += (shift.totalFuelSold || 0);
+          closedLedgerShifts.forEach(shift => {
+            totalLiters += (shift.totalNetSold || shift.totalFuelSold || 0);
             totalRevenue += (shift.totalNetSales || 0);
-            (shift.pumpReadings || []).forEach(reading => {
-               const fuel = reading.fuelType || 'Unknown';
-               productDistribution[fuel] = (productDistribution[fuel] || 0) + (reading.totalDispensed || 0);
+            (shift.pumpReadings || []).forEach((reading: any) => {
+               const fuel = reading.fuelType || reading.fueltype || 'Unknown';
+               const start = reading.startMeter !== undefined ? reading.startMeter : reading.startmeter || 0;
+               const end = reading.endMeter !== undefined ? reading.endMeter : reading.endmeter || 0;
+               const dispensed = reading.totalDispensed !== undefined ? reading.totalDispensed : Math.max(0, end - start);
+               productDistribution[fuel] = (productDistribution[fuel] || 0) + dispensed;
             });
           });
 
@@ -1254,41 +1673,93 @@ export default function ShiftManagementTab({
                 
                 {/* LEFT COLUMN (70%): Shift Ledger */}
                 <div className="lg:w-[70%] bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col h-[500px]">
-                  <div className="px-6 py-5 border-b border-gray-100 bg-gray-50/50 shrink-0">
-                     <h3 className="font-bold text-[#1C1C1C] text-sm uppercase tracking-wider">Shift Ledger</h3>
+                  <div className="px-5 py-3.5 border-b border-gray-100 bg-gray-50/80 shrink-0 flex items-center justify-between">
+                     <div className="flex items-center gap-2">
+                       <h3 className="font-bold text-[#1C1C1C] text-xs uppercase tracking-wider">Shift Ledger</h3>
+                       <span className="px-2 py-0.5 rounded-full bg-gray-200/60 text-gray-600 text-[10px] font-semibold tabular-nums">
+                         {closedLedgerShifts.length} {closedLedgerShifts.length === 1 ? 'Record' : 'Records'}
+                       </span>
+                     </div>
+                     {isLoadingLedger && (
+                       <span className="text-xs text-blue-600 font-medium flex items-center gap-1">
+                         <RefreshCw className="w-3 h-3 animate-spin" /> Syncing...
+                       </span>
+                     )}
                   </div>
                   <div className="overflow-auto flex-1 relative">
-                    <table className="w-full text-left">
-                      <thead className="sticky top-0 z-10 bg-gray-50/90 backdrop-blur-sm shadow-sm">
-                        <tr className="border-b border-gray-100 text-gray-500 font-bold text-xs uppercase tracking-wider">
-                          <th className="py-4 px-6">Shift ID</th>
-                          <th className="py-4 px-6">Supervisor</th>
-                          <th className="py-4 px-6 text-right">Liters</th>
-                          <th className="py-4 px-6 text-right">Revenue (Rs.)</th>
-                          <th className="py-4 px-6">End Time</th>
+                    <table className="w-full text-left border-collapse">
+                      <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200 shadow-xs">
+                        <tr className="text-gray-500 font-bold text-[11px] uppercase tracking-wider">
+                          <th className="py-2.5 px-4">Shift ID / Name</th>
+                          <th className="py-2.5 px-4">Supervisor</th>
+                          <th className="py-2.5 px-4 text-right">Liters Sold</th>
+                          <th className="py-2.5 px-4 text-right">Revenue (Rs.)</th>
+                          <th className="py-2.5 px-4 text-right">Cash Rec. / Variance</th>
+                          <th className="py-2.5 px-4">End Time & Date</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-gray-50 text-sm">
-                        {todaysShifts.length > 0 ? (
-                          todaysShifts.map(shift => (
-                            <tr key={shift.id} onClick={() => setSelectedPastShift(shift)} className="hover:bg-gray-50 transition-colors cursor-pointer group">
-                              <td className="py-4 px-6 font-semibold text-[#1C1C1C] tabular-nums group-hover:text-blue-600 transition-colors">{shift.id}</td>
-                              <td className="py-4 px-6 text-gray-600 font-medium">{shift.supervisorName}</td>
-                              <td className="py-4 px-6 text-right tabular-nums font-semibold text-gray-700">
-                                {(shift.totalFuelSold || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              </td>
-                              <td className="py-4 px-6 text-right tabular-nums font-bold text-[#1C1C1C]">
-                                {formatCurrency(shift.totalNetSales || 0)}
-                              </td>
-                              <td className="py-4 px-6 text-gray-500 tabular-nums font-medium">
-                                {new Date(shift.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                              </td>
-                            </tr>
-                          ))
+                      <tbody className="divide-y divide-gray-100 text-xs">
+                        {closedLedgerShifts.length > 0 ? (
+                          closedLedgerShifts.map(shift => {
+                            const supervisorName = employees.find(e => e.id === shift.supervisorId || e.id === shift.supervisorid)?.name || shift.supervisorName || 'Unassigned';
+                            const liters = shift.totalNetSold || shift.totalFuelSold || 0;
+                            const revenue = shift.totalNetSales || 0;
+                            const physCash = shift.totalPhysicalCash !== undefined && shift.totalPhysicalCash > 0 
+                              ? shift.totalPhysicalCash 
+                              : ((shift.initialPumperCash || 0) + (shift.replacementPumperCash || 0));
+                            const hasHandover = physCash > 0 || !!shift.handoverNotes || !!shift.replacementPumperId;
+                            const variance = shift.cashVariance !== undefined ? shift.cashVariance : (physCash > 0 ? physCash - revenue : 0);
+
+                            const formattedDate = shift.endTime 
+                              ? new Date(shift.endTime).toLocaleString([], { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                              : 'Completed';
+
+                            return (
+                              <tr 
+                                key={shift.id} 
+                                className="hover:bg-gray-50/70 transition-colors"
+                              >
+                                <td className="py-2.5 px-4 font-semibold text-[#1C1C1C] tabular-nums">
+                                  {shift.id} {shift.name ? <span className="text-[11px] font-normal text-gray-500">({shift.name})</span> : ''}
+                                  {hasHandover && (
+                                    <span className="ml-1.5 px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 border border-blue-100 font-medium text-[9px] uppercase tracking-wider">
+                                      Handover
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="py-2.5 px-4 text-gray-600 font-medium">{supervisorName}</td>
+                                <td className="py-2.5 px-4 text-right tabular-nums font-semibold text-gray-700">
+                                  {liters.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} L
+                                </td>
+                                <td className="py-2.5 px-4 text-right tabular-nums font-bold text-[#1C1C1C]">
+                                  {formatCurrency(revenue)}
+                                </td>
+                                <td className="py-2.5 px-4 text-right tabular-nums font-medium">
+                                  {hasHandover ? (
+                                    <div className="flex flex-col items-end">
+                                      <span className="font-bold text-gray-800">{formatCurrency(physCash)}</span>
+                                      {variance === 0 ? (
+                                        <span className="text-[10px] text-emerald-600 font-semibold">Balanced</span>
+                                      ) : variance > 0 ? (
+                                        <span className="text-[10px] text-emerald-600 font-semibold">+{formatCurrency(variance)}</span>
+                                      ) : (
+                                        <span className="text-[10px] text-red-500 font-semibold">{formatCurrency(variance)}</span>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span className="text-gray-400 font-normal text-[11px]">Match ({formatCurrency(revenue)})</span>
+                                  )}
+                                </td>
+                                <td className="py-2.5 px-4 text-gray-500 tabular-nums font-medium text-[11px]">
+                                  {formattedDate}
+                                </td>
+                              </tr>
+                            );
+                          })
                         ) : (
                           <tr>
-                            <td colSpan={5} className="py-12 text-center text-gray-400 font-medium text-sm">
-                              No shifts completed today yet.
+                            <td colSpan={6} className="py-12 text-center text-gray-400 font-medium text-xs">
+                              No completed shifts recorded yet.
                             </td>
                           </tr>
                         )}
@@ -1530,9 +2001,50 @@ export default function ShiftManagementTab({
                   <span className="tabular-nums font-semibold text-[#1C1C1C]">{formatLiters(stats.totalNetSold)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span>Expected Revenue:</span>
+                  <span>System Expected Revenue:</span>
                   <span className="font-bold text-blue-600 tabular-nums font-semibold">{formatCurrency(stats.totalNetSales)}</span>
                 </div>
+
+                {/* Mid-Shift Handover & Reconciliation Details */}
+                {(() => {
+                  const initCash = Number(initialPumperCash) || 0;
+                  const replCash = Number(replacementPumperCash) || 0;
+                  const totalPhys = initCash + replCash;
+                  const expected = stats.totalNetSales || 0;
+                  const varVal = totalPhys - expected;
+
+                  return (
+                    <div className="border-t border-gray-100 pt-2 space-y-1.5">
+                      <div className="flex justify-between text-[11px]">
+                        <span>Initial Pumper Cash:</span>
+                        <span className="tabular-nums font-semibold text-gray-700">{formatCurrency(initCash)}</span>
+                      </div>
+                      <div className="flex justify-between text-[11px]">
+                        <span>Replacement Pumper Cash:</span>
+                        <span className="tabular-nums font-semibold text-gray-700">{formatCurrency(replCash)}</span>
+                      </div>
+                      <div className="flex justify-between font-bold text-xs pt-1 border-t border-gray-100">
+                        <span>Total Physical Cash:</span>
+                        <span className="tabular-nums font-bold text-blue-600">{formatCurrency(totalPhys)}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-xs pt-1">
+                        <span className="font-semibold">Cash Difference / Variance:</span>
+                        {varVal === 0 ? (
+                          <span className="text-emerald-600 font-extrabold tabular-nums">Balanced ({formatCurrency(0)})</span>
+                        ) : varVal > 0 ? (
+                          <span className="text-emerald-600 font-extrabold tabular-nums">Excess (+{formatCurrency(varVal)})</span>
+                        ) : (
+                          <span className="text-red-500 font-extrabold tabular-nums">Shortage ({formatCurrency(varVal)})</span>
+                        )}
+                      </div>
+                      {handoverNotes && (
+                        <div className="text-[10px] text-gray-500 italic mt-1 bg-gray-100 p-1.5 rounded-lg border border-gray-200/50">
+                          Note: "{handoverNotes}"
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
 
@@ -1548,6 +2060,143 @@ export default function ShiftManagementTab({
                 className="px-5 py-2 bg-gradient-to-r from-red-600 to-red-500 text-[#1C1C1C] font-bold text-xs rounded-lg hover:brightness-110 transition-all cursor-pointer"
               >
                 Confirm & Lock Ledger
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MID-SHIFT PUMPER TRANSFER MODAL */}
+      {handoverPumpModal && (
+        <div id="handover-modal-overlay" className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div id="handover-modal-card" className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-gray-100 overflow-hidden">
+            {/* Header */}
+            <div className="px-5 py-4 bg-gradient-to-r from-blue-600 to-[#00BFFF] text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-white/20 rounded-xl backdrop-blur-md">
+                  <RefreshCw className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base leading-tight">Mid-Shift Pumper Transfer</h3>
+                  <p className="text-blue-100 text-xs">{handoverPumpModal.pumpName} • {handoverPumpModal.fuelType}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setHandoverPumpModal(null)}
+                className="p-1 rounded-lg hover:bg-white/20 text-white/80 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-5 space-y-4">
+              {/* Outgoing Pumper Summary */}
+              <div className="p-3 bg-gray-50 rounded-xl border border-gray-200/80 flex items-center justify-between text-xs">
+                <div>
+                  <span className="text-[10px] font-bold text-gray-500 uppercase block">Outgoing Pumper</span>
+                  <span className="font-bold text-[#1C1C1C] text-sm">
+                    {employees.find(e => e.id === handoverPumpModal.assignedPumperId)?.name || 'Unassigned'}
+                  </span>
+                </div>
+                <div className="text-right">
+                  <span className="text-[10px] font-bold text-gray-500 uppercase block">Start Meter</span>
+                  <span className="font-bold text-gray-700 tabular-nums">{handoverPumpModal.startMeter.toFixed(2)} L</span>
+                </div>
+              </div>
+
+              {/* Handover Meter Reading */}
+              <div>
+                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                  Handover Meter Reading (L)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={modalHandoverMeter}
+                  onFocus={(e) => e.target.select()}
+                  onChange={(e) => {
+                    const val = e.target.value === '' ? '' : parseFloat(e.target.value) || 0;
+                    setModalHandoverMeter(val);
+                    if (typeof val === 'number') {
+                      const fuelPrice = getPriceForFuelType(handoverPumpModal.fuelType);
+                      const hLiters = Math.max(0, val - handoverPumpModal.startMeter);
+                      const netLiters = Math.max(0, hLiters - handoverPumpModal.testingQty);
+                      setModalOutgoingCash(netLiters * fuelPrice);
+                    }
+                  }}
+                  className="w-full px-3.5 py-2.5 bg-white border border-gray-300 rounded-xl text-sm font-bold text-[#1C1C1C] tabular-nums focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                />
+                <p className="text-[10px] text-gray-500 mt-1">
+                  Liters dispensed by outgoing pumper: <strong className="text-blue-600 tabular-nums font-bold">
+                    {Math.max(0, (Number(modalHandoverMeter) || 0) - handoverPumpModal.startMeter).toFixed(2)} L
+                  </strong>
+                </p>
+              </div>
+
+              {/* Outgoing Pumper Cash Collected */}
+              <div>
+                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                  Outgoing Pumper Cash Collected (Rs.)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={modalOutgoingCash}
+                  onFocus={(e) => e.target.select()}
+                  onChange={(e) => setModalOutgoingCash(e.target.value === '' ? '' : parseFloat(e.target.value) || 0)}
+                  className="w-full px-3.5 py-2.5 bg-white border border-gray-300 rounded-xl text-sm font-bold text-[#1C1C1C] tabular-nums focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                />
+              </div>
+
+              {/* Replacement Pumper Selection */}
+              <div>
+                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                  Select Replacement Pumper (Incoming)
+                </label>
+                <select
+                  value={modalReplacementPumperId}
+                  onChange={(e) => setModalReplacementPumperId(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-white border border-gray-300 rounded-xl text-xs font-bold text-[#1C1C1C] focus:outline-none focus:border-blue-500"
+                >
+                  <option value="">-- Select Replacement Pumper --</option>
+                  {pumpers.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Handover / Reason Notes */}
+              <div>
+                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                  Transfer Notes
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Swapped for meal break (1:00 PM)"
+                  value={modalHandoverNotes}
+                  onChange={(e) => setModalHandoverNotes(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-white border border-gray-300 rounded-xl text-xs font-medium text-[#1C1C1C] focus:outline-none focus:border-blue-500"
+                />
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="px-5 py-4 bg-gray-50 border-t border-gray-100 flex items-center justify-end gap-2">
+              <button
+                onClick={() => setHandoverPumpModal(null)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-gray-600 hover:bg-gray-200/60 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmHandover}
+                className="px-5 py-2 rounded-xl text-xs font-extrabold bg-blue-600 hover:bg-blue-700 text-white transition-colors shadow-sm flex items-center gap-1.5 cursor-pointer"
+              >
+                <Check className="w-4 h-4" />
+                <span>Confirm Transfer</span>
               </button>
             </div>
           </div>

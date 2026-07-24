@@ -6,14 +6,16 @@
 import React, { useState } from 'react';
 import { 
   Plus, Calendar, ShieldCheck, AlertTriangle, Truck, 
-  DollarSign, RefreshCcw, Info, Fuel, X, CheckCircle2
+  DollarSign, RefreshCcw, Info, Fuel, X, CheckCircle2, Trash2
 } from 'lucide-react';
-import { FuelTank, StockDelivery, FuelType } from '../types';
+import { FuelTank, StockDelivery, FuelType, Pump } from '../types';
 import { supabase, getTanksTableName } from '../lib/supabase';
 
 interface FuelStockTabProps {
   tanks: FuelTank[];
   setTanks: React.Dispatch<React.SetStateAction<FuelTank[]>>;
+  pumps?: Pump[];
+  setPumps?: React.Dispatch<React.SetStateAction<Pump[]>>;
   deliveries: StockDelivery[];
   setDeliveries: React.Dispatch<React.SetStateAction<StockDelivery[]>>;
 }
@@ -21,12 +23,15 @@ interface FuelStockTabProps {
 export default function FuelStockTab({
   tanks,
   setTanks,
+  pumps,
+  setPumps,
   deliveries,
   setDeliveries,
 }: FuelStockTabProps) {
 
   // Delivery Modal State
   const [isDeliveryModalOpen, setIsDeliveryModalOpen] = useState(false);
+  const [selectedTankId, setSelectedTankId] = useState<string>('');
   const [deliveryFuelType, setDeliveryFuelType] = useState<FuelType>('Petrol 92');
   const [deliveryQty, setDeliveryQty] = useState<number>(5000);
   const [deliverySupplier, setDeliverySupplier] = useState('Lanka IOC PLC');
@@ -117,21 +122,25 @@ export default function FuelStockTab({
       return;
     }
     
-    // Find selected tank
-    const selectedTank = tanks.find(t => t.fuelType === deliveryFuelType);
-    if (!selectedTank) return;
-
-    if (selectedTank.currentLevel + deliveryQty > selectedTank.capacity) {
-      setModalError(`Delivery volume exceeds tank capacity! Max volume you can add is ${(selectedTank.capacity - selectedTank.currentLevel).toFixed(1)} L.`);
+    // Find selected target tank
+    const targetTank = tanks.find(t => t.id === selectedTankId) || tanks.find(t => t.fuelType === deliveryFuelType) || tanks[0];
+    if (!targetTank) {
+      setModalError('Please select a target storage tank.');
       return;
     }
 
-    // Update tank current level
+    const freeSpace = targetTank.capacity - targetTank.currentLevel;
+    if (deliveryQty > freeSpace) {
+      setModalError(`Delivery volume (${deliveryQty.toLocaleString()} L) exceeds target tank free space (${freeSpace.toFixed(1)} L) for ${targetTank.name}! Max volume you can add is ${freeSpace.toFixed(1)} L.`);
+      return;
+    }
+
+    // Update target tank current level
     const updatedTanks = tanks.map(t => {
-      if (t.id === selectedTank.id) {
+      if (t.id === targetTank.id) {
         return {
           ...t,
-          currentLevel: t.currentLevel + deliveryQty
+          currentLevel: Math.min(t.capacity, t.currentLevel + deliveryQty)
         };
       }
       return t;
@@ -139,13 +148,15 @@ export default function FuelStockTab({
 
     setTanks(updatedTanks);
 
-    // Create delivery record
+    // Create delivery record with target tank details
     const newDelivery: StockDelivery = {
       id: `del-${Date.now().toString().slice(-6)}`,
       date: new Date().toISOString(),
-      fuelType: deliveryFuelType,
+      fuelType: targetTank.fuelType,
+      tankId: targetTank.id,
+      tankName: targetTank.name,
       quantity: deliveryQty,
-      supplier: deliverySupplier,
+      supplier: deliverySupplier || 'Lanka IOC PLC',
       cost: deliveryCost
     };
 
@@ -176,29 +187,57 @@ export default function FuelStockTab({
     setEditingTankId(null);
   };
 
+  const handleDeleteTank = async (tankId: string) => {
+    const tank = tanks.find(t => t.id === tankId);
+    if (!tank) return;
+    if (confirm(`Are you sure you want to delete tank "${tank.name}" (${tank.fuelType})?`)) {
+      const isConfigured = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
+      if (isConfigured) {
+        try {
+          const tableName = getTanksTableName();
+          const { error } = await supabase.from(tableName).delete().eq('id', tankId);
+          if (error) console.warn("Supabase tank delete error:", error.message);
+        } catch (err) {
+          console.warn("Tank delete error:", err);
+        }
+      }
+      const updated = tanks.filter(t => t.id !== tankId);
+      setTanks(updated);
+      localStorage.setItem('fms_tanks', JSON.stringify(updated));
+    }
+  };
+
+  const handleDeleteDelivery = async (delId: string) => {
+    if (confirm("Are you sure you want to delete this delivery entry?")) {
+      const isConfigured = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
+      if (isConfigured) {
+        try {
+          const { error } = await supabase.from('stock_deliveries').delete().eq('id', delId);
+          if (error) console.warn("Supabase delivery delete error:", error.message);
+        } catch (err) {
+          console.warn("Delivery delete error:", err);
+        }
+      }
+      const updated = deliveries.filter(d => d.id !== delId);
+      setDeliveries(updated);
+      localStorage.setItem('fms_deliveries', JSON.stringify(updated));
+    }
+  };
+
   return (
-    <div id="fuel-stock-root" className="space-y-6">
+    <div id="fuel-stock-root" className="space-y-4">
       {/* Tab Title Block */}
-      <div id="stock-header-block" className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div id="stock-header-block" className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-extrabold text-[#1C1C1C] tracking-tight font-sans">
+          <h1 className="text-xl sm:text-2xl font-bold text-[#1C1C1C] tracking-tight font-sans">
             Underground Stock Control
           </h1>
-          <p className="text-gray-500 text-sm mt-1">
+          <p className="text-gray-500 text-xs sm:text-sm mt-0.5">
             Real-time liquid levels in underground storage tanks linked with pricing boards
           </p>
         </div>
 
                 <button
-          onClick={() => {
-            setAddTankError(null);
-            setIsAddTankModalOpen(true);
-          }}
-          className="flex items-center gap-2 px-5 py-2.5 bg-white border border-gray-200 text-[#1C1C1C] font-bold text-sm rounded-xl hover:bg-gray-50 transition-all shadow-sm cursor-pointer"
-        >
-          <span>+ Add Tank</span>
-        </button>
-        <button
           id="btn-trigger-delivery"
           onClick={() => {
             setModalError(null);
@@ -249,13 +288,15 @@ export default function FuelStockTab({
                     <span className="text-[10px] tabular-nums font-semibold text-gray-500 font-bold tracking-wider uppercase block">{tank.id}</span>
                     <h3 className="font-bold text-[#1C1C1C] text-base mt-0.5">{tank.name}</h3>
                   </div>
-                  {isCritical ? (
-                    <span className="inline-flex px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30 text-[9px] font-extrabold uppercase animate-pulse">Critical</span>
-                  ) : isLowStock ? (
-                    <span className="inline-flex px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[9px] font-bold uppercase">Low Stock</span>
-                  ) : (
-                    <span className="inline-flex px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[9px] font-bold uppercase">Secure</span>
-                  )}
+                  <div className="flex items-center gap-1.5">
+                    {isCritical ? (
+                      <span className="inline-flex px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30 text-[9px] font-extrabold uppercase animate-pulse">Critical</span>
+                    ) : isLowStock ? (
+                      <span className="inline-flex px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[9px] font-bold uppercase">Low Stock</span>
+                    ) : (
+                      <span className="inline-flex px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[9px] font-bold uppercase">Secure</span>
+                    )}
+                  </div>
                 </div>
 
                 {/* VISUAL LIQUID GAUGE (Simulated underground tank cylindrical view) */}
@@ -286,8 +327,21 @@ export default function FuelStockTab({
                   </div>
                 </div>
 
+                {/* Connected Pumps list */}
+                {(() => {
+                  const linkedPumps = (pumps || []).filter(p => p.tankId === tank.id || (!p.tankId && p.fuelType === tank.fuelType));
+                  return (
+                    <div className="flex justify-between items-center text-xs text-gray-500 border-b border-gray-100 py-2">
+                      <span>Mapped Pumps:</span>
+                      <span className="font-bold text-blue-600 text-right truncate max-w-[180px]" title={linkedPumps.map(p => `${p.name} (${p.fuelType})`).join(', ')}>
+                        {linkedPumps.length > 0 ? linkedPumps.map(p => p.name).join(', ') : 'None'}
+                      </span>
+                    </div>
+                  );
+                })()}
+
                 {/* Capacity stats */}
-                <div className="flex justify-between items-center text-xs text-gray-500 border-b border-gray-100 pb-3">
+                <div className="flex justify-between items-center text-xs text-gray-500 border-b border-gray-100 py-2">
                   <span>Tank Capacity:</span>
                   <span className="tabular-nums font-semibold text-[#1C1C1C]">{formatLiters(tank.capacity)}</span>
                 </div>
@@ -353,17 +407,22 @@ export default function FuelStockTab({
               <thead>
                 <tr className="border-b border-gray-100 text-gray-500 font-bold text-[11px] uppercase tracking-wider">
                   <th className="pb-3">Delivery ID</th>
+                  <th className="pb-3">Target Tank</th>
                   <th className="pb-3">Fuel Type</th>
                   <th className="pb-3 text-right">Volume</th>
                   <th className="pb-3">Supplier</th>
                   <th className="pb-3 text-right">Wholesale Cost</th>
                   <th className="pb-3">Date</th>
+                  <th className="pb-3 text-center">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 text-xs">
                 {deliveries.map((del) => (
                   <tr key={del.id} className="hover:bg-gray-50 transition-colors">
                     <td className="py-3.5 tabular-nums font-bold text-blue-600">{del.id}</td>
+                    <td className="py-3.5 font-bold text-[#1C1C1C]">
+                      {del.tankName || tanks.find(t => t.id === del.tankId)?.name || del.fuelType}
+                    </td>
                     <td className="py-3.5">
                       <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-semibold border ${
                         del.fuelType.includes('Petrol') 
@@ -377,6 +436,15 @@ export default function FuelStockTab({
                     <td className="py-3.5 text-gray-600 font-medium">{del.supplier}</td>
                     <td className="py-3.5 text-right tabular-nums font-bold text-[#1C1C1C]">{formatCurrency(del.cost)}</td>
                     <td className="py-3.5 text-gray-500">{new Date(del.date).toLocaleDateString()}</td>
+                    <td className="py-3.5 text-center">
+                      <button
+                        onClick={() => handleDeleteDelivery(del.id)}
+                        className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors cursor-pointer"
+                        title="Delete Delivery Record"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -428,21 +496,30 @@ export default function FuelStockTab({
                 </div>
               )}
 
-              {/* Fuel Type / Tank selector */}
+              {/* Target Storage Tank Selector */}
               <div>
-                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1.5">
-                  Select Receiving Tank
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1.5 flex items-center justify-between">
+                  <span>Select Target Storage Tank</span>
+                  <span className="text-blue-600 text-[11px] font-bold">Required</span>
                 </label>
                 <select
-                  value={deliveryFuelType}
-                  onChange={(e) => setDeliveryFuelType(e.target.value as FuelType)}
-                  className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-[#1C1C1C] text-sm focus:outline-none focus:border-blue-500"
+                  value={selectedTankId || (tanks[0]?.id || '')}
+                  onChange={(e) => {
+                    const tId = e.target.value;
+                    setSelectedTankId(tId);
+                    const tank = tanks.find(t => t.id === tId);
+                    if (tank) setDeliveryFuelType(tank.fuelType);
+                  }}
+                  className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-[#1C1C1C] text-sm font-semibold focus:outline-none focus:border-blue-500"
                 >
-                  {tanks.map((t) => (
-                    <option key={t.id} value={t.fuelType}>
-                      {t.name} (Available: {formatLiters(t.capacity - t.currentLevel)})
-                    </option>
-                  ))}
+                  {tanks.map((t) => {
+                    const freeSpace = Math.max(0, t.capacity - t.currentLevel);
+                    return (
+                      <option key={t.id} value={t.id}>
+                        {t.name} ({t.fuelType}) — Free Space: {formatLiters(freeSpace)}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
 
