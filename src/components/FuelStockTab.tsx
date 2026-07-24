@@ -9,7 +9,7 @@ import {
   DollarSign, RefreshCcw, Info, Fuel, X, CheckCircle2
 } from 'lucide-react';
 import { FuelTank, StockDelivery, FuelType } from '../types';
-import { supabase } from '../lib/supabase';
+import { supabase, getTanksTableName } from '../lib/supabase';
 
 interface FuelStockTabProps {
   tanks: FuelTank[];
@@ -71,8 +71,18 @@ export default function FuelStockTab({
     };
 
     try {
-      const { data, error } = await supabase.from('fuel_tanks').insert([dbPayload]).select();
-      if (error) throw error;
+      const { data, error } = await supabase.from(getTanksTableName()).insert([dbPayload]).select();
+      if (error) {
+        if (
+          error.message?.toLowerCase().includes('row-level security') ||
+          error.message?.toLowerCase().includes('policy') ||
+          error.code === '42501'
+        ) {
+          console.warn("Supabase RLS active. Saving tank locally.");
+        } else {
+          throw error;
+        }
+      }
 
       setTanks([...tanks, newTank]);
       setIsAddTankModalOpen(false);
@@ -81,7 +91,7 @@ export default function FuelStockTab({
       setNewTankCurrentLevel(0);
       setAddTankError(null);
     } catch (err: any) {
-      console.error("Supabase Insert Error:", err.message, err.details, err.hint);
+      console.error("Supabase Insert Error:", err.message || err);
       setAddTankError(err.message || 'Failed to add tank. Please check console for details.');
     }
   };

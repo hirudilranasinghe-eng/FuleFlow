@@ -1,4 +1,4 @@
--- Enable UUID generation
+export const SUPABASE_SQL = `-- Enable UUID generation
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Employees Table
@@ -123,4 +123,4 @@ DROP POLICY IF EXISTS "Enable all access for stock_deliveries" ON stock_deliveri
 CREATE POLICY "Enable all access for stock_deliveries" ON stock_deliveries FOR ALL TO public USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Enable all access for price_schedules" ON price_schedules;
-CREATE POLICY "Enable all access for price_schedules" ON price_schedules FOR ALL TO public USING (true) WITH CHECK (true);
+CREATE POLICY "Enable all access for price_schedules" ON price_schedules FOR ALL TO public USING (true) WITH CHECK (true);`;

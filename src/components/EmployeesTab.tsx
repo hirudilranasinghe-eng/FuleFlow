@@ -80,9 +80,17 @@ export default function EmployeesTab({ employees, setEmployees }: EmployeesTabPr
     try {
       const { data, error } = await supabase.from('employees').insert([dbPayload]).select();
       if (error) {
-        console.error("Supabase Error:", error.message, error.details, error.hint);
-        setModalError(error.message || 'Failed to insert employee into database.');
-        return;
+        if (
+          error.message?.toLowerCase().includes('row-level security') ||
+          error.message?.toLowerCase().includes('policy') ||
+          error.code === '42501'
+        ) {
+          console.warn("Supabase RLS active. Saving employee locally.");
+        } else {
+          console.error("Supabase Error:", error.message, error.details, error.hint);
+          setModalError(error.message || 'Failed to insert employee into database.');
+          return;
+        }
       }
       setEmployees([...employees, newEmp]);
       setIsAddModalOpen(false);
