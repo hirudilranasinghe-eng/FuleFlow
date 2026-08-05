@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export type FuelType = 'Petrol 92' | 'Petrol 95' | 'Auto Diesel' | 'Super Diesel';
+export type FuelType = 'Petrol 92' | 'Petrol 95' | 'Auto Diesel' | 'Super Diesel' | 'Oil & Lubricants';
 
 export interface AuthUser {
   id: string;
@@ -68,6 +68,11 @@ export interface PumpReading {
   status: 'Active' | 'Idle' | 'Completed';
   isLocked?: boolean;
   unitPrice?: number;
+  actualCash?: number; // Physical cash handed over by pumper
+  cashVariance?: number; // (actualCash - netExpectedCash)
+  creditSalesAmount?: number; // Credit / Chitty sales amount
+  cardSalesAmount?: number; // Card / POS sales amount
+  oilSalesAmount?: number; // Engine oil / lubricant sales amount
 }
 
 export interface Shift {
@@ -108,3 +113,49 @@ export interface PriceSchedule {
   effectiveDate: string; // ISO string
   status: 'Pending' | 'Applied' | 'Cancelled';
 }
+
+export type CustomerType = 'Cash' | 'Credit' | 'Deposit';
+
+export interface Customer {
+  id: string;
+  name: string;
+  phone: string;
+  customerType: CustomerType;
+  creditLimit: number; // in Rs.
+  currentBalance: number; // in Rs. (Outstanding credit owed)
+  depositBalance: number; // in Rs. (Prepaid deposit balance available)
+  allowedCreditDays: number; // e.g. 14, 30 days
+  address?: string;
+  vehicleNumbers?: string[];
+  status: 'Active' | 'Blocked' | 'Overdue';
+  createdAt: string;
+}
+
+export interface CreditTransaction {
+  id: string;
+  customerId: string;
+  customerName: string;
+  date: string; // ISO String
+  dueDate: string; // ISO String (Date + allowedCreditDays)
+  vehicleNumber: string;
+  invoiceNumber: string; // Chitty / Invoice No
+  fuelType: FuelType;
+  liters: number;
+  ratePerLiter: number;
+  totalAmount: number; // in Rs.
+  paidAmount: number; // in Rs.
+  status: 'Unpaid' | 'Partial' | 'Paid' | 'Overdue';
+  notes?: string;
+}
+
+export interface CreditPayment {
+  id: string;
+  customerId: string;
+  customerName: string;
+  date: string; // ISO String
+  amount: number; // in Rs.
+  paymentMethod: 'Cash' | 'Cheque' | 'Bank Transfer';
+  referenceNumber: string;
+  notes?: string;
+}
+

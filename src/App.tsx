@@ -10,12 +10,15 @@ import DashboardTab from './components/DashboardTab';
 import ShiftManagementTab from './components/ShiftManagementTab';
 import FuelStockTab from './components/FuelStockTab';
 import DailySalesTab from './components/DailySalesTab';
+import ReportsTab from './components/ReportsTab';
+import CustomersTab from './components/CustomersTab';
 import EmployeesTab from './components/EmployeesTab';
 import AdminControlTab from './components/AdminControlTab';
 import PriceManagementTab from './components/PriceManagementTab';
 import LoginPage from './components/LoginPage';
-import { AuthUser, Employee, FuelTank, Pump, Shift, StockDelivery, PriceSchedule, resolveUserRole } from './types';
+import { AuthUser, Employee, FuelTank, Pump, Shift, StockDelivery, PriceSchedule, Customer, CreditTransaction, CreditPayment, resolveUserRole } from './types';
 import { supabase, getTanksTableName, setTanksTableName } from './lib/supabase';
+import { upsertPumpReadings, syncCreditAndCardSales } from './lib/supabaseClient';
 
 const defaultEmps: Employee[] = [
   { id: 'emp-101', name: 'Samantha Silva', role: 'Supervisor', phone: '0771234567', status: 'Active', avatarColor: 'bg-blue-500' },
@@ -39,7 +42,141 @@ export const defaultPumps: Pump[] = [
   { id: 'pump-105', name: 'Pump 05', fuelType: 'Auto Diesel', tankId: 'tank-autodiesel', status: 'Active' },
   { id: 'pump-106', name: 'Pump 06', fuelType: 'Auto Diesel', tankId: 'tank-autodiesel', status: 'Active' },
   { id: 'pump-107', name: 'Pump 07', fuelType: 'Super Diesel', tankId: 'tank-superdiesel', status: 'Active' },
-  { id: 'pump-108', name: 'Pump 08', fuelType: 'Super Diesel', tankId: 'tank-superdiesel', status: 'Active' }
+  { id: 'pump-108', name: 'Pump 08', fuelType: 'Super Diesel', tankId: 'tank-superdiesel', status: 'Active' },
+  { id: 'pump-oil-bay', name: 'Oil & Lubricants Bay', fuelType: 'Oil & Lubricants', tankId: '', status: 'Active' }
+];
+
+const defaultCustomers: Customer[] = [
+  {
+    id: 'CUST-101',
+    name: 'Lanka Logistics PLC',
+    phone: '0112345678',
+    customerType: 'Credit',
+    creditLimit: 250000,
+    currentBalance: 145000,
+    depositBalance: 0,
+    allowedCreditDays: 14,
+    address: 'No. 120, Baseline Road, Colombo 09',
+    vehicleNumbers: ['WP CBB-4512', 'WP CBB-4513', 'WP CBB-8901'],
+    status: 'Active',
+    createdAt: '2026-01-10T08:00:00.000Z',
+  },
+  {
+    id: 'CUST-102',
+    name: 'Island Wide Transport Ltd',
+    phone: '0332245100',
+    customerType: 'Credit',
+    creditLimit: 500000,
+    currentBalance: 320000,
+    depositBalance: 0,
+    allowedCreditDays: 30,
+    address: 'Kandy Road, Kelaniya',
+    vehicleNumbers: ['WP GA-9081', 'WP GA-9082'],
+    status: 'Active',
+    createdAt: '2026-02-01T08:00:00.000Z',
+  },
+  {
+    id: 'CUST-103',
+    name: 'Southern Express Coaches',
+    phone: '0912233444',
+    customerType: 'Credit',
+    creditLimit: 150000,
+    currentBalance: 175000,
+    depositBalance: 0,
+    allowedCreditDays: 14,
+    address: 'Galle Road, Kalutara',
+    vehicleNumbers: ['SP ND-3321'],
+    status: 'Overdue',
+    createdAt: '2026-03-15T08:00:00.000Z',
+  },
+  {
+    id: 'CUST-104',
+    name: 'Metropolitan Taxi Services',
+    phone: '0115566777',
+    customerType: 'Deposit',
+    creditLimit: 0,
+    currentBalance: 0,
+    depositBalance: 85000,
+    allowedCreditDays: 0,
+    address: 'Nawala Road, Rajagiriya',
+    vehicleNumbers: ['WP CAB-1020', 'WP CAB-1021'],
+    status: 'Active',
+    createdAt: '2026-04-05T08:00:00.000Z',
+  },
+];
+
+const defaultCreditTransactions: CreditTransaction[] = [
+  {
+    id: 'TX-801',
+    customerId: 'CUST-101',
+    customerName: 'Lanka Logistics PLC',
+    date: new Date(Date.now() - 3 * 86400000).toISOString(),
+    dueDate: new Date(Date.now() + 11 * 86400000).toISOString().split('T')[0],
+    vehicleNumber: 'WP CBB-4512',
+    invoiceNumber: 'INV-2026-1045',
+    fuelType: 'Auto Diesel',
+    liters: 250,
+    ratePerLiter: 317,
+    totalAmount: 79250,
+    paidAmount: 0,
+    status: 'Unpaid',
+    notes: 'Long distance haulage refill',
+  },
+  {
+    id: 'TX-802',
+    customerId: 'CUST-102',
+    customerName: 'Island Wide Transport Ltd',
+    date: new Date(Date.now() - 8 * 86400000).toISOString(),
+    dueDate: new Date(Date.now() + 22 * 86400000).toISOString().split('T')[0],
+    vehicleNumber: 'WP GA-9081',
+    invoiceNumber: 'INV-2026-1038',
+    fuelType: 'Auto Diesel',
+    liters: 400,
+    ratePerLiter: 317,
+    totalAmount: 126800,
+    paidAmount: 0,
+    status: 'Unpaid',
+    notes: 'Intercity container truck',
+  },
+  {
+    id: 'TX-803',
+    customerId: 'CUST-103',
+    customerName: 'Southern Express Coaches',
+    date: new Date(Date.now() - 25 * 86400000).toISOString(),
+    dueDate: new Date(Date.now() - 11 * 86400000).toISOString().split('T')[0],
+    vehicleNumber: 'SP ND-3321',
+    invoiceNumber: 'INV-2026-0992',
+    fuelType: 'Super Diesel',
+    liters: 300,
+    ratePerLiter: 343,
+    totalAmount: 102900,
+    paidAmount: 0,
+    status: 'Overdue',
+    notes: 'Express highway bus',
+  },
+];
+
+const defaultCreditPayments: CreditPayment[] = [
+  {
+    id: 'PAY-501',
+    customerId: 'CUST-101',
+    customerName: 'Lanka Logistics PLC',
+    date: new Date(Date.now() - 5 * 86400000).toISOString(),
+    amount: 50000,
+    paymentMethod: 'Bank Transfer',
+    referenceNumber: 'BT-BOC-9921',
+    notes: 'Part settlement for June statement',
+  },
+  {
+    id: 'PAY-502',
+    customerId: 'CUST-102',
+    customerName: 'Island Wide Transport Ltd',
+    date: new Date(Date.now() - 12 * 86400000).toISOString(),
+    amount: 150000,
+    paymentMethod: 'Cheque',
+    referenceNumber: 'CHQ-HNB-4482',
+    notes: 'Monthly settlement cheque',
+  },
 ];
 
 export default function App() {
@@ -149,7 +286,12 @@ export default function App() {
       const stored = localStorage.getItem('fms_pumps');
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          if (!parsed.some((p: any) => p.id === 'pump-oil-bay')) {
+            return [...parsed, { id: 'pump-oil-bay', name: 'Oil & Lubricants Bay', fuelType: 'Oil & Lubricants', tankId: '', status: 'Active' }];
+          }
+          return parsed;
+        }
       }
     } catch (_) {}
     return defaultPumps;
@@ -167,6 +309,49 @@ export default function App() {
   const [shiftHistory, setShiftHistory] = useState<Shift[]>([]);
   const [deliveries, setDeliveries] = useState<StockDelivery[]>([]);
   const [priceSchedules, setPriceSchedules] = useState<PriceSchedule[]>([]);
+
+  // Customer & Credit states
+  const [customers, setCustomers] = useState<Customer[]>(() => {
+    try {
+      const stored = localStorage.getItem('fms_customers');
+      if (stored) return JSON.parse(stored);
+    } catch (_) {}
+    return defaultCustomers;
+  });
+
+  const [creditTransactions, setCreditTransactions] = useState<CreditTransaction[]>(() => {
+    try {
+      const stored = localStorage.getItem('fms_creditTransactions');
+      if (stored) return JSON.parse(stored);
+    } catch (_) {}
+    return defaultCreditTransactions;
+  });
+
+  const [payments, setPayments] = useState<CreditPayment[]>(() => {
+    try {
+      const stored = localStorage.getItem('fms_creditPayments');
+      if (stored) return JSON.parse(stored);
+    } catch (_) {}
+    return defaultCreditPayments;
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('fms_customers', JSON.stringify(customers));
+    } catch (_) {}
+  }, [customers]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('fms_creditTransactions', JSON.stringify(creditTransactions));
+    } catch (_) {}
+  }, [creditTransactions]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('fms_creditPayments', JSON.stringify(payments));
+    } catch (_) {}
+  }, [payments]);
 
   // Error handling for writing state back to Supabase (e.g. Row-Level Security policy violations)
   const handleSyncWriteError = (err: any) => {
@@ -386,21 +571,26 @@ export default function App() {
             handoverNotes: s.handovernotes || '',
             replacementPumperId: s.replacementpumperid || '',
             pumpReadings: (s.pumpReadings || []).map((r: any) => ({
-              pumpId: r.pumpid || r.pumpId,
-              pumpName: r.pumpname || r.pumpName,
-              fuelType: r.fueltype || r.fuelType,
-              tankId: r.tankid || r.tankId || (r.fueltype === 'Petrol 92' ? 'tank-petrol92' : r.fueltype === 'Petrol 95' ? 'tank-petrol95' : r.fueltype === 'Auto Diesel' ? 'tank-autodiesel' : 'tank-superdiesel'),
-              assignedPumperId: r.assignedpumperid || r.assignedPumperId || null,
-              replacementPumperId: r.replacementpumperid || r.replacementPumperId || null,
-              initialPumperCash: Number(r.initialpumpercash || r.initialPumperCash) || 0,
-              handoverMeter: Number(r.handovermeter || r.handoverMeter) || 0,
-              handoverNotes: r.handovernotes || r.handoverNotes || '',
-              startMeter: Number(r.startmeter !== undefined ? r.startmeter : r.startMeter) || 0,
-              endMeter: Number(r.endmeter !== undefined ? r.endmeter : r.endMeter) || 0,
-              testingQty: Number(r.testingqty !== undefined ? r.testingqty : r.testingQty) || 0,
+              pumpId: r.pump_id || r.pumpid || r.pumpId,
+              pumpName: r.pump_name || r.pumpname || r.pumpName,
+              fuelType: r.fuel_type || r.fueltype || r.fuelType,
+              tankId: r.tank_id || r.tankid || r.tankId || (r.fueltype === 'Petrol 92' ? 'tank-petrol92' : r.fueltype === 'Petrol 95' ? 'tank-petrol95' : r.fueltype === 'Auto Diesel' ? 'tank-autodiesel' : 'tank-superdiesel'),
+              assignedPumperId: r.assigned_pumper_id || r.assignedpumperid || r.assignedPumperId || null,
+              replacementPumperId: r.replacement_pumper_id || r.replacementpumperid || r.replacementPumperId || null,
+              initialPumperCash: Number(r.initial_pumper_cash || r.initialpumpercash || r.initialPumperCash) || 0,
+              handoverMeter: Number(r.handover_meter !== undefined ? r.handover_meter : r.handovermeter !== undefined ? r.handovermeter : r.handoverMeter) || 0,
+              handoverNotes: r.handover_notes || r.handovernotes || r.handoverNotes || '',
+              startMeter: Number(r.start_meter !== undefined ? r.start_meter : r.startmeter !== undefined ? r.startmeter : r.startMeter) || 0,
+              endMeter: Number(r.end_meter !== undefined ? r.end_meter : r.endmeter !== undefined ? r.endmeter : r.endMeter) || 0,
+              testingQty: Number(r.testing_qty !== undefined ? r.testing_qty : r.testingqty !== undefined ? r.testingqty : r.testingQty) || 0,
               status: r.status || 'Idle',
-              isLocked: r.islocked !== undefined ? r.islocked : r.isLocked,
-              unitPrice: Number(r.unitprice || r.unitPrice) || 0
+              isLocked: r.is_locked !== undefined ? r.is_locked : r.islocked !== undefined ? r.islocked : r.isLocked,
+              unitPrice: Number(r.unit_price || r.unitprice || r.unitPrice) || 0,
+              actualCash: Number(r.actual_cash ?? r.actualcash ?? r.actualCash) || 0,
+              cashVariance: Number(r.cash_variance ?? r.cashvariance ?? r.cashVariance) || 0,
+              creditSalesAmount: Number(r.credit_sales_amount ?? r.creditsalesamount ?? r.creditSalesAmount) || 0,
+              cardSalesAmount: Number(r.card_sales_amount ?? r.cardsalesamount ?? r.cardSalesAmount) || 0,
+              oilSalesAmount: Number(r.oil_sales_amount ?? r.oilsalesamount ?? r.oilSalesAmount) || 0
             }))
           }));
 
@@ -625,50 +815,8 @@ export default function App() {
         }
 
         if (pumpReadings && pumpReadings.length > 0) {
-          const readingsToUpsert = pumpReadings.map(r => ({
-            id: (r as any).id || `${activeShift.id}_${r.pumpId}`,
-            shift_id: activeShift.id,
-            pumpid: r.pumpId,
-            pumpname: r.pumpName,
-            fueltype: r.fuelType,
-            tankid: r.tankId || (r.fuelType === 'Petrol 92' ? 'tank-petrol92' : r.fuelType === 'Petrol 95' ? 'tank-petrol95' : r.fuelType === 'Auto Diesel' ? 'tank-autodiesel' : 'tank-superdiesel'),
-            assignedpumperid: r.assignedPumperId || null,
-            replacementpumperid: r.replacementPumperId || null,
-            initialpumpercash: r.initialPumperCash || 0,
-            handovermeter: r.handoverMeter || 0,
-            handovernotes: r.handoverNotes || '',
-            startmeter: r.startMeter || 0,
-            endmeter: r.endMeter || 0,
-            testingqty: r.testingQty || 0,
-            status: r.status,
-            islocked: r.isLocked || false,
-            unitprice: r.unitPrice || 0
-          }));
-
-          const { error: readingsErr } = await supabase.from('pump_readings').upsert(readingsToUpsert);
-          if (readingsErr) {
-            if (readingsErr.code === '42703' || readingsErr.message?.includes('column')) {
-              const basicReadings = pumpReadings.map(r => ({
-                id: (r as any).id || `${activeShift.id}_${r.pumpId}`,
-                shift_id: activeShift.id,
-                pumpid: r.pumpId,
-                pumpname: r.pumpName,
-                fueltype: r.fuelType,
-                tankid: r.tankId,
-                assignedpumperid: r.assignedPumperId || null,
-                startmeter: r.startMeter || 0,
-                endmeter: r.endMeter || 0,
-                testingqty: r.testingQty || 0,
-                status: r.status,
-                islocked: r.isLocked || false,
-                unitprice: r.unitPrice || 0
-              }));
-              const { error: basicErr } = await supabase.from('pump_readings').upsert(basicReadings);
-              if (basicErr) handleSyncWriteError(basicErr);
-            } else {
-              handleSyncWriteError(readingsErr);
-            }
-          }
+          const { error: readingsErr } = await upsertPumpReadings(supabase, pumpReadings, activeShift.id);
+          if (readingsErr) handleSyncWriteError(readingsErr);
         }
       }
     };
@@ -696,10 +844,7 @@ export default function App() {
             continue;
           }
           if (pumpReadings && pumpReadings.length > 0) {
-            const readingsToUpsert = pumpReadings.map(r => ({
-              id: (r as any).id, shift_id: shift.id, pumpid: r.pumpId, pumpname: r.pumpName, fueltype: r.fuelType, assignedpumperid: r.assignedPumperId, startmeter: r.startMeter, endmeter: r.endMeter, testingqty: r.testingQty, status: r.status, islocked: r.isLocked, unitprice: r.unitPrice
-            }));
-            const { error: readingsErr } = await supabase.from('pump_readings').upsert(readingsToUpsert);
+            const { error: readingsErr } = await upsertPumpReadings(supabase, pumpReadings, shift.id);
             if (readingsErr) handleSyncWriteError(readingsErr);
           }
         }
@@ -858,28 +1003,94 @@ export default function App() {
         cashvariance: shiftData.cashVariance || 0,
         handovernotes: shiftData.handoverNotes || '',
         replacementpumperid: shiftData.replacementPumperId || null
-      }).then(({ error: sErr }) => {
-        if (sErr) console.warn("Supabase shift close notice:", sErr?.message || sErr);
+      }).then(async ({ error: sErr }) => {
+        if (sErr && (sErr.code === '42703' || sErr.message?.includes('column'))) {
+          await supabase.from('shifts').upsert({
+            id: shiftData.id,
+            name: shiftData.name,
+            supervisorid: shiftData.supervisorId,
+            starttime: shiftData.startTime,
+            endtime: closedTime,
+            isactive: false,
+            totalfuelsold: shiftData.totalFuelSold || 0,
+            totalnetsold: shiftData.totalNetSold || 0,
+            totalnetsales: shiftData.totalNetSales || 0
+          });
+        } else if (sErr) {
+          console.warn("Supabase shift close notice:", sErr?.message || sErr);
+        }
       });
 
       if (pumpReadings && pumpReadings.length > 0) {
-        const readingsToUpsert = pumpReadings.map(r => ({
-          id: (r as any).id,
-          shift_id: closedShift.id,
-          pumpid: r.pumpId,
-          pumpname: r.pumpName,
-          fueltype: r.fuelType,
-          tankid: r.tankId || (r.fuelType === 'Petrol 92' ? 'tank-petrol92' : r.fuelType === 'Petrol 95' ? 'tank-petrol95' : r.fuelType === 'Auto Diesel' ? 'tank-autodiesel' : 'tank-superdiesel'),
-          assignedpumperid: r.assignedPumperId,
-          startmeter: r.startMeter,
-          endmeter: r.endMeter,
-          testingqty: r.testingQty || 0,
-          status: 'Completed',
-          islocked: true,
-          unitprice: r.unitPrice
-        }));
-        supabase.from('pump_readings').upsert(readingsToUpsert).then(({ error: prErr }) => {
+        const completedReadings = pumpReadings.map(r => ({ ...r, status: 'Completed' as const, isLocked: true }));
+        upsertPumpReadings(supabase, completedReadings, closedShift.id).then(({ error: prErr }) => {
           if (prErr) console.warn("Supabase pump_readings close notice:", prErr?.message || prErr);
+        });
+
+        // Explicit direct inserts into credit_sales and card_sales tables
+        syncCreditAndCardSales(supabase, pumpReadings, closedShift.id);
+
+        // Save detailed shift logs entry per pump
+        const shiftLogsToInsert = pumpReadings.map(r => {
+          const fuel = Math.max(0, (r.endMeter || 0) - (r.startMeter || 0));
+          const net = Math.max(0, fuel - (r.testingQty || 0));
+          const rate = r.unitPrice || 0;
+          const grossFuelRev = net * rate;
+          const oilSales = r.oilSalesAmount || 0;
+          const totalGrossRev = grossFuelRev + oilSales;
+          const creditAmt = r.creditSalesAmount || 0;
+          const cardAmt = r.cardSalesAmount || 0;
+          const expectedCash = Math.max(0, totalGrossRev - (creditAmt + cardAmt));
+          const actCash = r.actualCash || 0;
+          const pVariance = r.cashVariance ?? (actCash - expectedCash);
+
+          return {
+            id: `log_${closedShift.id}_${r.pumpId}_${Date.now()}`,
+            shift_id: closedShift.id,
+            shift_name: closedShift.name,
+            supervisor_id: closedShift.supervisorId,
+            pump_id: r.pumpId,
+            pump_name: r.pumpName,
+            fuel_type: r.fuelType,
+            assigned_pumper_id: r.assignedPumperId || null,
+            start_meter: r.startMeter || 0,
+            end_meter: r.endMeter || 0,
+            testing_qty: r.testingQty || 0,
+            net_liters: net,
+            unit_price: rate,
+            gross_revenue: totalGrossRev,
+            oil_sales_amount: oilSales,
+            credit_sales_amount: creditAmt,
+            card_sales_amount: cardAmt,
+            expected_cash: expectedCash,
+            actual_cash: actCash,
+            cash_variance: pVariance,
+            closed_at: closedTime
+          };
+        });
+
+        supabase.from('shift_logs').insert(shiftLogsToInsert).then(async ({ error: logErr }) => {
+          if (logErr && (logErr.code === '42703' || logErr.message?.includes('column'))) {
+            const basicLogs = shiftLogsToInsert.map(log => ({
+              id: log.id,
+              shift_id: log.shift_id,
+              pump_id: log.pump_id,
+              pump_name: log.pump_name,
+              fuel_type: log.fuel_type,
+              start_meter: log.start_meter,
+              end_meter: log.end_meter,
+              testing_qty: log.testing_qty,
+              net_liters: log.net_liters,
+              unit_price: log.unit_price,
+              gross_revenue: log.gross_revenue,
+              expected_cash: log.expected_cash,
+              actual_cash: log.actual_cash,
+              cash_variance: log.cash_variance
+            }));
+            await supabase.from('shift_logs').insert(basicLogs);
+          } else if (logErr) {
+            console.warn("Supabase shift_logs insert notice:", logErr?.message || logErr);
+          }
         });
       }
     }
@@ -1074,6 +1285,31 @@ export default function App() {
                 setShiftHistory={setShiftHistory}
                 onDeleteShift={handleDeleteShift}
                 employees={employees}
+                tanks={tanks}
+              />
+            )}
+
+            {activeTab === 'reports' && (
+              <ReportsTab
+                shiftHistory={shiftHistory}
+                deliveries={deliveries}
+                tanks={tanks}
+                pumps={pumps}
+                employees={employees}
+                customers={customers}
+                creditTransactions={creditTransactions}
+                payments={payments}
+              />
+            )}
+
+            {activeTab === 'customers' && (
+              <CustomersTab
+                customers={customers}
+                setCustomers={setCustomers}
+                creditTransactions={creditTransactions}
+                setCreditTransactions={setCreditTransactions}
+                payments={payments}
+                setPayments={setPayments}
                 tanks={tanks}
               />
             )}

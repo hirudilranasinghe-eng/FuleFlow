@@ -8,6 +8,15 @@ import {
   Fuel, TrendingUp, AlertTriangle, Users, ArrowUpRight, 
   Calendar, CheckCircle2, ShoppingBag, Droplet, Clock, Info
 } from 'lucide-react';
+import { 
+  ResponsiveContainer, 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip
+} from 'recharts';
 import { Employee, FuelTank, Pump, Shift } from '../types';
 
 interface DashboardTabProps {
@@ -63,18 +72,31 @@ export default function DashboardTab({
     return sold;
   }, [activeShift, shiftHistory]);
 
-  // SVG Chart Computations (Beautiful manual responsive bars!)
+  // Recharts Chart Data Computations (Last 6 completed shifts)
   const chartData = useMemo(() => {
-    // Generate past 5 shifts sales for comparison
-    const list = [...shiftHistory].slice(0, 5).reverse();
-    if (activeShift) {
+    // Generate past 6 shifts sales for comparison
+    const list = [...shiftHistory].slice(0, 6).reverse();
+    if (activeShift && list.length < 6 && !list.some(s => s.id === activeShift.id)) {
       list.push(activeShift);
     }
-    return list.map(s => ({
-      name: s.id.split('-').slice(1).join('-') || s.name.split(' ')[0],
-      sales: s.totalNetSales,
-      liters: s.totalNetSold
-    }));
+    return list.map(s => {
+      const dateStr = s.startTime 
+        ? new Date(s.startTime).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+        : 'Shift';
+      const fullDateStr = s.startTime 
+        ? new Date(s.startTime).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+        : '';
+      return {
+        shiftId: s.id,
+        shiftName: s.name,
+        name: `${s.name.replace(/Shift\s*/i, '')} (${dateStr})`,
+        shortName: s.name,
+        date: dateStr,
+        fullDate: fullDateStr,
+        sales: s.totalNetSales || 0,
+        liters: s.totalNetSold || 0,
+      };
+    });
   }, [activeShift, shiftHistory]);
 
   const maxSaleValue = useMemo(() => {
@@ -115,6 +137,34 @@ export default function DashboardTab({
 
   const formatLiters = (val: number) => {
     return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(val) + ' L';
+  };
+
+  const CustomTooltip = ({ active, payload }: any) => {
+    if (active && payload && payload.length) {
+      const data = payload[0].payload;
+      return (
+        <div className="bg-white/95 backdrop-blur-md p-3.5 border border-gray-200/90 rounded-xl shadow-xl text-xs space-y-1.5 min-w-[210px] pointer-events-none">
+          <div className="flex items-center justify-between border-b border-gray-100 pb-1.5 gap-2">
+            <span className="font-extrabold text-[#1C1C1C]">{data.shiftName}</span>
+            <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md tabular-nums">{data.shiftId}</span>
+          </div>
+          {data.fullDate && (
+            <div className="text-[10px] text-gray-500 font-medium">
+              {data.fullDate}
+            </div>
+          )}
+          <div className="flex items-center justify-between pt-1">
+            <span className="text-gray-500 font-medium">Fuel Dispensed:</span>
+            <span className="font-bold text-gray-800 tabular-nums">{formatLiters(data.liters)}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-gray-500 font-medium">Net Sales Revenue:</span>
+            <span className="font-extrabold text-blue-600 tabular-nums text-sm">{formatCurrency(data.sales)}</span>
+          </div>
+        </div>
+      );
+    }
+    return null;
   };
 
   return (
@@ -250,51 +300,58 @@ export default function DashboardTab({
       {/* Graphs / Main Analytics Grid */}
       <div id="db-analytics-grid" className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
-        {/* Beautiful Custom Responsive Bar Chart (Liters/Sales Revenue trends) */}
+        {/* Recharts Bar Chart (Liters/Sales Revenue trends) */}
         <div className="glass-panel p-6 rounded-2xl lg:col-span-2">
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="font-bold text-[#1C1C1C] text-base">Shift Sales Performance</h3>
               <p className="text-xs text-gray-500 mt-0.5">Revenue tracking over the past 6 shifts</p>
             </div>
             <div className="flex items-center gap-3 text-xs">
-              <div className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-blue-500" />
-                <span className="text-gray-500">Sales Net ($)</span>
+              <div className="flex items-center gap-1.5 bg-blue-50/80 border border-blue-100/80 px-2.5 py-1 rounded-lg">
+                <span className="w-2.5 h-2.5 rounded-full bg-blue-600" />
+                <span className="text-blue-900 font-bold">Sales Net (Rs.)</span>
               </div>
             </div>
           </div>
 
-          {/* Manual SVG Responsive Chart */}
-          <div className="h-64 relative flex items-end justify-between px-2 pt-6">
+          {/* Recharts Bar Chart Container with Explicit Height */}
+          <div className="w-full h-[300px] min-h-[300px] pt-2">
             {chartData.length > 0 ? (
-              chartData.map((d, index) => {
-                const heightPercent = Math.max(8, Math.round((d.sales / maxSaleValue) * 85));
-                return (
-                  <div key={index} className="flex flex-col items-center flex-1 group relative">
-                    {/* Hover tooltip */}
-                    <div className="absolute bottom-full mb-2 bg-white border border-gray-100 text-[#1C1C1C] text-[10px] py-1 px-2 rounded-lg tabular-nums font-semibold opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-10 whitespace-nowrap text-center shadow-lg">
-                      <div className="font-bold text-blue-600">{formatCurrency(d.sales)}</div>
-                      <div className="text-[9px] text-gray-500">{d.liters.toFixed(1)} Liters</div>
-                    </div>
-
-                    {/* Bar */}
-                    <div 
-                      className="w-8 sm:w-12 bg-blue-100 rounded-t-lg transition-all duration-500 group-hover:bg-blue-200"
-                      style={{ height: `${heightPercent}%` }}
-                    >
-                      <div className="w-full bg-blue-500 rounded-t-lg transition-all duration-500" style={{height: '100%', opacity: 0.6}} />
-                    </div>
-
-                    {/* Label */}
-                    <span className="text-[10px] tabular-nums font-semibold text-gray-500 mt-3 truncate max-w-[70px] text-center">
-                      {d.name}
-                    </span>
-                  </div>
-                );
-              })
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={chartData} margin={{ top: 15, right: 10, left: 15, bottom: 25 }}>
+                  <defs>
+                    <linearGradient id="salesBarGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#2563EB" stopOpacity={0.95} />
+                      <stop offset="100%" stopColor="#60A5FA" stopOpacity={0.65} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F3F4F6" />
+                  <XAxis 
+                    dataKey="name" 
+                    tick={{ fontSize: 11, fill: '#6B7280', fontWeight: 600 }}
+                    tickLine={false}
+                    axisLine={{ stroke: '#E5E7EB' }}
+                    dy={8}
+                  />
+                  <YAxis 
+                    tick={{ fontSize: 10, fill: '#6B7280', fontWeight: 600 }}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={(val) => val >= 1000 ? `Rs. ${(val / 1000).toFixed(0)}k` : `Rs. ${val}`}
+                  />
+                  <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(59, 130, 246, 0.05)' }} />
+                  <Bar 
+                    dataKey="sales" 
+                    name="Sales Net (Rs.)" 
+                    fill="url(#salesBarGrad)" 
+                    radius={[8, 8, 0, 0]} 
+                    maxBarSize={52} 
+                  />
+                </BarChart>
+              </ResponsiveContainer>
             ) : (
-              <div className="w-full h-full flex items-center justify-center text-gray-500 text-sm">
+              <div className="w-full h-full flex items-center justify-center text-gray-500 text-sm font-medium">
                 Insufficient sales history to populate performance chart.
               </div>
             )}

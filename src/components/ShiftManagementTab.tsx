@@ -3,15 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { 
   Search, Plus, Clock, Fuel, ArrowUpRight, DollarSign, 
   User, CheckCircle, AlertCircle, Sparkles, X, Download, RotateCcw,
   ShieldCheck, Check, Save, AlertTriangle, TrendingUp, RefreshCw,
-  Lock, Unlock, Edit2, ArrowLeft
+  Lock, Unlock, Edit2, ArrowLeft, Users, Package
 } from 'lucide-react';
-import { supabase } from '../lib/supabase';
-import { Employee, FuelTank, Pump, PumpReading, Shift } from '../types';
+import { supabase, saveCreditSale, saveCardSale, syncCreditAndCardSales, upsertPumpReadings } from '../lib/supabaseClient';
+import { Employee, FuelTank, Pump, PumpReading, Shift, FuelType } from '../types';
 
 interface ShiftManagementTabProps {
   employees: Employee[];
@@ -34,7 +34,8 @@ const defaultPumpsList: Pump[] = [
   { id: 'pump-105', name: 'Pump 05', fuelType: 'Auto Diesel', tankId: 'tank-autodiesel', status: 'Active' },
   { id: 'pump-106', name: 'Pump 06', fuelType: 'Auto Diesel', tankId: 'tank-autodiesel', status: 'Active' },
   { id: 'pump-107', name: 'Pump 07', fuelType: 'Super Diesel', tankId: 'tank-superdiesel', status: 'Active' },
-  { id: 'pump-108', name: 'Pump 08', fuelType: 'Super Diesel', tankId: 'tank-superdiesel', status: 'Active' }
+  { id: 'pump-108', name: 'Pump 08', fuelType: 'Super Diesel', tankId: 'tank-superdiesel', status: 'Active' },
+  { id: 'pump-oil-bay', name: 'Oil & Lubricants Bay', fuelType: 'Oil & Lubricants', tankId: '', status: 'Active' }
 ];
 
 export default function ShiftManagementTab({
@@ -70,6 +71,9 @@ export default function ShiftManagementTab({
   const [draftShiftName, setDraftShiftName] = useState('');
   const [draftStartTime, setDraftStartTime] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Debounce timer store for remote database syncing
+  const debounceTimersRef = useRef<{ [key: string]: NodeJS.Timeout }>({});
 
   // Mid-Shift Handover & Cash Collection state
   const [initialPumperCash, setInitialPumperCash] = useState<number | ''>(0);
@@ -169,7 +173,10 @@ export default function ShiftManagementTab({
   // Sync draft states when activeShift changes
   React.useEffect(() => {
     if (activeShift) {
-      const availablePumps = (pumps && pumps.length > 0) ? pumps : defaultPumpsList;
+      const availablePumpsList = (pumps && pumps.length > 0) ? pumps : defaultPumpsList;
+      const availablePumps = availablePumpsList.some(p => p.id === 'pump-oil-bay')
+        ? availablePumpsList
+        : [...availablePumpsList, { id: 'pump-oil-bay', name: 'Oil & Lubricants Bay', fuelType: 'Oil & Lubricants' as FuelType, tankId: '', status: 'Active' }];
       const currentReadings = activeShift.pumpReadings || [];
       const readingMap = new Map(currentReadings.map(r => [r.pumpId, r]));
 
@@ -261,19 +268,24 @@ export default function ShiftManagementTab({
               handoverNotes: s.handovernotes || s.handoverNotes || '',
               replacementPumperId: s.replacementpumperid || s.replacementPumperId || '',
               pumpReadings: (s.pumpReadings || []).map((r: any) => ({
-                pumpId: r.pumpid,
-                pumpName: r.pumpname,
-                fuelType: r.fueltype,
-                tankId: r.tankid,
-                assignedPumperId: r.assignedpumperid,
-                startMeter: r.startmeter || 0,
-                endMeter: r.endmeter || 0,
-                testingQty: r.testingqty || 0,
+                pumpId: r.pump_id || r.pumpid,
+                pumpName: r.pump_name || r.pumpname,
+                fuelType: r.fuel_type || r.fueltype,
+                tankId: r.tank_id || r.tankid,
+                assignedPumperId: r.assigned_pumper_id || r.assignedpumperid,
+                startMeter: Number(r.start_meter !== undefined ? r.start_meter : r.startmeter) || 0,
+                endMeter: Number(r.end_meter !== undefined ? r.end_meter : r.endmeter) || 0,
+                testingQty: Number(r.testing_qty !== undefined ? r.testing_qty : r.testingqty) || 0,
                 status: r.status,
-                isLocked: r.islocked,
-                unitPrice: r.unitprice || 0,
-                totalDispensed: Math.max(0, (r.endmeter || 0) - (r.startmeter || 0)),
-                netSales: Math.max(0, ((r.endmeter || 0) - (r.startmeter || 0) - (r.testingqty || 0))) * (r.unitprice || 0)
+                isLocked: r.is_locked !== undefined ? r.is_locked : r.islocked,
+                unitPrice: Number(r.unit_price || r.unitprice) || 0,
+                actualCash: Number(r.actual_cash ?? r.actualcash) || 0,
+                cashVariance: Number(r.cash_variance ?? r.cashvariance) || 0,
+                creditSalesAmount: Number(r.credit_sales_amount ?? r.creditsalesamount) || 0,
+                cardSalesAmount: Number(r.card_sales_amount ?? r.cardsalesamount) || 0,
+                oilSalesAmount: Number(r.oil_sales_amount ?? r.oilsalesamount) || 0,
+                totalDispensed: Math.max(0, (Number(r.end_meter ?? r.endmeter) || 0) - (Number(r.start_meter ?? r.startmeter) || 0)),
+                netSales: Math.max(0, ((Number(r.end_meter ?? r.endmeter) || 0) - (Number(r.start_meter ?? r.startmeter) || 0) - (Number(r.testing_qty ?? r.testingqty) || 0))) * (Number(r.unit_price || r.unitprice) || 0)
               }))
             }));
           }
@@ -425,6 +437,7 @@ export default function ShiftManagementTab({
   };
 
   const getPriceForFuelType = (type: string) => {
+    if (type === 'Oil & Lubricants') return 0;
     const tank = tanks.find(t => t.fuelType === type);
     return tank ? tank.pricePerLiter : 1.50;
   };
@@ -467,13 +480,14 @@ export default function ShiftManagementTab({
   // Running totals calculations based on draftReadings (enables live calculation feedback)
   const stats = useMemo(() => {
     if (!activeShift || draftReadings.length === 0) {
-      return { runningPumps: 0, totalFuelSold: 0, totalNetSold: 0, totalNetSales: 0 };
+      return { runningPumps: 0, totalFuelSold: 0, totalNetSold: 0, totalFuelSales: 0, totalOilSales: 0, totalNetSales: 0 };
     }
     
     let runningPumps = 0;
     let totalFuelSold = 0;
     let totalNetSold = 0;
-    let totalNetSales = 0;
+    let totalFuelSales = 0;
+    let totalOilSales = 0;
 
     draftReadings.forEach(r => {
       if (r.assignedPumperId) {
@@ -482,16 +496,23 @@ export default function ShiftManagementTab({
       const fuelSold = Math.max(0, r.endMeter - r.startMeter);
       const netSold = Math.max(0, fuelSold - r.testingQty);
       const rate = getPriceForFuelType(r.fuelType);
+      const fuelRev = netSold * rate;
+      const oilRev = r.oilSalesAmount || 0;
       
       totalFuelSold += fuelSold;
       totalNetSold += netSold;
-      totalNetSales += (netSold * rate);
+      totalFuelSales += fuelRev;
+      totalOilSales += oilRev;
     });
+
+    const totalNetSales = totalFuelSales + totalOilSales;
 
     return {
       runningPumps,
       totalFuelSold,
       totalNetSold,
+      totalFuelSales,
+      totalOilSales,
       totalNetSales
     };
   }, [activeShift, draftReadings, tanks]);
@@ -550,10 +571,159 @@ export default function ShiftManagementTab({
     return Object.values(pumperGroups);
   }, [draftReadings, employees]);
 
+  // Filter pumpers assigned to 2 or more active/draft pumps for multi-pump consolidation
+  const multiPumpersData = useMemo(() => {
+    return activePumpersData.filter(p => p.readings.length >= 2);
+  }, [activePumpersData]);
+
+  // Compute consolidated totals for ALL active pumpers (whether 1 or multiple pumps)
+  const allPumperStats = useMemo(() => {
+    return activePumpersData.map(pumper => {
+      let totalGrossRevenue = 0;
+      let totalFuelRevenue = 0;
+      let totalOilSales = 0;
+      let totalNetLiters = 0;
+      let totalCreditSales = 0;
+      let totalCardSales = 0;
+      let totalNetExpCash = 0;
+      let totalActualCash = 0;
+
+      pumper.readings.forEach(r => {
+        const fuelPrice = getPriceForFuelType(r.fuelType);
+        const fuelSold = Math.max(0, r.endMeter - r.startMeter);
+        const netSold = Math.max(0, fuelSold - r.testingQty);
+        const grossFuelRev = netSold * fuelPrice;
+        const oilSales = r.oilSalesAmount || 0;
+        const grossTotalRev = grossFuelRev + oilSales;
+        const creditVal = r.creditSalesAmount || 0;
+        const cardVal = r.cardSalesAmount || 0;
+        const netExp = Math.max(0, grossTotalRev - (creditVal + cardVal));
+        const actCash = r.actualCash || 0;
+
+        totalFuelRevenue += grossFuelRev;
+        totalOilSales += oilSales;
+        totalGrossRevenue += grossTotalRev;
+        totalNetLiters += netSold;
+        totalCreditSales += creditVal;
+        totalCardSales += cardVal;
+        totalNetExpCash += netExp;
+        totalActualCash += actCash;
+      });
+
+      const totalCashVariance = totalActualCash - totalNetExpCash;
+
+      return {
+        ...pumper,
+        totalGrossRevenue,
+        totalFuelRevenue,
+        totalOilSales,
+        totalNetLiters,
+        totalCreditSales,
+        totalCardSales,
+        totalNetExpCash,
+        totalActualCash,
+        totalCashVariance,
+        overallVariance: totalCashVariance
+      };
+    });
+  }, [activePumpersData, activeShift, tanks]);
+
+  // Alias pumperStats for widget rendering
+  const pumperStats = allPumperStats;
+
+  // Handle consolidated single cash handover entry for multi-pump assigned pumper
+  const handleUpdateConsolidatedCashForPumper = (pumperId: string, newTotalCash: number) => {
+    if (!activeShift) return;
+
+    const pumperReadings = draftReadings.filter(r => r.assignedPumperId === pumperId);
+    if (pumperReadings.length === 0) return;
+
+    const pumpData = pumperReadings.map(r => {
+      const fuelPrice = getPriceForFuelType(r.fuelType);
+      const fuelSold = Math.max(0, r.endMeter - r.startMeter);
+      const netSold = Math.max(0, fuelSold - r.testingQty);
+      const grossFuelRev = netSold * fuelPrice;
+      const oilSales = r.oilSalesAmount || 0;
+      const grossTotalRev = grossFuelRev + oilSales;
+      const creditVal = r.creditSalesAmount || 0;
+      const cardVal = r.cardSalesAmount || 0;
+      const netExpCash = Math.max(0, grossTotalRev - (creditVal + cardVal));
+      return { pumpId: r.pumpId, netExpCash, status: r.status };
+    });
+
+    const totalNetExpCash = pumpData.reduce((acc, p) => acc + p.netExpCash, 0);
+
+    let allocatedSoFar = 0;
+    const newCashPerPump: Record<string, number> = {};
+
+    pumpData.forEach((p, idx) => {
+      if (idx === pumpData.length - 1) {
+        newCashPerPump[p.pumpId] = Math.max(0, Math.round((newTotalCash - allocatedSoFar) * 100) / 100);
+      } else {
+        let allocated = 0;
+        if (totalNetExpCash > 0) {
+          allocated = Math.round((p.netExpCash / totalNetExpCash) * newTotalCash * 100) / 100;
+        } else {
+          allocated = Math.round((newTotalCash / pumpData.length) * 100) / 100;
+        }
+        newCashPerPump[p.pumpId] = allocated;
+        allocatedSoFar += allocated;
+      }
+    });
+
+    const updatedReadings = draftReadings.map(r => {
+      if (r.assignedPumperId === pumperId && newCashPerPump[r.pumpId] !== undefined) {
+        if (r.status === 'Completed') return r; // preserve locked pump status
+
+        const actCash = newCashPerPump[r.pumpId];
+        const fuelPrice = getPriceForFuelType(r.fuelType);
+        const fuelSold = Math.max(0, r.endMeter - r.startMeter);
+        const netSold = Math.max(0, fuelSold - r.testingQty);
+        const grossFuelRev = netSold * fuelPrice;
+        const oilSales = r.oilSalesAmount || 0;
+        const grossTotalRev = grossFuelRev + oilSales;
+        const creditVal = r.creditSalesAmount || 0;
+        const cardVal = r.cardSalesAmount || 0;
+        const netExpCash = Math.max(0, grossTotalRev - (creditVal + cardVal));
+        const computedVariance = actCash - netExpCash;
+
+        return {
+          ...r,
+          actualCash: actCash,
+          cashVariance: computedVariance
+        };
+      }
+      return r;
+    });
+
+    setDraftReadings(updatedReadings);
+
+    // Sync activeShift
+    let totalFuel = 0;
+    let totalNet = 0;
+    let totalSales = 0;
+
+    updatedReadings.forEach(dr => {
+      const fuel = Math.max(0, dr.endMeter - dr.startMeter);
+      const net = Math.max(0, fuel - dr.testingQty);
+      totalFuel += fuel;
+      totalNet += net;
+      totalSales += (net * getPriceForFuelType(dr.fuelType));
+    });
+
+    setActiveShift({
+      ...activeShift,
+      pumpReadings: updatedReadings,
+      totalFuelSold: totalFuel,
+      totalNetSold: totalNet,
+      totalNetSales: totalSales
+    });
+  };
+
   // Handle live updates to a specific pump's readings in local draft state
   const handleUpdateReading = (
     pumpId: string,
-    field: 'assignedPumperId' | 'startMeter' | 'endMeter' | 'testingQty',
+    field: 'assignedPumperId' | 'startMeter' | 'endMeter' | 'testingQty' | 'actualCash' | 'creditSalesAmount' | 'cardSalesAmount' | 'oilSalesAmount',
     value: any
   ) => {
     if (!activeShift) return;
@@ -564,11 +734,65 @@ export default function ShiftManagementTab({
         if (r.status === 'Completed') {
           return r;
         }
-        
+
+        const fuelPrice = getPriceForFuelType(r.fuelType);
+        const startM = field === 'startMeter' ? (parseFloat(value) || 0) : r.startMeter;
+        const endM = field === 'endMeter' ? (parseFloat(value) || 0) : r.endMeter;
+        const testQ = field === 'testingQty' ? (parseFloat(value) || 0) : r.testingQty;
+        const creditVal = field === 'creditSalesAmount' ? (parseFloat(value) || 0) : (r.creditSalesAmount ?? 0);
+        const cardVal = field === 'cardSalesAmount' ? (parseFloat(value) || 0) : (r.cardSalesAmount ?? 0);
+        const oilVal = field === 'oilSalesAmount' ? (parseFloat(value) || 0) : (r.oilSalesAmount ?? 0);
+        const actCash = field === 'actualCash' ? (parseFloat(value) || 0) : (r.actualCash ?? 0);
+
+        const fuelSold = Math.max(0, endM - startM);
+        const netSold = Math.max(0, fuelSold - testQ);
+        const grossFuelRevenue = netSold * fuelPrice;
+        const totalGrossRevenue = grossFuelRevenue + oilVal;
+        const netExpectedCash = Math.max(0, totalGrossRevenue - (creditVal + cardVal));
+        const computedVariance = actCash - netExpectedCash;
+
         const updated = {
           ...r,
-          [field]: value
+          [field]: value,
+          creditSalesAmount: creditVal,
+          cardSalesAmount: cardVal,
+          oilSalesAmount: oilVal,
+          actualCash: actCash,
+          cashVariance: computedVariance
         };
+
+        // Debounce Supabase remote sync calls (500ms) to prevent database call spamming on every keystroke
+        const syncKey = `${pumpId}_sync`;
+        if (debounceTimersRef.current[syncKey]) {
+          clearTimeout(debounceTimersRef.current[syncKey]);
+        }
+
+        debounceTimersRef.current[syncKey] = setTimeout(() => {
+          if (field === 'creditSalesAmount' && creditVal > 0) {
+            saveCreditSale(supabase, {
+              shift_id: activeShift.id,
+              pump_id: pumpId,
+              customer_name: 'Credit Customer',
+              fuel_type: r.fuelType || 'Fuel',
+              liters: netSold,
+              amount: Number(creditVal),
+              status: 'Approved'
+            });
+          }
+
+          if (field === 'cardSalesAmount' && cardVal > 0) {
+            saveCardSale(supabase, {
+              shift_id: activeShift.id,
+              pump_id: pumpId,
+              card_type: 'POS Card',
+              amount: Number(cardVal),
+              status: 'Settled'
+            });
+          }
+
+          // Direct fallback write to pump_readings table so card_sales_amount & credit_sales_amount are updated
+          upsertPumpReadings(supabase, [updated], activeShift.id);
+        }, 500);
         
         return updated;
       }
@@ -785,19 +1009,27 @@ export default function ShiftManagementTab({
     const r = draftReadings.find(dr => dr.pumpId === pumpId);
     if (!r) return;
 
+    const isOilBay = r.pumpId === 'pump-oil-bay' || r.fuelType === 'Oil & Lubricants' || r.pumpName.toLowerCase().includes('oil');
+
     const errors: string[] = [];
-    if (r.endMeter === undefined || r.endMeter === null || r.endMeter < 0 || isNaN(r.endMeter)) {
-      errors.push("Please enter a valid End Meter reading.");
+    if (!isOilBay) {
+      if (r.endMeter === undefined || r.endMeter === null || r.endMeter < 0 || isNaN(r.endMeter)) {
+        errors.push("Please enter a valid End Meter reading.");
+      } else {
+        if (r.endMeter < r.startMeter) {
+          errors.push(`End Meter (${r.endMeter} L) cannot be less than Start Meter (${r.startMeter} L).`);
+        }
+        const gross = r.endMeter - r.startMeter;
+        if (r.testingQty < 0) {
+          errors.push("Testing Quantity cannot be negative.");
+        }
+        if (gross < r.testingQty) {
+          errors.push(`Testing Quantity (${r.testingQty} L) cannot exceed Gross Liters Sold (${gross.toFixed(2)} L).`);
+        }
+      }
     } else {
-      if (r.endMeter < r.startMeter) {
-        errors.push(`End Meter (${r.endMeter} L) cannot be less than Start Meter (${r.startMeter} L).`);
-      }
-      const gross = r.endMeter - r.startMeter;
-      if (r.testingQty < 0) {
-        errors.push("Testing Quantity cannot be negative.");
-      }
-      if (gross < r.testingQty) {
-        errors.push(`Testing Quantity (${r.testingQty} L) cannot exceed Gross Liters Sold (${gross.toFixed(2)} L).`);
+      if ((r.oilSalesAmount ?? 0) < 0) {
+        errors.push("Oil & Lubricants sales amount cannot be negative.");
       }
     }
 
@@ -809,11 +1041,25 @@ export default function ShiftManagementTab({
 
     const updatedReadings = draftReadings.map(dr => {
       if (dr.pumpId === pumpId) {
+        const price = getPriceForFuelType(dr.fuelType);
+        const fuel = Math.max(0, dr.endMeter - dr.startMeter);
+        const net = Math.max(0, fuel - dr.testingQty);
+        const grossRev = net * price;
+        const creditVal = dr.creditSalesAmount ?? 0;
+        const cardVal = dr.cardSalesAmount ?? 0;
+        const netExpCash = Math.max(0, grossRev - (creditVal + cardVal));
+        const actCash = dr.actualCash ?? 0;
+        const pVariance = dr.cashVariance ?? (actCash - netExpCash);
+
         return { 
           ...dr, 
           isLocked: true, 
           status: 'Completed' as const,
-          unitPrice: getPriceForFuelType(dr.fuelType)
+          unitPrice: price,
+          creditSalesAmount: creditVal,
+          cardSalesAmount: cardVal,
+          actualCash: actCash,
+          cashVariance: pVariance
         };
       }
       return dr;
@@ -911,7 +1157,10 @@ export default function ShiftManagementTab({
     const randSuffix = Math.floor(10 + Math.random() * 90);
     const newShiftId = `SH-${dateStr}-${randSuffix}`;
 
-    const pumpsList = (pumps && pumps.length > 0) ? pumps : defaultPumpsList;
+    const pumpsListRaw = (pumps && pumps.length > 0) ? pumps : defaultPumpsList;
+    const pumpsList = pumpsListRaw.some(p => p.id === 'pump-oil-bay')
+      ? pumpsListRaw
+      : [...pumpsListRaw, { id: 'pump-oil-bay', name: 'Oil & Lubricants Bay', fuelType: 'Oil & Lubricants' as FuelType, tankId: '', status: 'Active' }];
 
     const newPumpReadings: PumpReading[] = pumpsList.map((pump) => {
       // Automatically fetch previous shift's recorded endmeter for each pump
@@ -992,24 +1241,41 @@ export default function ShiftManagementTab({
     let totalFuel = 0;
     let totalNet = 0;
     let totalSales = 0;
+    let totalPumpsActualCash = 0;
 
     const finalReadings = draftReadings.map(r => {
       const fuel = Math.max(0, r.endMeter - r.startMeter);
       const net = Math.max(0, fuel - r.testingQty);
+      const price = getPriceForFuelType(r.fuelType);
+      const grossFuelRev = net * price;
+      const oilSales = r.oilSalesAmount ?? 0;
+      const totalGrossRev = grossFuelRev + oilSales;
+      const creditVal = r.creditSalesAmount ?? 0;
+      const cardVal = r.cardSalesAmount ?? 0;
+      const netExpCash = Math.max(0, totalGrossRev - (creditVal + cardVal));
+      const actCash = r.actualCash ?? 0;
+      const pVariance = r.cashVariance ?? (actCash - netExpCash);
+
       totalFuel += fuel;
       totalNet += net;
-      totalSales += (net * getPriceForFuelType(r.fuelType));
+      totalSales += totalGrossRev;
+      totalPumpsActualCash += actCash;
       
       return {
         ...r,
         status: 'Completed' as const,
-        unitPrice: r.unitPrice || getPriceForFuelType(r.fuelType)
+        unitPrice: r.unitPrice || price,
+        oilSalesAmount: oilSales,
+        creditSalesAmount: creditVal,
+        cardSalesAmount: cardVal,
+        actualCash: actCash,
+        cashVariance: pVariance
       };
     });
 
     const initCash = Number(initialPumperCash) || 0;
     const replCash = Number(replacementPumperCash) || 0;
-    const physCash = initCash + replCash;
+    const physCash = totalPumpsActualCash > 0 ? totalPumpsActualCash : (initCash + replCash);
     const variance = physCash - totalSales;
 
     const closedShift: Shift = {
@@ -1031,6 +1297,8 @@ export default function ShiftManagementTab({
       replacementPumperId: replacementPumperId
     };
 
+    syncCreditAndCardSales(supabase, finalReadings, closedShift.id);
+
     onCloseShift(closedShift);
     setIsCloseConfirmOpen(false);
   };
@@ -1044,7 +1312,7 @@ export default function ShiftManagementTab({
     csvContent += `Shift Name,${activeShift.name}\n`;
     csvContent += `Supervisor,${activeSupervisor?.name || 'N/A'}\n`;
     csvContent += `Started At,${new Date(activeShift.startTime).toLocaleString()}\n\n`;
-    csvContent += "Pump,Fuel Type,Assigned Pumper,Start Meter (L),End Meter (L),Fuel Sold (L),Testing Deducted (L),Net Sold (L),Fuel Price (Per Liter),Net Revenue\n";
+    csvContent += "Pump,Fuel Type,Assigned Pumper,Start Meter (L),End Meter (L),Fuel Sold (L),Testing Deducted (L),Net Sold (L),Fuel Price (Per Liter),Fuel Revenue,Oil/Lube Sales,Total Revenue,Credit Sales,Card Sales,Actual Cash\n";
 
     activeShift.pumpReadings.forEach(r => {
       const pumperName = r.assignedPumperId 
@@ -1053,9 +1321,14 @@ export default function ShiftManagementTab({
       const sold = Math.max(0, r.endMeter - r.startMeter);
       const net = Math.max(0, r.endMeter - r.startMeter - r.testingQty);
       const price = getPriceForFuelType(r.fuelType);
-      const rev = net * price;
+      const fuelRev = net * price;
+      const oilRev = r.oilSalesAmount || 0;
+      const totalRev = fuelRev + oilRev;
+      const creditVal = r.creditSalesAmount || 0;
+      const cardVal = r.cardSalesAmount || 0;
+      const actCash = r.actualCash || 0;
 
-      csvContent += `"${r.pumpName}","${r.fuelType}","${pumperName}",${r.startMeter},${r.endMeter},${sold},${r.testingQty},${net},${price},${rev.toFixed(2)}\n`;
+      csvContent += `"${r.pumpName}","${r.fuelType}","${pumperName}",${r.startMeter},${r.endMeter},${sold},${r.testingQty},${net},${price},${fuelRev.toFixed(2)},${oilRev.toFixed(2)},${totalRev.toFixed(2)},${creditVal.toFixed(2)},${cardVal.toFixed(2)},${actCash.toFixed(2)}\n`;
     });
 
     csvContent += `\nTOTALS,,, , ,${stats.totalFuelSold.toFixed(2)}, ,${stats.totalNetSold.toFixed(2)}, ,${stats.totalNetSales.toFixed(2)}\n`;
@@ -1288,14 +1561,17 @@ export default function ShiftManagementTab({
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
               {filteredReadings.length > 0 ? (
                 filteredReadings.map((r) => {
+                  const isOilBay = r.pumpId === 'pump-oil-bay' || r.fuelType === 'Oil & Lubricants' || r.pumpName.toLowerCase().includes('oil');
                   const fuelPrice = getPriceForFuelType(r.fuelType);
-                  const fuelSold = Math.max(0, r.endMeter - r.startMeter);
-                  const netSold = Math.max(0, fuelSold - r.testingQty);
-                  const expectedCash = netSold * fuelPrice;
+                  const fuelSold = isOilBay ? 0 : Math.max(0, r.endMeter - r.startMeter);
+                  const netSold = isOilBay ? 0 : Math.max(0, fuelSold - r.testingQty);
+                  const expectedCash = isOilBay ? (r.oilSalesAmount || 0) : (netSold * fuelPrice);
 
                   // Styling theme per fuel type
                   const isPetrol = r.fuelType.includes('Petrol');
-                  const themeClasses = r.fuelType === 'Petrol 92'
+                  const themeClasses = isOilBay
+                    ? { header: 'bg-amber-500/10 border-l-4 border-amber-500', text: 'text-amber-600' }
+                    : r.fuelType === 'Petrol 92'
                     ? { header: 'bg-blue-500/10 border-l-4 border-blue-500', text: 'text-blue-600' }
                     : r.fuelType === 'Petrol 95'
                     ? { header: 'bg-purple-500/10 border-l-4 border-purple-500', text: 'text-purple-400' }
@@ -1313,7 +1589,7 @@ export default function ShiftManagementTab({
                         r.status === 'Completed' 
                           ? 'border-emerald-500/30 shadow-emerald-500/5 bg-emerald-500/5' 
                           : r.status === 'Active'
-                          ? 'border-blue-500/30 shadow-blue-500/5 bg-blue-500/5'
+                          ? isOilBay ? 'border-amber-500/30 shadow-amber-500/5 bg-amber-500/5' : 'border-blue-500/30 shadow-blue-500/5 bg-blue-500/5'
                           : 'hover:border-blue-500/20 hover:shadow-[0_0_15px_rgba(0,123,255,0.15)]'
                       }`}
                     >
@@ -1321,16 +1597,17 @@ export default function ShiftManagementTab({
                       <div className={`px-4 py-3 border-b border-gray-100 flex items-center justify-between ${themeClasses.header}`}>
                         <div>
                           <h4 className="font-extrabold text-[#1C1C1C] text-sm flex items-center gap-1.5">
-                            {r.pumpName}
+                            {isOilBay && <Package className="w-4 h-4 text-amber-600 shrink-0" />}
+                            <span>{r.pumpName}</span>
                             {r.status === 'Completed' ? (
-                              <span className="flex items-center gap-1 px-1.5 py-0.5 bg-emerald-500/25 text-emerald-300 border border-emerald-500/35 text-[9px] font-extrabold uppercase rounded-md shadow-xs">
-                                <ShieldCheck className="w-3 h-3 text-emerald-400" />
-                                <span>Shift Completed / Locked</span>
+                              <span className="flex items-center gap-1 px-1.5 py-0.5 bg-emerald-500/25 text-emerald-700 border border-emerald-500/35 text-[9px] font-extrabold uppercase rounded-md shadow-xs">
+                                <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                                <span>{isOilBay ? 'Bay Closed / Locked' : 'Shift Completed / Locked'}</span>
                               </span>
                             ) : r.status === 'Active' ? (
-                              <span className="flex items-center gap-1 px-1.5 py-0.5 bg-amber-500/25 text-amber-300 border border-amber-500/35 text-[9px] font-extrabold uppercase rounded-md shadow-xs animate-pulse">
+                              <span className="flex items-center gap-1 px-1.5 py-0.5 bg-amber-500/25 text-amber-700 border border-amber-500/35 text-[9px] font-extrabold uppercase rounded-md shadow-xs animate-pulse">
                                 <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping" />
-                                <span>Pump Active / In Progress</span>
+                                <span>{isOilBay ? 'Bay Active / In Progress' : 'Pump Active / In Progress'}</span>
                               </span>
                             ) : (
                               <span className="flex items-center gap-1 px-1.5 py-0.5 bg-gray-100 text-gray-500 border border-gray-100 text-[9px] font-bold uppercase rounded-md">
@@ -1342,11 +1619,13 @@ export default function ShiftManagementTab({
                         </div>
                         <div className="text-right">
                           <span className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-bold ${themeClasses.header} ${themeClasses.text}`}>
-                            {r.fuelType}
+                            {isOilBay ? 'Oil & Lubricants' : r.fuelType}
                           </span>
-                          <span className="block text-[9px] text-gray-500 tabular-nums font-semibold mt-0.5">
-                            Price: {formatCurrency(fuelPrice)}/L
-                          </span>
+                          {!isOilBay && (
+                            <span className="block text-[9px] text-gray-500 tabular-nums font-semibold mt-0.5">
+                              Price: {formatCurrency(fuelPrice)}/L
+                            </span>
+                          )}
                         </div>
                       </div>
 
@@ -1380,7 +1659,7 @@ export default function ShiftManagementTab({
                                 <RefreshCw className="w-3 h-3 text-blue-600" /> Handover Transfer
                               </span>
                               <span className="tabular-nums text-blue-700 font-extrabold text-[10px]">
-                                Meter: {r.handoverMeter?.toFixed(2) || '0.00'} L
+                                {isOilBay ? `Sales at Transfer: ${formatCurrency(r.oilSalesAmount || 0)}` : `Meter: ${r.handoverMeter?.toFixed(2) || '0.00'} L`}
                               </span>
                             </div>
                             <div className="text-gray-600 flex justify-between text-[10px]">
@@ -1395,87 +1674,306 @@ export default function ShiftManagementTab({
                           </div>
                         )}
 
-                        {/* Interactive Meters Grid with enlarged, spacious input boxes & zero auto-clear */}
-                        <div className="space-y-2.5">
-                          {/* Start Meter & End Meter prominent 2-column layout for maximum digit width */}
-                          <div className="grid grid-cols-2 gap-2.5">
-                            <div>
-                              <label className="text-[10px] font-extrabold text-gray-500 block mb-1 uppercase tracking-wider flex items-center justify-between">
-                                <span>Start Meter</span>
-                                {r.status !== 'Idle' && <Lock className="w-2.5 h-2.5 text-gray-400" />}
-                              </label>
-                              <input
-                                type="number"
-                                step="any"
-                                value={r.startMeter ?? 0}
-                                disabled={r.status !== 'Idle'}
-                                onFocus={(e) => e.target.select()}
-                                onChange={(e) => handleUpdateReading(r.pumpId, 'startMeter', parseFloat(e.target.value) || 0)}
-                                className="w-full px-3 py-2 bg-white border border-gray-200 text-[#1C1C1C] rounded-xl text-xs sm:text-sm tabular-nums font-extrabold text-center focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-gray-50 disabled:text-gray-500 disabled:border-gray-200 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none min-w-0"
-                              />
+                        {isOilBay ? (
+                          /* Dedicated Oil & Lubricant Bay Inputs */
+                          <div className="space-y-2.5">
+                            <div className="p-3 bg-amber-50/80 border border-amber-200/90 rounded-xl space-y-2.5">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-extrabold text-amber-900 uppercase tracking-wider flex items-center gap-1.5">
+                                  <Package className="w-3.5 h-3.5 text-amber-600" />
+                                  <span>Oil & Lube Sales Entry</span>
+                                </span>
+                                <span className="text-[9px] font-bold text-amber-800 bg-amber-100/80 px-2 py-0.5 rounded-full">
+                                  Virtual Bay
+                                </span>
+                              </div>
+
+                              {/* Primary Sales Entry: Total Oil Sales (Rs.) */}
+                              <div>
+                                <label className="text-[10px] font-extrabold text-gray-700 block mb-1 uppercase tracking-wider flex items-center justify-between">
+                                  <span>Total Oil / Lube Sales (Rs.)</span>
+                                  {r.status !== 'Completed' && <Edit2 className="w-2.5 h-2.5 text-amber-600" />}
+                                </label>
+                                <div className="relative">
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    value={r.oilSalesAmount ?? 0}
+                                    disabled={r.status === 'Completed'}
+                                    placeholder="0.00"
+                                    onFocus={(e) => e.target.select()}
+                                    onChange={(e) => handleUpdateReading(r.pumpId, 'oilSalesAmount', parseFloat(e.target.value) || 0)}
+                                    className="w-full px-3 py-2 bg-white border border-amber-300 text-[#1C1C1C] rounded-xl text-xs sm:text-sm tabular-nums font-extrabold text-right focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 disabled:bg-gray-50 disabled:text-gray-500 disabled:border-gray-200 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none min-w-0"
+                                  />
+                                </div>
+                              </div>
                             </div>
 
-                            <div>
-                              <label className="text-[10px] font-extrabold text-gray-500 block mb-1 uppercase tracking-wider flex items-center justify-between">
-                                <span>End Meter</span>
-                                {r.status === 'Active' && <Edit2 className="w-2.5 h-2.5 text-blue-500" />}
-                              </label>
-                              <input
-                                type="number"
-                                step="any"
-                                value={r.endMeter ?? 0}
-                                disabled={r.status !== 'Active'}
-                                placeholder="0.000"
-                                onFocus={(e) => e.target.select()}
-                                onChange={(e) => handleUpdateReading(r.pumpId, 'endMeter', parseFloat(e.target.value) || 0)}
-                                className="w-full px-3 py-2 bg-white border border-gray-200 text-[#1C1C1C] rounded-xl text-xs sm:text-sm tabular-nums font-extrabold text-center focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-gray-50 disabled:text-gray-500 disabled:border-gray-200 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none min-w-0"
-                              />
-                            </div>
-                          </div>
-
-                          {/* Calibration Test (Testing Qty) field */}
-                          <div className="flex items-center justify-between bg-gray-50/80 px-3 py-2 rounded-xl border border-gray-100 gap-2">
-                            <div className="flex-1 min-w-0">
-                              <span className="text-[10px] font-extrabold text-gray-500 uppercase tracking-wider block">
-                                Calibration Test (L)
+                            {/* Non-Cash Collections Section */}
+                            <div className="p-2.5 bg-purple-50/60 border border-purple-100 rounded-xl space-y-2">
+                              <span className="text-[10px] font-extrabold text-purple-900 uppercase tracking-wider block">
+                                Oil Bay Non-Cash Collections
                               </span>
-                            </div>
-                            <div className="w-28 sm:w-32">
-                              <input
-                                type="number"
-                                step="any"
-                                value={r.testingQty ?? 0}
-                                disabled={r.status !== 'Active'}
-                                onFocus={(e) => e.target.select()}
-                                onChange={(e) => handleUpdateReading(r.pumpId, 'testingQty', parseFloat(e.target.value) || 0)}
-                                className="w-full px-2.5 py-1.5 bg-white border border-gray-200 text-[#1C1C1C] rounded-lg text-xs sm:text-sm tabular-nums font-bold text-center focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-gray-100 disabled:text-gray-400 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                              />
-                            </div>
-                          </div>
-                        </div>
+                              
+                              <div className="flex items-center justify-between gap-2">
+                                <label className="text-[10px] font-bold text-gray-600 flex-1 min-w-0">
+                                  Credit Sales (Rs.)
+                                </label>
+                                <div className="w-28 sm:w-32">
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    value={r.creditSalesAmount ?? 0}
+                                    disabled={r.status === 'Completed'}
+                                    placeholder="0.00"
+                                    onFocus={(e) => e.target.select()}
+                                    onChange={(e) => handleUpdateReading(r.pumpId, 'creditSalesAmount', parseFloat(e.target.value) || 0)}
+                                    className="w-full px-2.5 py-1 bg-white border border-gray-200 text-[#1C1C1C] rounded-lg text-xs tabular-nums font-extrabold text-right focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 disabled:bg-gray-100 disabled:text-gray-400 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none min-w-0"
+                                  />
+                                </div>
+                              </div>
 
-                        {/* Visual calculations feed */}
-                        <div className={`p-2.5 rounded-xl text-[11px] space-y-1 font-sans border transition-colors ${
-                          r.status === 'Completed'
-                            ? 'bg-emerald-500/10 border-emerald-500/20'
-                            : r.status === 'Active'
-                            ? 'bg-blue-500/10 border-blue-500/20'
-                            : 'bg-gray-50 border-gray-100'
-                        }`}>
-                          <div className="flex justify-between text-gray-500">
-                            <span>Gross Fuel:</span>
-                            <span className="tabular-nums font-semibold text-gray-600">{fuelSold.toFixed(2)} L</span>
+                              <div className="flex items-center justify-between gap-2">
+                                <label className="text-[10px] font-bold text-gray-600 flex-1 min-w-0">
+                                  Card Sales (Rs.)
+                                </label>
+                                <div className="w-28 sm:w-32">
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    value={r.cardSalesAmount ?? 0}
+                                    disabled={r.status === 'Completed'}
+                                    placeholder="0.00"
+                                    onFocus={(e) => e.target.select()}
+                                    onChange={(e) => handleUpdateReading(r.pumpId, 'cardSalesAmount', parseFloat(e.target.value) || 0)}
+                                    className="w-full px-2.5 py-1 bg-white border border-gray-200 text-[#1C1C1C] rounded-lg text-xs tabular-nums font-extrabold text-right focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 disabled:bg-gray-100 disabled:text-gray-400 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none min-w-0"
+                                  />
+                                </div>
+                              </div>
+                            </div>
                           </div>
-                          <div className="flex justify-between text-gray-500">
-                            <span>Calibration Test:</span>
-                            <span className="tabular-nums font-semibold text-red-400 font-semibold">-{r.testingQty.toFixed(1)} L</span>
+                        ) : (
+                          /* Standard Fuel Pump Inputs Grid */
+                          <div className="space-y-2.5">
+                            {/* Start Meter & End Meter prominent 2-column layout for maximum digit width */}
+                            <div className="grid grid-cols-2 gap-2.5">
+                              <div>
+                                <label className="text-[10px] font-extrabold text-gray-500 block mb-1 uppercase tracking-wider flex items-center justify-between">
+                                  <span>Start Meter</span>
+                                  {r.status !== 'Idle' && <Lock className="w-2.5 h-2.5 text-gray-400" />}
+                                </label>
+                                <input
+                                  type="number"
+                                  step="any"
+                                  value={r.startMeter ?? 0}
+                                  disabled={r.status !== 'Idle'}
+                                  onFocus={(e) => e.target.select()}
+                                  onChange={(e) => handleUpdateReading(r.pumpId, 'startMeter', parseFloat(e.target.value) || 0)}
+                                  className="w-full px-3 py-2 bg-white border border-gray-200 text-[#1C1C1C] rounded-xl text-xs sm:text-sm tabular-nums font-extrabold text-center focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-gray-50 disabled:text-gray-500 disabled:border-gray-200 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none min-w-0"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="text-[10px] font-extrabold text-gray-500 block mb-1 uppercase tracking-wider flex items-center justify-between">
+                                  <span>End Meter</span>
+                                  {r.status === 'Active' && <Edit2 className="w-2.5 h-2.5 text-blue-500" />}
+                                </label>
+                                <input
+                                  type="number"
+                                  step="any"
+                                  value={r.endMeter ?? 0}
+                                  disabled={r.status !== 'Active'}
+                                  placeholder="0.000"
+                                  onFocus={(e) => e.target.select()}
+                                  onChange={(e) => handleUpdateReading(r.pumpId, 'endMeter', parseFloat(e.target.value) || 0)}
+                                  className="w-full px-3 py-2 bg-white border border-gray-200 text-[#1C1C1C] rounded-xl text-xs sm:text-sm tabular-nums font-extrabold text-center focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-gray-50 disabled:text-gray-500 disabled:border-gray-200 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none min-w-0"
+                                />
+                              </div>
+                            </div>
+
+                            {/* Calibration Test (Testing Qty) field */}
+                            <div className="flex items-center justify-between bg-gray-50/80 px-3 py-2 rounded-xl border border-gray-100 gap-2">
+                              <div className="flex-1 min-w-0">
+                                <span className="text-[10px] font-extrabold text-gray-500 uppercase tracking-wider block">
+                                  Calibration Test (L)
+                                </span>
+                              </div>
+                              <div className="w-28 sm:w-32">
+                                <input
+                                  type="number"
+                                  step="any"
+                                  value={r.testingQty ?? 0}
+                                  disabled={r.status !== 'Active'}
+                                  onFocus={(e) => e.target.select()}
+                                  onChange={(e) => handleUpdateReading(r.pumpId, 'testingQty', parseFloat(e.target.value) || 0)}
+                                  className="w-full px-2.5 py-1.5 bg-white border border-gray-200 text-[#1C1C1C] rounded-lg text-xs sm:text-sm tabular-nums font-bold text-center focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-gray-100 disabled:text-gray-400 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                />
+                              </div>
+                            </div>
+
+                            {/* Engine Oil / Lubricant Sales Section */}
+                            <div className="p-2.5 bg-amber-50/70 border border-amber-200/80 rounded-xl space-y-2">
+                              <span className="text-[10px] font-extrabold text-amber-900 uppercase tracking-wider block flex items-center gap-1">
+                                <Package className="w-3 h-3 text-amber-600" />
+                                <span>Engine Oil / Lubricant Sales</span>
+                              </span>
+                              
+                              {/* Oil/Lube Sales (Rs.) */}
+                              <div className="flex items-center justify-between gap-2">
+                                <label className="text-[10px] font-bold text-gray-700 flex-1 min-w-0">
+                                  Oil/Lube Sales (Rs.)
+                                </label>
+                                <div className="w-28 sm:w-32">
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    value={r.oilSalesAmount ?? 0}
+                                    disabled={r.status !== 'Active'}
+                                    placeholder="0.00"
+                                    onFocus={(e) => e.target.select()}
+                                    onChange={(e) => handleUpdateReading(r.pumpId, 'oilSalesAmount', parseFloat(e.target.value) || 0)}
+                                    className="w-full px-2.5 py-1 bg-white border border-amber-200 text-[#1C1C1C] rounded-lg text-xs tabular-nums font-extrabold text-right focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 disabled:bg-gray-100 disabled:text-gray-400 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none min-w-0"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Pumper Non-Cash Collections: Credit Sales and Card Sales */}
+                            <div className="p-2.5 bg-purple-50/60 border border-purple-100 rounded-xl space-y-2">
+                              <span className="text-[10px] font-extrabold text-purple-900 uppercase tracking-wider block">
+                                Pumper Non-Cash Collections
+                              </span>
+                              
+                              {/* Credit Sales (Rs.) */}
+                              <div className="flex items-center justify-between gap-2">
+                                <label className="text-[10px] font-bold text-gray-600 flex-1 min-w-0">
+                                  Credit Sales (Rs.)
+                                </label>
+                                <div className="w-28 sm:w-32">
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    value={r.creditSalesAmount ?? 0}
+                                    disabled={r.status !== 'Active'}
+                                    placeholder="0.00"
+                                    onFocus={(e) => e.target.select()}
+                                    onChange={(e) => handleUpdateReading(r.pumpId, 'creditSalesAmount', parseFloat(e.target.value) || 0)}
+                                    className="w-full px-2.5 py-1 bg-white border border-gray-200 text-[#1C1C1C] rounded-lg text-xs tabular-nums font-extrabold text-right focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 disabled:bg-gray-100 disabled:text-gray-400 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none min-w-0"
+                                  />
+                                </div>
+                              </div>
+
+                              {/* Card Sales (Rs.) */}
+                              <div className="flex items-center justify-between gap-2">
+                                <label className="text-[10px] font-bold text-gray-600 flex-1 min-w-0">
+                                  Card Sales (Rs.)
+                                </label>
+                                <div className="w-28 sm:w-32">
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    value={r.cardSalesAmount ?? 0}
+                                    disabled={r.status !== 'Active'}
+                                    placeholder="0.00"
+                                    onFocus={(e) => e.target.select()}
+                                    onChange={(e) => handleUpdateReading(r.pumpId, 'cardSalesAmount', parseFloat(e.target.value) || 0)}
+                                    className="w-full px-2.5 py-1 bg-white border border-gray-200 text-[#1C1C1C] rounded-lg text-xs tabular-nums font-extrabold text-right focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 disabled:bg-gray-100 disabled:text-gray-400 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none min-w-0"
+                                  />
+                                </div>
+                              </div>
+                            </div>
                           </div>
-                          <hr className="border-gray-100 my-1" />
-                          <div className="flex justify-between font-bold text-gray-600">
-                            <span>Net Sold:</span>
-                            <span className={`tabular-nums font-semibold ${r.status !== 'Idle' ? 'text-emerald-600 font-extrabold' : 'text-gray-500'}`}>{netSold.toFixed(2)} L</span>
-                          </div>
-                        </div>
+                        )}
+
+                        {/* Visual calculations feed & Cash breakdown */}
+                        {(() => {
+                          if (isOilBay) {
+                            const oilSalesAmount = r.oilSalesAmount || 0;
+                            const creditSalesAmount = r.creditSalesAmount || 0;
+                            const cardSalesAmount = r.cardSalesAmount || 0;
+                            const netPhysicalCashDue = Math.max(0, oilSalesAmount - (creditSalesAmount + cardSalesAmount));
+
+                            return (
+                              <div className={`p-3 rounded-xl text-[11px] space-y-1.5 font-sans border transition-colors ${
+                                r.status === 'Completed'
+                                  ? 'bg-emerald-500/10 border-emerald-500/20'
+                                  : r.status === 'Active'
+                                  ? 'bg-amber-500/10 border-amber-500/20'
+                                  : 'bg-gray-50 border-gray-100'
+                              }`}>
+                                <div className="flex justify-between font-extrabold text-amber-900">
+                                  <span>Total Oil Revenue:</span>
+                                  <span className="tabular-nums font-extrabold text-amber-700">{formatCurrency(oilSalesAmount)}</span>
+                                </div>
+                                <div className="flex justify-between text-gray-500">
+                                  <span>(-) Credit Sales:</span>
+                                  <span className="tabular-nums font-semibold text-purple-600">-{formatCurrency(creditSalesAmount)}</span>
+                                </div>
+                                <div className="flex justify-between text-gray-500">
+                                  <span>(-) Card Payments:</span>
+                                  <span className="tabular-nums font-semibold text-indigo-600">-{formatCurrency(cardSalesAmount)}</span>
+                                </div>
+                                <hr className="border-gray-200/80 my-1" />
+                                <div className="flex justify-between font-extrabold text-[#1C1C1C]">
+                                  <span>= Net Physical Cash Due:</span>
+                                  <span className="tabular-nums text-blue-600">{formatCurrency(netPhysicalCashDue)}</span>
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          const grossFuelRevenue = netSold * fuelPrice;
+                          const oilSalesAmount = r.oilSalesAmount || 0;
+                          const totalGrossRevenue = grossFuelRevenue + oilSalesAmount;
+                          const creditSalesAmount = r.creditSalesAmount || 0;
+                          const cardSalesAmount = r.cardSalesAmount || 0;
+                          const netPhysicalCashDue = Math.max(0, totalGrossRevenue - (creditSalesAmount + cardSalesAmount));
+
+                          return (
+                            <div className={`p-3 rounded-xl text-[11px] space-y-1.5 font-sans border transition-colors ${
+                              r.status === 'Completed'
+                                ? 'bg-emerald-500/10 border-emerald-500/20'
+                                : r.status === 'Active'
+                                ? 'bg-blue-500/10 border-blue-500/20'
+                                : 'bg-gray-50 border-gray-100'
+                            }`}>
+                              <div className="flex justify-between text-gray-500">
+                                <span>Gross Fuel Liters:</span>
+                                <span className="tabular-nums font-semibold text-gray-600">{fuelSold.toFixed(2)} L</span>
+                              </div>
+                              <div className="flex justify-between text-gray-500">
+                                <span>Calibration Test:</span>
+                                <span className="tabular-nums font-semibold text-red-400">-{r.testingQty.toFixed(1)} L</span>
+                              </div>
+                              <div className="flex justify-between font-bold text-gray-700">
+                                <span>Net Fuel Sold:</span>
+                                <span className="tabular-nums text-gray-900">{netSold.toFixed(2)} L</span>
+                              </div>
+                              <hr className="border-gray-200/60 my-1" />
+                              <div className="flex justify-between text-gray-600 font-medium">
+                                <span>Fuel Revenue:</span>
+                                <span className="tabular-nums font-bold text-gray-800">{formatCurrency(grossFuelRevenue)}</span>
+                              </div>
+                              <div className="flex justify-between text-amber-700 font-semibold">
+                                <span>(+) Oil/Lube Sales:</span>
+                                <span className="tabular-nums font-bold text-amber-600">+{formatCurrency(oilSalesAmount)}</span>
+                              </div>
+                              <div className="flex justify-between text-gray-500">
+                                <span>(-) Credit Sales:</span>
+                                <span className="tabular-nums font-semibold text-purple-600">-{formatCurrency(creditSalesAmount)}</span>
+                              </div>
+                              <div className="flex justify-between text-gray-500">
+                                <span>(-) Card Payments:</span>
+                                <span className="tabular-nums font-semibold text-indigo-600">-{formatCurrency(cardSalesAmount)}</span>
+                              </div>
+                              <hr className="border-gray-200/80 my-1" />
+                              <div className="flex justify-between font-extrabold text-[#1C1C1C]">
+                                <span>= Net Physical Cash Due:</span>
+                                <span className="tabular-nums text-blue-600">{formatCurrency(netPhysicalCashDue)}</span>
+                              </div>
+                            </div>
+                          );
+                        })()}
 
                         {/* Pump Card Action Controls */}
                         <div className="pt-2 border-t border-gray-100">
@@ -1527,22 +2025,94 @@ export default function ShiftManagementTab({
 
                       </div>
 
-                      {/* Card Footer expected revenue display */}
-                      <div className={`px-4 py-3 border-t border-gray-100 flex items-center justify-between transition-colors ${
+                      {/* Card Footer expected revenue display, actual cash handover input & live variance */}
+                      <div className={`px-4 py-3 border-t border-gray-100 transition-colors space-y-2.5 ${
                         r.status === 'Completed' 
                           ? 'bg-emerald-500/10' 
                           : r.status === 'Active'
                           ? 'bg-blue-500/10'
                           : 'bg-gray-50'
                       }`}>
-                        <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
-                          {r.status === 'Completed' ? 'Final Cash Due' : 'Expected Cash'}
-                        </span>
-                        <span className={`tabular-nums font-extrabold text-sm transition-colors ${
-                          r.status === 'Completed' ? 'text-emerald-400' : 'text-blue-600'
-                        }`}>
-                          {formatCurrency(expectedCash)}
-                        </span>
+                        {/* Net Expected Physical Cash Display */}
+                        {(() => {
+                          const grossFuelRevenue = netSold * fuelPrice;
+                          const oilSalesAmount = r.oilSalesAmount || 0;
+                          const totalGrossRevenue = grossFuelRevenue + oilSalesAmount;
+                          const creditSalesAmount = r.creditSalesAmount || 0;
+                          const cardSalesAmount = r.cardSalesAmount || 0;
+                          const netExpCash = Math.max(0, totalGrossRevenue - (creditSalesAmount + cardSalesAmount));
+
+                          return (
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                                {r.status === 'Completed' ? 'Final Net Cash Due' : 'Expected Physical Cash'}
+                              </span>
+                              <span className={`tabular-nums font-extrabold text-sm transition-colors ${
+                                r.status === 'Completed' ? 'text-emerald-600' : 'text-blue-600'
+                              }`}>
+                                {formatCurrency(netExpCash)}
+                              </span>
+                            </div>
+                          );
+                        })()}
+
+                        {/* Manual Physical Cash Handover Input Field */}
+                        <div className="pt-2 border-t border-gray-200/60 space-y-1.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <label className="text-[10px] font-extrabold text-gray-600 uppercase tracking-wider flex-1 min-w-0">
+                              Actual Cash Handed Over (Rs.)
+                            </label>
+                            <div className="w-28 sm:w-32">
+                              <input
+                                type="number"
+                                step="any"
+                                value={r.actualCash ?? 0}
+                                disabled={r.status === 'Completed'}
+                                onFocus={(e) => e.target.select()}
+                                onChange={(e) => handleUpdateReading(r.pumpId, 'actualCash', parseFloat(e.target.value) || 0)}
+                                className="w-full px-2.5 py-1 bg-white border border-gray-200 text-[#1C1C1C] rounded-lg text-xs sm:text-sm tabular-nums font-extrabold text-right focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-gray-100 disabled:text-gray-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none min-w-0"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Dynamic Live Variance Status */}
+                          <div className="flex items-center justify-between pt-1">
+                            <span className="text-[10px] font-extrabold text-gray-500 uppercase tracking-wider">
+                              Cash Variance
+                            </span>
+                            {(() => {
+                              const actCash = r.actualCash ?? 0;
+                              const grossFuelRevenue = netSold * fuelPrice;
+                              const oilSalesAmount = r.oilSalesAmount || 0;
+                              const totalGrossRevenue = grossFuelRevenue + oilSalesAmount;
+                              const creditSalesAmount = r.creditSalesAmount || 0;
+                              const cardSalesAmount = r.cardSalesAmount || 0;
+                              const netExpCash = Math.max(0, totalGrossRevenue - (creditSalesAmount + cardSalesAmount));
+                              const varVal = actCash - netExpCash;
+                              const absFormatted = formatCurrency(Math.abs(varVal));
+
+                              if (varVal < -0.01) {
+                                return (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-extrabold bg-red-500/10 text-red-600 border border-red-500/20 tabular-nums">
+                                    - {absFormatted} (Shortage)
+                                  </span>
+                                );
+                              } else if (varVal > 0.01) {
+                                return (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-extrabold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 tabular-nums">
+                                    + {absFormatted} (Excess)
+                                  </span>
+                                );
+                              } else {
+                                return (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-extrabold bg-gray-100 text-gray-600 border border-gray-200 tabular-nums">
+                                    Rs. 0.00 (Balanced)
+                                  </span>
+                                );
+                              }
+                            })()}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   );
@@ -1553,6 +2123,155 @@ export default function ShiftManagementTab({
                 </div>
               )}
             </div>
+
+            {/* Consolidated Multi-Pump Summary Widget */}
+            {multiPumpersData.length > 0 && (
+              <div className="mt-8 pt-6 border-t border-gray-200/80 space-y-4">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl text-white shadow-sm">
+                    <Users className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-[#1C1C1C] tracking-tight">
+                      Pumper Consolidated Multi-Pump Summary
+                    </h3>
+                    <p className="text-xs text-gray-500">
+                      Combined sales breakdown & single cash handover option for pumpers managing 2 or more pumps.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {pumperStats.map(p => {
+                    const absVar = Math.abs(p.totalCashVariance);
+                    const absVarFormatted = formatCurrency(absVar);
+
+                    return (
+                      <div
+                        key={`multi-pumper-${p.pumperId}`}
+                        className="bg-white border border-blue-100/80 rounded-2xl shadow-sm overflow-hidden flex flex-col justify-between transition-all hover:border-blue-300"
+                      >
+                        {/* Banner Header */}
+                        <div className="p-4 bg-gradient-to-r from-blue-50/80 via-indigo-50/30 to-purple-50/20 border-b border-blue-100 flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className={`w-9 h-9 rounded-xl text-white font-bold text-sm flex items-center justify-center shadow-sm shrink-0 ${p.avatarColor}`}>
+                              {p.pumperName.charAt(0)}
+                            </div>
+                            <div className="min-w-0">
+                              <h4 className="font-bold text-[#1C1C1C] text-sm truncate">
+                                {p.pumperName}
+                              </h4>
+                              <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                                <span className="text-[10px] font-extrabold px-2 py-0.5 bg-blue-100 text-blue-800 rounded-md uppercase tracking-wider">
+                                  {p.readings.length} Pumps Assigned
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                          
+                          {/* Pump Pills */}
+                          <div className="flex items-center gap-1 flex-wrap justify-end">
+                            {p.readings.map(r => (
+                              <span
+                                key={`p-pill-${r.pumpId}`}
+                                className="text-[10px] font-bold px-2 py-0.5 bg-white border border-gray-200 text-gray-700 rounded-lg shadow-2xs tabular-nums"
+                              >
+                                Pump {r.pumpId.replace('pump-', '')} ({r.fuelType})
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Metrics Breakdown */}
+                        <div className="p-4 space-y-3 bg-white">
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+                            <div className="p-2.5 bg-gray-50 rounded-xl border border-gray-100">
+                              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-0.5">
+                                Net Fuel Sold
+                              </span>
+                              <span className="font-extrabold text-[#1C1C1C] text-sm tabular-nums">
+                                {p.totalNetLiters.toFixed(2)} L
+                              </span>
+                            </div>
+
+                            <div className="p-2.5 bg-gray-50 rounded-xl border border-gray-100">
+                              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-0.5">
+                                Gross Revenue
+                              </span>
+                              <span className="font-extrabold text-[#1C1C1C] text-sm tabular-nums">
+                                {formatCurrency(p.totalGrossRevenue)}
+                              </span>
+                            </div>
+
+                            <div className="p-2.5 bg-purple-50/70 rounded-xl border border-purple-100 col-span-2 sm:col-span-1">
+                              <span className="text-[10px] font-extrabold text-purple-900 uppercase tracking-wider block mb-0.5">
+                                Non-Cash Deductions
+                              </span>
+                              <span className="font-extrabold text-purple-700 text-sm tabular-nums block">
+                                {formatCurrency(p.totalCreditSales + p.totalCardSales)}
+                              </span>
+                              <span className="text-[9px] text-purple-600 font-semibold block mt-0.5">
+                                Credit: {formatCurrency(p.totalCreditSales)} | Card: {formatCurrency(p.totalCardSales)}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Net Physical Cash Due */}
+                          <div className="p-3 bg-blue-50/60 border border-blue-100 rounded-xl flex items-center justify-between">
+                            <span className="text-xs font-bold text-blue-900">
+                              Total Net Physical Cash Due:
+                            </span>
+                            <span className="text-base font-extrabold text-blue-700 tabular-nums">
+                              {formatCurrency(p.totalNetExpCash)}
+                            </span>
+                          </div>
+
+                          {/* Consolidated Cash Handover Input */}
+                          <div className="p-3 bg-gray-50 border border-gray-200/80 rounded-xl space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <label className="text-[11px] font-extrabold text-gray-700 uppercase tracking-wider flex-1 min-w-0">
+                                Consolidated Cash Handed Over (Rs.)
+                              </label>
+                              <div className="w-32 sm:w-36">
+                                <input
+                                  type="number"
+                                  step="any"
+                                  value={p.totalActualCash ?? 0}
+                                  placeholder="0.00"
+                                  onFocus={(e) => e.target.select()}
+                                  onChange={(e) => handleUpdateConsolidatedCashForPumper(p.pumperId, parseFloat(e.target.value) || 0)}
+                                  className="w-full px-2.5 py-1.5 bg-white border border-gray-300 text-[#1C1C1C] rounded-lg text-sm tabular-nums font-extrabold text-right focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none min-w-0"
+                                />
+                              </div>
+                            </div>
+
+                            {/* Net Shift Variance */}
+                            <div className="flex items-center justify-between pt-1 border-t border-gray-200/60">
+                              <span className="text-[10px] font-extrabold text-gray-500 uppercase tracking-wider">
+                                Shift Net Cash Variance
+                              </span>
+                              {p.totalCashVariance < -0.01 ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-extrabold bg-red-500/10 text-red-600 border border-red-500/20 tabular-nums">
+                                  - {absVarFormatted} (Shortage)
+                                </span>
+                              ) : p.totalCashVariance > 0.01 ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-extrabold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 tabular-nums">
+                                  + {absVarFormatted} (Excess)
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200 tabular-nums">
+                                  Rs. 0.00 (Balanced)
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
           </div>
         </>
@@ -1977,87 +2696,140 @@ export default function ShiftManagementTab({
       {/* --- CONFIRM CLOSE SHIFT MODAL --- */}
       {isCloseConfirmOpen && activeShift && (
         <div id="close-modal-overlay" className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-fade-in">
-          <div id="close-modal-card" className="bg-gray-50 rounded-2xl max-w-md w-full shadow-2xl border border-gray-200 overflow-hidden">
-            <div className="p-6 text-center">
-              <div className="w-12 h-12 bg-red-500/10 text-red-400 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-500/20">
+          <div id="close-modal-card" className="bg-gray-50 rounded-2xl max-w-2xl w-full shadow-2xl border border-gray-200 overflow-hidden max-h-[90vh] flex flex-col">
+            <div className="p-6 text-center overflow-y-auto space-y-4">
+              <div className="w-12 h-12 bg-red-500/10 text-red-500 rounded-full flex items-center justify-center mx-auto mb-2 border border-red-500/20">
                 <AlertCircle className="w-6 h-6" />
               </div>
-              <h3 className="font-bold text-[#1C1C1C] text-lg">End Shift & Lock Ledger?</h3>
-              <p className="text-gray-500 text-sm mt-2">
-                This action will lock the current ledger (<strong className="text-[#1C1C1C] tabular-nums font-semibold">{activeShift.id}</strong>), permanently save the shift to history, and deduct the sold fuel stock levels from the underground tanks.
+              <h3 className="font-extrabold text-[#1C1C1C] text-lg">End Shift & Lock Ledger?</h3>
+              <p className="text-gray-500 text-xs">
+                This action will lock current shift ledger (<strong className="text-[#1C1C1C] tabular-nums font-semibold">{activeShift.id}</strong>), save readings permanently, and deduct sold fuel from underground storage tanks.
               </p>
               
-              <div className="mt-5 bg-gray-50/60 p-4 rounded-xl text-left text-xs text-gray-600 space-y-2 border border-gray-100">
-                <div className="flex justify-between">
-                  <span>Supervisor:</span>
-                  <span className="font-semibold text-[#1C1C1C]">{activeSupervisor?.name || 'N/A'}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Shift Name:</span>
-                  <span className="font-semibold text-[#1C1C1C]">{activeShift.name}</span>
-                </div>
-                <div className="flex justify-between border-t border-gray-100 pt-2">
-                  <span>Total Net Fuel Sold:</span>
-                  <span className="tabular-nums font-semibold text-[#1C1C1C]">{formatLiters(stats.totalNetSold)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>System Expected Revenue:</span>
-                  <span className="font-bold text-blue-600 tabular-nums font-semibold">{formatCurrency(stats.totalNetSales)}</span>
+              {/* Overall Shift Revenue Summary Box */}
+              <div className="bg-white p-4 rounded-xl text-left text-xs text-gray-600 space-y-2.5 border border-gray-200/80 shadow-xs">
+                <div className="flex justify-between items-center pb-2 border-b border-gray-100">
+                  <span className="font-bold text-gray-700">Supervisor: <strong className="text-[#1C1C1C]">{activeSupervisor?.name || 'N/A'}</strong></span>
+                  <span className="font-bold text-gray-700">Shift: <strong className="text-[#1C1C1C]">{activeShift.name}</strong></span>
                 </div>
 
-                {/* Mid-Shift Handover & Reconciliation Details */}
-                {(() => {
-                  const initCash = Number(initialPumperCash) || 0;
-                  const replCash = Number(replacementPumperCash) || 0;
-                  const totalPhys = initCash + replCash;
-                  const expected = stats.totalNetSales || 0;
-                  const varVal = totalPhys - expected;
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  <div className="bg-gray-50 p-2.5 rounded-xl border border-gray-100">
+                    <span className="text-[10px] text-gray-500 uppercase font-bold block">Net Fuel Sold</span>
+                    <span className="text-xs sm:text-sm font-extrabold text-[#1C1C1C] tabular-nums">{formatLiters(stats.totalNetSold)}</span>
+                  </div>
+                  <div className="bg-gray-50 p-2.5 rounded-xl border border-gray-100">
+                    <span className="text-[10px] text-gray-500 uppercase font-bold block">Gross Fuel Revenue</span>
+                    <span className="text-xs sm:text-sm font-extrabold text-[#1C1C1C] tabular-nums">{formatCurrency(stats.totalFuelSales)}</span>
+                  </div>
+                  <div className="bg-amber-50/60 p-2.5 rounded-xl border border-amber-100 col-span-2 sm:col-span-1">
+                    <span className="text-[10px] text-amber-900 uppercase font-bold block">(+) Oil/Lube Sales</span>
+                    <span className="text-xs sm:text-sm font-extrabold text-amber-700 tabular-nums">+{formatCurrency(stats.totalOilSales)}</span>
+                  </div>
+                </div>
 
-                  return (
-                    <div className="border-t border-gray-100 pt-2 space-y-1.5">
-                      <div className="flex justify-between text-[11px]">
-                        <span>Initial Pumper Cash:</span>
-                        <span className="tabular-nums font-semibold text-gray-700">{formatCurrency(initCash)}</span>
-                      </div>
-                      <div className="flex justify-between text-[11px]">
-                        <span>Replacement Pumper Cash:</span>
-                        <span className="tabular-nums font-semibold text-gray-700">{formatCurrency(replCash)}</span>
-                      </div>
-                      <div className="flex justify-between font-bold text-xs pt-1 border-t border-gray-100">
-                        <span>Total Physical Cash:</span>
-                        <span className="tabular-nums font-bold text-blue-600">{formatCurrency(totalPhys)}</span>
-                      </div>
-                      <div className="flex justify-between items-center text-xs pt-1">
-                        <span className="font-semibold">Cash Difference / Variance:</span>
-                        {varVal === 0 ? (
-                          <span className="text-emerald-600 font-extrabold tabular-nums">Balanced ({formatCurrency(0)})</span>
-                        ) : varVal > 0 ? (
-                          <span className="text-emerald-600 font-extrabold tabular-nums">Excess (+{formatCurrency(varVal)})</span>
-                        ) : (
-                          <span className="text-red-500 font-extrabold tabular-nums">Shortage ({formatCurrency(varVal)})</span>
-                        )}
-                      </div>
-                      {handoverNotes && (
-                        <div className="text-[10px] text-gray-500 italic mt-1 bg-gray-100 p-1.5 rounded-lg border border-gray-200/50">
-                          Note: "{handoverNotes}"
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
+                <div className="flex justify-between items-center pt-2 border-t border-gray-100 text-xs">
+                  <span className="font-extrabold text-gray-800">Total Consolidated System Revenue:</span>
+                  <span className="font-extrabold text-blue-600 tabular-nums text-base">{formatCurrency(stats.totalNetSales)}</span>
+                </div>
               </div>
+
+              {/* Pumper Consolidated Shift Summary */}
+              {allPumperStats.length > 0 && (
+                <div className="text-left space-y-2 pt-1">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-extrabold text-[#1C1C1C] text-xs uppercase tracking-wider flex items-center gap-1.5">
+                      <Users className="w-3.5 h-3.5 text-blue-600" />
+                      Pumper Consolidated Shift Summary
+                    </h4>
+                    <span className="text-[10px] font-bold text-gray-500 bg-gray-200/60 px-2 py-0.5 rounded-full">
+                      {allPumperStats.length} {allPumperStats.length === 1 ? 'Pumper Account' : 'Pumper Accounts'}
+                    </span>
+                  </div>
+
+                  <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                    {allPumperStats.map((p) => {
+                      const absVar = Math.abs(p.overallVariance);
+                      const absVarFormatted = formatCurrency(absVar);
+
+                      return (
+                        <div key={`modal-pumper-${p.pumperId}`} className="bg-white p-3 rounded-xl border border-gray-200/90 shadow-2xs space-y-2 text-xs">
+                          <div className="flex items-center justify-between gap-2 border-b border-gray-100 pb-2">
+                            <div className="flex items-center gap-2">
+                              <div className={`w-6 h-6 rounded-lg text-white font-bold text-xs flex items-center justify-center shrink-0 ${p.avatarColor}`}>
+                                {p.pumperName.charAt(0)}
+                              </div>
+                              <span className="font-bold text-[#1C1C1C]">{p.pumperName}</span>
+                            </div>
+                            <div className="flex items-center gap-1 flex-wrap">
+                              {p.readings.map(r => (
+                                <span key={`m-pill-${r.pumpId}`} className="text-[9px] font-bold px-1.5 py-0.5 bg-gray-100 text-gray-700 rounded-md tabular-nums border border-gray-200/60">
+                                  {r.pumpName}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Financial Row */}
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] bg-gray-50/80 p-2 rounded-lg border border-gray-100">
+                            <div>
+                              <span className="text-[9px] font-semibold text-gray-400 block uppercase">Fuel Sales</span>
+                              <span className="font-bold text-gray-700 tabular-nums">{formatCurrency(p.totalFuelRevenue)}</span>
+                            </div>
+                            <div>
+                              <span className="text-[9px] font-semibold text-amber-700 block uppercase">Oil/Lube Sales</span>
+                              <span className="font-bold text-amber-700 tabular-nums">+{formatCurrency(p.totalOilSales)}</span>
+                            </div>
+                            <div>
+                              <span className="text-[9px] font-semibold text-purple-600 block uppercase">Non-Cash (Credit/Card)</span>
+                              <span className="font-bold text-purple-700 tabular-nums">-{formatCurrency(p.totalCreditSales + p.totalCardSales)}</span>
+                            </div>
+                            <div>
+                              <span className="text-[9px] font-extrabold text-blue-900 block uppercase">Net Cash Due</span>
+                              <span className="font-extrabold text-blue-700 tabular-nums">{formatCurrency(p.totalNetExpCash)}</span>
+                            </div>
+                          </div>
+
+                          {/* Cash Handover & Variance Status */}
+                          <div className="flex items-center justify-between pt-1 text-xs">
+                            <div className="flex items-center gap-1 text-gray-600">
+                              <span className="font-medium">Actual Cash Handed Over:</span>
+                              <span className="font-bold text-[#1C1C1C] tabular-nums">{formatCurrency(p.totalActualCash)}</span>
+                            </div>
+                            <div>
+                              {p.overallVariance < -0.01 ? (
+                                <span className="px-2 py-0.5 rounded-md font-extrabold text-[11px] bg-red-100 text-red-700 border border-red-200 tabular-nums">
+                                  -{absVarFormatted} (Shortage)
+                                </span>
+                              ) : p.overallVariance > 0.01 ? (
+                                <span className="px-2 py-0.5 rounded-md font-extrabold text-[11px] bg-emerald-100 text-emerald-800 border border-emerald-200 tabular-nums">
+                                  +{absVarFormatted} (Excess)
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded-md font-extrabold text-[11px] bg-gray-100 text-gray-700 border border-gray-200 tabular-nums">
+                                  Rs. 0.00 (Balanced)
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
 
-            <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex items-center justify-end gap-3">
+            <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex items-center justify-end gap-3 shrink-0">
               <button
                 onClick={() => setIsCloseConfirmOpen(false)}
-                className="px-4 py-2 bg-transparent border border-gray-200 text-gray-600 font-medium text-xs rounded-lg hover:bg-gray-100 cursor-pointer"
+                className="px-4 py-2 bg-white border border-gray-200 text-gray-600 font-bold text-xs rounded-lg hover:bg-gray-100 cursor-pointer shadow-2xs transition-all"
               >
                 Cancel
               </button>
               <button
                 onClick={handleConfirmCloseShift}
-                className="px-5 py-2 bg-gradient-to-r from-red-600 to-red-500 text-[#1C1C1C] font-bold text-xs rounded-lg hover:brightness-110 transition-all cursor-pointer"
+                className="px-5 py-2 bg-gradient-to-r from-red-600 to-red-500 text-white font-bold text-xs rounded-lg hover:brightness-110 transition-all cursor-pointer shadow-sm"
               >
                 Confirm & Lock Ledger
               </button>

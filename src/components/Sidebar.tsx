@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import { LayoutDashboard, Clock, Fuel, BarChart3, Tag, ShieldCheck, LogOut } from 'lucide-react';
+import { LayoutDashboard, Clock, Fuel, BarChart3, FileText, Users, Tag, ShieldCheck, LogOut } from 'lucide-react';
 import { AuthUser, resolveUserRole } from '../types';
 
 interface SidebarProps {
@@ -30,8 +30,11 @@ export default function Sidebar({ activeTab, setActiveTab, user, onLogout }: Sid
     { id: 'shift', name: 'Shift Management', icon: Clock },
     { id: 'stock', name: 'Fuel Stock', icon: Fuel },
     { id: 'sales', name: 'Daily Sales', icon: BarChart3 },
+    { id: 'reports', name: 'Reports', icon: FileText },
+    { id: 'customers', name: 'Customers & Credit', icon: Users },
     ...(isAdmin ? [{ id: 'admin', name: 'Admin Control', icon: ShieldCheck }] : []),
   ];
+
 
   const userName = user?.name || (isAdmin ? 'Rumesh Anjana' : 'Station User');
   const userRoleDisplay = isAdmin ? 'System Admin' : 'User';
