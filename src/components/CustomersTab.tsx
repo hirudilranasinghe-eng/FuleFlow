@@ -1052,6 +1052,7 @@ export default function CustomersTab({
                     min="0"
                     placeholder="100000"
                     value={creditLimit}
+                    onFocus={(e) => e.target.select()}
                     onChange={(e) => setCreditLimit(e.target.value)}
                     className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 font-bold text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
@@ -1064,6 +1065,7 @@ export default function CustomersTab({
                     min="1"
                     placeholder="14"
                     value={allowedCreditDays}
+                    onFocus={(e) => e.target.select()}
                     onChange={(e) => setAllowedCreditDays(e.target.value)}
                     className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 font-bold text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
@@ -1078,6 +1080,7 @@ export default function CustomersTab({
                     min="0"
                     placeholder="50000"
                     value={depositBalance}
+                    onFocus={(e) => e.target.select()}
                     onChange={(e) => setDepositBalance(e.target.value)}
                     className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 font-bold text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
@@ -1200,6 +1203,7 @@ export default function CustomersTab({
                     min="0.1"
                     required
                     value={saleLiters}
+                    onFocus={(e) => e.target.select()}
                     onChange={(e) => setSaleLiters(e.target.value)}
                     className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 font-bold text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
@@ -1212,6 +1216,7 @@ export default function CustomersTab({
                     step="0.01"
                     required
                     value={saleRate}
+                    onFocus={(e) => e.target.select()}
                     onChange={(e) => setSaleRate(e.target.value)}
                     className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 font-bold text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
@@ -1298,6 +1303,7 @@ export default function CustomersTab({
                     required
                     placeholder="25000"
                     value={paymentAmount}
+                    onFocus={(e) => e.target.select()}
                     onChange={(e) => setPaymentAmount(e.target.value)}
                     className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 font-black text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
                   />

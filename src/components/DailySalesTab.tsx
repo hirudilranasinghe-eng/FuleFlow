@@ -55,7 +55,7 @@ export default function DailySalesTab({ shiftHistory, setShiftHistory, onDeleteS
       const tank = tanks.find(t => t.fuelType === r.fuelType);
       if (tank) return tank.pricePerLiter;
     }
-    return 1.50; // default fallback if nothing is configured
+    return 0.00; // default fallback if nothing is configured
   };
 
   // Filter history based on search query

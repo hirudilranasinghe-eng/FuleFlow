@@ -85,16 +85,6 @@ export default function PriceManagementTab({ tanks, setTanks, priceSchedules, se
 
   return (
     <div id="price-management-root" className="space-y-4 w-full max-w-6xl mx-auto animate-fade-in pb-12">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white p-4 sm:p-5 rounded-2xl border border-gray-100 shadow-sm">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-[#1C1C1C] tracking-tight">Price Management</h1>
-          <p className="text-xs sm:text-sm text-gray-500 mt-0.5">Manage global board prices per liter for all fuel products.</p>
-        </div>
-        <div className="w-10 h-10 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600 flex-shrink-0">
-          <Tag className="w-5 h-5" />
-        </div>
-      </div>
-
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="px-6 py-5 border-b border-gray-100 bg-gray-50/50">
           <h3 className="font-bold text-[#1C1C1C] text-sm uppercase tracking-wider">Current Retail Prices</h3>
@@ -130,6 +120,7 @@ export default function PriceManagementTab({ tanks, setTanks, priceSchedules, se
                           type="number"
                           step="0.01"
                           value={tempPrice}
+                          onFocus={(e) => e.target.select()}
                           onChange={(e) => setTempPrice(parseFloat(e.target.value) || 0)}
                           className="w-24 px-3 py-1.5 border border-blue-500 bg-white text-[#1C1C1C] rounded-lg tabular-nums font-semibold text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-right"
                           autoFocus
@@ -208,6 +199,7 @@ export default function PriceManagementTab({ tanks, setTanks, priceSchedules, se
                   min="0"
                   required
                   value={schedPrice || ''}
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) => setSchedPrice(parseFloat(e.target.value) || 0)}
                   className="w-full pl-10 pr-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] text-sm tabular-nums font-semibold focus:outline-none focus:border-blue-500"
                 />

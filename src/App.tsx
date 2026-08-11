@@ -16,168 +16,12 @@ import EmployeesTab from './components/EmployeesTab';
 import AdminControlTab from './components/AdminControlTab';
 import PriceManagementTab from './components/PriceManagementTab';
 import LoginPage from './components/LoginPage';
-import { AuthUser, Employee, FuelTank, Pump, Shift, StockDelivery, PriceSchedule, Customer, CreditTransaction, CreditPayment, resolveUserRole } from './types';
+import { AuthUser, Employee, FuelTank, Pump, PumpMachine, Shift, StockDelivery, PriceSchedule, Customer, CreditTransaction, CreditPayment, resolveUserRole } from './types';
 import { supabase, getTanksTableName, setTanksTableName } from './lib/supabase';
-import { upsertPumpReadings, syncCreditAndCardSales } from './lib/supabaseClient';
+import { upsertPumpReadings, syncCreditAndCardSales, updateNozzleMeterCarryover } from './lib/supabaseClient';
 
-const defaultEmps: Employee[] = [
-  { id: 'emp-101', name: 'Samantha Silva', role: 'Supervisor', phone: '0771234567', status: 'Active', avatarColor: 'bg-blue-500' },
-  { id: 'emp-102', name: 'Roshan Perera', role: 'Pumper', phone: '0712345678', status: 'Active', avatarColor: 'bg-emerald-500' },
-  { id: 'emp-103', name: 'Nimal Fernando', role: 'Pumper', phone: '0753456789', status: 'Active', avatarColor: 'bg-purple-500' },
-  { id: 'emp-104', name: 'Priyantha Bandara', role: 'Pumper', phone: '0724567890', status: 'Active', avatarColor: 'bg-amber-500' }
-];
-
-const defaultTanks: FuelTank[] = [
-  { id: 'tank-petrol92', fuelType: 'Petrol 92', name: 'Tank 01 - Petrol 92', capacity: 15000, currentLevel: 9200, pricePerLiter: 355 },
-  { id: 'tank-petrol95', fuelType: 'Petrol 95', name: 'Tank 02 - Petrol 95', capacity: 15000, currentLevel: 12500, pricePerLiter: 410 },
-  { id: 'tank-autodiesel', fuelType: 'Auto Diesel', name: 'Tank 03 - Auto Diesel', capacity: 20000, currentLevel: 7400, pricePerLiter: 317 },
-  { id: 'tank-superdiesel', fuelType: 'Super Diesel', name: 'Tank 04 - Super Diesel', capacity: 10000, currentLevel: 3200, pricePerLiter: 343 }
-];
-
-export const defaultPumps: Pump[] = [
-  { id: 'pump-101', name: 'Pump 01', fuelType: 'Petrol 92', tankId: 'tank-petrol92', status: 'Active' },
-  { id: 'pump-102', name: 'Pump 02', fuelType: 'Petrol 92', tankId: 'tank-petrol92', status: 'Active' },
-  { id: 'pump-103', name: 'Pump 03', fuelType: 'Petrol 95', tankId: 'tank-petrol95', status: 'Active' },
-  { id: 'pump-104', name: 'Pump 04', fuelType: 'Petrol 95', tankId: 'tank-petrol95', status: 'Active' },
-  { id: 'pump-105', name: 'Pump 05', fuelType: 'Auto Diesel', tankId: 'tank-autodiesel', status: 'Active' },
-  { id: 'pump-106', name: 'Pump 06', fuelType: 'Auto Diesel', tankId: 'tank-autodiesel', status: 'Active' },
-  { id: 'pump-107', name: 'Pump 07', fuelType: 'Super Diesel', tankId: 'tank-superdiesel', status: 'Active' },
-  { id: 'pump-108', name: 'Pump 08', fuelType: 'Super Diesel', tankId: 'tank-superdiesel', status: 'Active' },
-  { id: 'pump-oil-bay', name: 'Oil & Lubricants Bay', fuelType: 'Oil & Lubricants', tankId: '', status: 'Active' }
-];
-
-const defaultCustomers: Customer[] = [
-  {
-    id: 'CUST-101',
-    name: 'Lanka Logistics PLC',
-    phone: '0112345678',
-    customerType: 'Credit',
-    creditLimit: 250000,
-    currentBalance: 145000,
-    depositBalance: 0,
-    allowedCreditDays: 14,
-    address: 'No. 120, Baseline Road, Colombo 09',
-    vehicleNumbers: ['WP CBB-4512', 'WP CBB-4513', 'WP CBB-8901'],
-    status: 'Active',
-    createdAt: '2026-01-10T08:00:00.000Z',
-  },
-  {
-    id: 'CUST-102',
-    name: 'Island Wide Transport Ltd',
-    phone: '0332245100',
-    customerType: 'Credit',
-    creditLimit: 500000,
-    currentBalance: 320000,
-    depositBalance: 0,
-    allowedCreditDays: 30,
-    address: 'Kandy Road, Kelaniya',
-    vehicleNumbers: ['WP GA-9081', 'WP GA-9082'],
-    status: 'Active',
-    createdAt: '2026-02-01T08:00:00.000Z',
-  },
-  {
-    id: 'CUST-103',
-    name: 'Southern Express Coaches',
-    phone: '0912233444',
-    customerType: 'Credit',
-    creditLimit: 150000,
-    currentBalance: 175000,
-    depositBalance: 0,
-    allowedCreditDays: 14,
-    address: 'Galle Road, Kalutara',
-    vehicleNumbers: ['SP ND-3321'],
-    status: 'Overdue',
-    createdAt: '2026-03-15T08:00:00.000Z',
-  },
-  {
-    id: 'CUST-104',
-    name: 'Metropolitan Taxi Services',
-    phone: '0115566777',
-    customerType: 'Deposit',
-    creditLimit: 0,
-    currentBalance: 0,
-    depositBalance: 85000,
-    allowedCreditDays: 0,
-    address: 'Nawala Road, Rajagiriya',
-    vehicleNumbers: ['WP CAB-1020', 'WP CAB-1021'],
-    status: 'Active',
-    createdAt: '2026-04-05T08:00:00.000Z',
-  },
-];
-
-const defaultCreditTransactions: CreditTransaction[] = [
-  {
-    id: 'TX-801',
-    customerId: 'CUST-101',
-    customerName: 'Lanka Logistics PLC',
-    date: new Date(Date.now() - 3 * 86400000).toISOString(),
-    dueDate: new Date(Date.now() + 11 * 86400000).toISOString().split('T')[0],
-    vehicleNumber: 'WP CBB-4512',
-    invoiceNumber: 'INV-2026-1045',
-    fuelType: 'Auto Diesel',
-    liters: 250,
-    ratePerLiter: 317,
-    totalAmount: 79250,
-    paidAmount: 0,
-    status: 'Unpaid',
-    notes: 'Long distance haulage refill',
-  },
-  {
-    id: 'TX-802',
-    customerId: 'CUST-102',
-    customerName: 'Island Wide Transport Ltd',
-    date: new Date(Date.now() - 8 * 86400000).toISOString(),
-    dueDate: new Date(Date.now() + 22 * 86400000).toISOString().split('T')[0],
-    vehicleNumber: 'WP GA-9081',
-    invoiceNumber: 'INV-2026-1038',
-    fuelType: 'Auto Diesel',
-    liters: 400,
-    ratePerLiter: 317,
-    totalAmount: 126800,
-    paidAmount: 0,
-    status: 'Unpaid',
-    notes: 'Intercity container truck',
-  },
-  {
-    id: 'TX-803',
-    customerId: 'CUST-103',
-    customerName: 'Southern Express Coaches',
-    date: new Date(Date.now() - 25 * 86400000).toISOString(),
-    dueDate: new Date(Date.now() - 11 * 86400000).toISOString().split('T')[0],
-    vehicleNumber: 'SP ND-3321',
-    invoiceNumber: 'INV-2026-0992',
-    fuelType: 'Super Diesel',
-    liters: 300,
-    ratePerLiter: 343,
-    totalAmount: 102900,
-    paidAmount: 0,
-    status: 'Overdue',
-    notes: 'Express highway bus',
-  },
-];
-
-const defaultCreditPayments: CreditPayment[] = [
-  {
-    id: 'PAY-501',
-    customerId: 'CUST-101',
-    customerName: 'Lanka Logistics PLC',
-    date: new Date(Date.now() - 5 * 86400000).toISOString(),
-    amount: 50000,
-    paymentMethod: 'Bank Transfer',
-    referenceNumber: 'BT-BOC-9921',
-    notes: 'Part settlement for June statement',
-  },
-  {
-    id: 'PAY-502',
-    customerId: 'CUST-102',
-    customerName: 'Island Wide Transport Ltd',
-    date: new Date(Date.now() - 12 * 86400000).toISOString(),
-    amount: 150000,
-    paymentMethod: 'Cheque',
-    referenceNumber: 'CHQ-HNB-4482',
-    notes: 'Monthly settlement cheque',
-  },
-];
+export const defaultPumpMachines: PumpMachine[] = [];
+export const defaultPumps: Pump[] = [];
 
 export default function App() {
   // Auth state & session guard
@@ -278,34 +122,93 @@ export default function App() {
     } catch (_) {}
   };
 
+  // Clear stale cached shifts and legacy keys from localStorage on startup
+  useEffect(() => {
+    const shiftKeysToPurge = [
+      'fms_shiftHistory', 
+      'fms_shifts', 
+      'fuelflow_history', 
+      'fms_activeShift', 
+      'active_shift_data', 
+      'shift_history', 
+      'fms_history'
+    ];
+    shiftKeysToPurge.forEach(key => {
+      try {
+        localStorage.removeItem(key);
+      } catch (_) {}
+    });
+
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key.startsWith('fuelflow_settled_pumpers_') || key.toLowerCase().includes('shift_history') || key.toLowerCase().includes('shifthistory'))) {
+          localStorage.removeItem(key);
+        }
+      }
+    } catch (_) {}
+
+    const legacyKeys = ['fms_pump_machines', 'fms_pumps', 'fms_tanks', 'fms_customers', 'fms_creditTransactions', 'fms_creditPayments', 'fms_employees'];
+    legacyKeys.forEach(key => {
+      try {
+        const stored = localStorage.getItem(key);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed)) {
+            const isLegacyDemo = parsed.some((item: any) => 
+              ['mach-01', 'mach-02', 'noz-101', 'pump-101', 'tank-petrol92', 'CUST-101', 'TX-801', 'emp-101', 'PAY-501'].includes(item.id)
+            );
+            if (isLegacyDemo) {
+              localStorage.removeItem(key);
+            }
+          }
+        }
+      } catch (_) {}
+    });
+  }, []);
+
   // Core persisted states
-  const [employees, setEmployees] = useState<Employee[]>(defaultEmps);
-  const [tanks, setTanks] = useState<FuelTank[]>(defaultTanks);
+  const [employees, setEmployees] = useState<Employee[]>(() => {
+    try {
+      const stored = localStorage.getItem('fms_employees');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && !parsed.some((e: any) => e.id === 'emp-101')) return parsed;
+      }
+    } catch (_) {}
+    return [];
+  });
+  const [tanks, setTanks] = useState<FuelTank[]>(() => {
+    try {
+      const stored = localStorage.getItem('fms_tanks');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && !parsed.some((t: any) => t.id === 'tank-petrol92')) return parsed;
+      }
+    } catch (_) {}
+    return [];
+  });
+  const [pumpMachines, setPumpMachines] = useState<PumpMachine[]>(() => {
+    try {
+      const stored = localStorage.getItem('fms_pump_machines');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && !parsed.some((m: any) => m.id === 'mach-01')) return parsed;
+      }
+    } catch (_) {}
+    return [];
+  });
   const [pumps, setPumps] = useState<Pump[]>(() => {
     try {
       const stored = localStorage.getItem('fms_pumps');
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          if (!parsed.some((p: any) => p.id === 'pump-oil-bay')) {
-            return [...parsed, { id: 'pump-oil-bay', name: 'Oil & Lubricants Bay', fuelType: 'Oil & Lubricants', tankId: '', status: 'Active' }];
-          }
-          return parsed;
-        }
+        if (Array.isArray(parsed) && !parsed.some((p: any) => ['noz-101', 'pump-101'].includes(p.id))) return parsed;
       }
     } catch (_) {}
-    return defaultPumps;
+    return [];
   });
-  const [activeShift, setActiveShift] = useState<Shift | null>(() => {
-    try {
-      const stored = localStorage.getItem('fms_activeShift') || localStorage.getItem('active_shift_data');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (parsed && (parsed.isActive || parsed.isactive)) return parsed;
-      }
-    } catch (_) {}
-    return null;
-  });
+  const [activeShift, setActiveShift] = useState<Shift | null>(null);
   const [shiftHistory, setShiftHistory] = useState<Shift[]>([]);
   const [deliveries, setDeliveries] = useState<StockDelivery[]>([]);
   const [priceSchedules, setPriceSchedules] = useState<PriceSchedule[]>([]);
@@ -314,25 +217,34 @@ export default function App() {
   const [customers, setCustomers] = useState<Customer[]>(() => {
     try {
       const stored = localStorage.getItem('fms_customers');
-      if (stored) return JSON.parse(stored);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && !parsed.some((c: any) => c.id === 'CUST-101')) return parsed;
+      }
     } catch (_) {}
-    return defaultCustomers;
+    return [];
   });
 
   const [creditTransactions, setCreditTransactions] = useState<CreditTransaction[]>(() => {
     try {
       const stored = localStorage.getItem('fms_creditTransactions');
-      if (stored) return JSON.parse(stored);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && !parsed.some((t: any) => t.id === 'TX-801')) return parsed;
+      }
     } catch (_) {}
-    return defaultCreditTransactions;
+    return [];
   });
 
   const [payments, setPayments] = useState<CreditPayment[]>(() => {
     try {
       const stored = localStorage.getItem('fms_creditPayments');
-      if (stored) return JSON.parse(stored);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && !parsed.some((p: any) => p.id === 'PAY-501')) return parsed;
+      }
     } catch (_) {}
-    return defaultCreditPayments;
+    return [];
   });
 
   useEffect(() => {
@@ -340,6 +252,12 @@ export default function App() {
       localStorage.setItem('fms_customers', JSON.stringify(customers));
     } catch (_) {}
   }, [customers]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('fms_pump_machines', JSON.stringify(pumpMachines));
+    } catch (_) {}
+  }, [pumpMachines]);
 
   useEffect(() => {
     try {
@@ -375,67 +293,47 @@ export default function App() {
   useEffect(() => {
     const fetchAllData = async () => {
       const isConfigured = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
-      
-      const defaultEmps: Employee[] = [
-        { id: 'emp-101', name: 'Samantha Silva', role: 'Supervisor', phone: '0771234567', status: 'Active', avatarColor: 'bg-blue-500' },
-        { id: 'emp-102', name: 'Roshan Perera', role: 'Pumper', phone: '0712345678', status: 'Active', avatarColor: 'bg-emerald-500' },
-        { id: 'emp-103', name: 'Nimal Fernando', role: 'Pumper', phone: '0753456789', status: 'Active', avatarColor: 'bg-purple-500' },
-        { id: 'emp-104', name: 'Priyantha Bandara', role: 'Pumper', phone: '0724567890', status: 'Active', avatarColor: 'bg-amber-500' }
-      ];
-
-      const defaultTanks: FuelTank[] = [
-        { id: 'tank-petrol92', fuelType: 'Petrol 92', name: 'Tank 01 - Petrol 92', capacity: 15000, currentLevel: 9200, pricePerLiter: 355 },
-        { id: 'tank-petrol95', fuelType: 'Petrol 95', name: 'Tank 02 - Petrol 95', capacity: 15000, currentLevel: 12500, pricePerLiter: 410 },
-        { id: 'tank-autodiesel', fuelType: 'Auto Diesel', name: 'Tank 03 - Auto Diesel', capacity: 20000, currentLevel: 7400, pricePerLiter: 317 },
-        { id: 'tank-superdiesel', fuelType: 'Super Diesel', name: 'Tank 04 - Super Diesel', capacity: 10000, currentLevel: 3200, pricePerLiter: 343 }
-      ];
 
       const loadLocalStorageFallback = () => {
         try {
           const storedEmps = localStorage.getItem('fms_employees');
           const storedTanks = localStorage.getItem('fms_tanks');
           const storedPumps = localStorage.getItem('fms_pumps');
+          const storedMachines = localStorage.getItem('fms_pump_machines');
           const storedHistory = localStorage.getItem('fms_shiftHistory');
           const storedDeliveries = localStorage.getItem('fms_deliveries');
           const storedSchedules = localStorage.getItem('fms_priceSchedules');
 
-          if (storedEmps !== null) {
-            try { setEmployees(JSON.parse(storedEmps)); } catch (_) { setEmployees([]); }
-          } else {
-            setEmployees(defaultEmps);
-          }
-
-          if (storedTanks !== null) {
-            try { setTanks(JSON.parse(storedTanks)); } catch (_) { setTanks([]); }
-          } else {
-            setTanks(defaultTanks);
-          }
-
-          if (storedPumps !== null) {
-            try { 
-              const parsed = JSON.parse(storedPumps);
-              setPumps(Array.isArray(parsed) && parsed.length > 0 ? parsed : defaultPumps); 
-            } catch (_) { 
-              setPumps(defaultPumps); 
-            }
-          } else {
-            setPumps(defaultPumps);
-          }
-
-          const storedActiveShift = localStorage.getItem('fms_activeShift') || localStorage.getItem('active_shift_data');
-          if (storedActiveShift) {
+          if (storedEmps) {
             try {
-              const parsed = JSON.parse(storedActiveShift);
-              if (parsed && (parsed.isActive || parsed.isactive)) {
-                setActiveShift(parsed);
-              }
-            } catch (_) {}
-          }
-          if (storedHistory) {
+              const p = JSON.parse(storedEmps);
+              setEmployees(Array.isArray(p) && !p.some((e: any) => e.id === 'emp-101') ? p : []);
+            } catch (_) { setEmployees([]); }
+          } else { setEmployees([]); }
+
+          if (storedTanks) {
             try {
-              setShiftHistory(JSON.parse(storedHistory));
-            } catch (_) {}
-          }
+              const p = JSON.parse(storedTanks);
+              setTanks(Array.isArray(p) && !p.some((t: any) => t.id === 'tank-petrol92') ? p : []);
+            } catch (_) { setTanks([]); }
+          } else { setTanks([]); }
+
+          if (storedPumps) {
+            try {
+              const p = JSON.parse(storedPumps);
+              setPumps(Array.isArray(p) && !p.some((e: any) => ['noz-101', 'pump-101'].includes(e.id)) ? p : []);
+            } catch (_) { setPumps([]); }
+          } else { setPumps([]); }
+
+          if (storedMachines) {
+            try {
+              const p = JSON.parse(storedMachines);
+              setPumpMachines(Array.isArray(p) && !p.some((e: any) => e.id === 'mach-01') ? p : []);
+            } catch (_) { setPumpMachines([]); }
+          } else { setPumpMachines([]); }
+
+          setActiveShift(null);
+          setShiftHistory([]);
           if (storedDeliveries) {
             try {
               setDeliveries(JSON.parse(storedDeliveries));
@@ -448,8 +346,10 @@ export default function App() {
           }
         } catch (e) {
           console.warn("Failed to load fallback from localStorage", e);
-          setEmployees(defaultEmps);
-          setTanks(defaultTanks);
+          setEmployees([]);
+          setTanks([]);
+          setPumps([]);
+          setPumpMachines([]);
         }
       };
 
@@ -487,11 +387,13 @@ export default function App() {
         const { data: employeesData, error: empError } = await supabase.from('employees').select('*');
         if (empError) handleSupabaseError(empError);
 
-        if (employeesData) {
+        if (employeesData && employeesData.length > 0) {
           const mappedEmps = employeesData.map(e => ({
             id: e.id, name: e.name, role: e.role, phone: e.phone, status: e.status, avatarColor: e.avatarcolor
           }));
           setEmployees(mappedEmps as Employee[]);
+        } else {
+          setEmployees([]);
         }
 
         // Probe and fetch fuel tanks dynamically (supports plural/singular database configurations)
@@ -513,37 +415,70 @@ export default function App() {
         const { data: tanksData, error: tankError } = await supabase.from(targetTbl).select('*');
         if (tankError) handleSupabaseError(tankError);
 
-        if (tanksData) {
+        if (tanksData && tanksData.length > 0) {
           const mappedTanks = tanksData.map(t => ({
             id: t.id, fuelType: t.fueltype, name: t.name, capacity: t.capacity, currentLevel: t.currentlevel, pricePerLiter: t.priceperliter
           }));
           setTanks(mappedTanks as FuelTank[]);
+        } else {
+          setTanks([]);
         }
 
-        // Fetch pumps table
-        const { data: pumpsData } = await supabase.from('pumps').select('*');
-        if (pumpsData && pumpsData.length > 0) {
-          const mappedPumps = pumpsData.map(p => ({
+        // Fetch pump_machines / machines table if available
+        try {
+          let { data: machinesData } = await supabase.from('pump_machines').select('*');
+          if (!machinesData || machinesData.length === 0) {
+            const { data: altMachData } = await supabase.from('machines').select('*');
+            machinesData = altMachData;
+          }
+          if (machinesData && machinesData.length > 0) {
+            const mappedMachines = machinesData.map((m: any) => ({
+              id: m.id,
+              name: m.name,
+              status: m.status || 'Active',
+              location: m.location || ''
+            }));
+            setPumpMachines(mappedMachines as PumpMachine[]);
+          } else {
+            setPumpMachines([]);
+          }
+        } catch (mErr) {
+          console.warn("Supabase pump_machines query notice:", mErr);
+          setPumpMachines([]);
+        }
+
+        // Fetch nozzles / pumps table
+        let fetchedPumps: any[] | null = null;
+        try {
+          const { data: nozzlesData } = await supabase.from('nozzles').select('*');
+          if (nozzlesData && nozzlesData.length > 0) {
+            fetchedPumps = nozzlesData;
+          }
+        } catch (_) {}
+
+        if (!fetchedPumps || fetchedPumps.length === 0) {
+          try {
+            const { data: pumpsData } = await supabase.from('pumps').select('*');
+            if (pumpsData && pumpsData.length > 0) {
+              fetchedPumps = pumpsData;
+            }
+          } catch (_) {}
+        }
+
+        if (fetchedPumps && fetchedPumps.length > 0) {
+          const mappedPumps = fetchedPumps.map((p: any) => ({
             id: p.id,
             name: p.name,
-            fuelType: p.fueltype,
-            tankId: p.tankid || undefined,
-            status: p.status || 'Active'
+            fuelType: p.fueltype || p.fuel_type || p.fuelType,
+            tankId: p.tankid || p.tank_id || p.tankId || undefined,
+            status: p.status || 'Active',
+            machineId: p.machineid || p.machine_id || p.machineId || undefined,
+            machineName: p.machinename || p.machine_name || p.machineName || undefined,
+            startMeter: Number(p.startmeter ?? p.start_meter ?? p.startMeter) || 0
           }));
           setPumps(mappedPumps as Pump[]);
         } else {
-          // Fallback if pumps table in Supabase is empty
-          const storedPumps = localStorage.getItem('fms_pumps');
-          if (storedPumps) {
-            try {
-              const parsed = JSON.parse(storedPumps);
-              setPumps(Array.isArray(parsed) && parsed.length > 0 ? parsed : defaultPumps);
-            } catch (_) {
-              setPumps(defaultPumps);
-            }
-          } else {
-            setPumps(defaultPumps);
-          }
+          setPumps([]);
         }
 
         // Fetch shifts with pump readings
@@ -597,54 +532,16 @@ export default function App() {
           const dbActive = mappedShifts.find(s => s.isActive);
           const history = mappedShifts.filter(s => !s.isActive);
 
-          const storedActiveStr = localStorage.getItem('fms_activeShift') || localStorage.getItem('active_shift_data');
-          let localActive: Shift | null = null;
-          if (storedActiveStr) {
-            try { localActive = JSON.parse(storedActiveStr); } catch (_) {}
-          }
-
           if (dbActive) {
-            const mergedReadings = dbActive.pumpReadings.map(dpr => {
-              const lpr = localActive?.pumpReadings?.find(r => r.pumpId === dpr.pumpId);
-              if (lpr) {
-                return {
-                  ...dpr,
-                  startMeter: lpr.startMeter !== undefined ? lpr.startMeter : dpr.startMeter,
-                  endMeter: lpr.endMeter !== undefined ? lpr.endMeter : dpr.endMeter,
-                  testingQty: lpr.testingQty !== undefined ? lpr.testingQty : dpr.testingQty,
-                  assignedPumperId: lpr.assignedPumperId || dpr.assignedPumperId || null,
-                  replacementPumperId: lpr.replacementPumperId || dpr.replacementPumperId || null,
-                  initialPumperCash: lpr.initialPumperCash || dpr.initialPumperCash || 0,
-                  handoverMeter: lpr.handoverMeter || dpr.handoverMeter || 0,
-                  handoverNotes: lpr.handoverNotes || dpr.handoverNotes || '',
-                  status: lpr.status || dpr.status || 'Idle',
-                  isLocked: lpr.isLocked !== undefined ? lpr.isLocked : dpr.isLocked,
-                  unitPrice: lpr.unitPrice || dpr.unitPrice || 0
-                };
-              }
-              return dpr;
-            });
-
-            if (localActive && localActive.pumpReadings) {
-              localActive.pumpReadings.forEach(lpr => {
-                if (!mergedReadings.some(dpr => dpr.pumpId === lpr.pumpId)) {
-                  mergedReadings.push(lpr);
-                }
-              });
-            }
-
-            setActiveShift({
-              ...dbActive,
-              supervisorId: localActive?.supervisorId || dbActive.supervisorId,
-              name: localActive?.name || dbActive.name,
-              startTime: localActive?.startTime || dbActive.startTime,
-              pumpReadings: mergedReadings
-            } as unknown as Shift);
-          } else if (localActive && (localActive.isActive || (localActive as any).isactive)) {
-            setActiveShift(localActive);
+            setActiveShift(dbActive as unknown as Shift);
+          } else {
+            setActiveShift(null);
           }
 
           setShiftHistory(history as unknown as Shift[]);
+        } else {
+          setActiveShift(null);
+          setShiftHistory([]);
         }
 
         // Fetch deliveries
@@ -864,7 +761,7 @@ export default function App() {
 
     if (deliveries.length > 0) {
       const dbPayload = deliveries.map(d => ({
-        id: d.id, date: d.date, fueltype: d.fuelType, quantity: d.quantity, supplier: d.supplier, cost: d.cost
+        id: d.id, date: d.date, fueltype: d.fuelType, quantity: d.quantity, supplier: d.supplier
       }));
       supabase.from('stock_deliveries').upsert(dbPayload).then(({ error }) => {
         if (error) handleSyncWriteError(error);
@@ -962,6 +859,21 @@ export default function App() {
       localStorage.setItem('fms_tanks', JSON.stringify(updatedTanks));
     } catch (_) {}
 
+    // Update local pumps / nozzles state with closing meter carry-over
+    if (closedShift.pumpReadings && closedShift.pumpReadings.length > 0) {
+      const updatedPumps = pumps.map(p => {
+        const rd = closedShift.pumpReadings.find(r => r.pumpId === p.id);
+        if (rd && rd.endMeter !== undefined && rd.endMeter > 0) {
+          return { ...p, startMeter: rd.endMeter };
+        }
+        return p;
+      });
+      setPumps(updatedPumps);
+      try {
+        localStorage.setItem('fms_pumps', JSON.stringify(updatedPumps));
+      } catch (_) {}
+    }
+
     // Persist updated tank levels directly to Supabase fuel_tanks table
     const isConfigured = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
     if (isConfigured && !dbError && !isRlsActive) {
@@ -976,6 +888,11 @@ export default function App() {
       supabase.from(getTanksTableName()).upsert(tankPayload).then(({ error }) => {
         if (error) console.warn("Supabase tank level deduction update notice:", error?.message || error);
       });
+
+      // Update nozzle carry-over start_meter directly in nozzles and pumps tables in Supabase
+      if (closedShift.pumpReadings && closedShift.pumpReadings.length > 0) {
+        updateNozzleMeterCarryover(supabase, closedShift.pumpReadings.map(r => ({ pumpId: r.pumpId, endMeter: r.endMeter })));
+      }
     }
 
     // 2. Add shift to completed history list
@@ -1260,6 +1177,7 @@ export default function App() {
                 setTanks={setTanks}
                 pumps={pumps}
                 setPumps={setPumps}
+                pumpMachines={pumpMachines}
                 activeShift={activeShift}
                 setActiveShift={setActiveShift}
                 shiftHistory={shiftHistory}
@@ -1320,6 +1238,8 @@ export default function App() {
                 setTanks={setTanks}
                 pumps={pumps}
                 setPumps={setPumps}
+                pumpMachines={pumpMachines}
+                setPumpMachines={setPumpMachines}
                 employees={employees}
                 setEmployees={setEmployees}
                 priceSchedules={priceSchedules}
@@ -1334,6 +1254,8 @@ export default function App() {
                 setTanks={setTanks}
                 pumps={pumps}
                 setPumps={setPumps}
+                pumpMachines={pumpMachines}
+                setPumpMachines={setPumpMachines}
                 employees={employees}
                 setEmployees={setEmployees}
                 priceSchedules={priceSchedules}

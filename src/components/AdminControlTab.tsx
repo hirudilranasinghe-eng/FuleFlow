@@ -10,8 +10,9 @@ import {
   Landmark, Edit2, Search, Phone, X, RefreshCcw,
   Layers, Info, Tag, Calendar, Clock, Save, Gauge
 } from 'lucide-react';
-import { Employee, FuelTank, FuelType, Pump, PriceSchedule } from '../types';
+import { Employee, FuelTank, FuelType, Pump, PumpMachine, PriceSchedule } from '../types';
 import { supabase, getTanksTableName } from '../lib/supabase';
+import { savePumpMachine, deletePumpMachine, saveNozzle, deleteNozzle, saveFuelTank, deleteFuelTank } from '../lib/supabaseClient';
 import { SUPABASE_SQL } from '../lib/sqlSchema';
 
 interface AdminControlTabProps {
@@ -19,6 +20,8 @@ interface AdminControlTabProps {
   setTanks: React.Dispatch<React.SetStateAction<FuelTank[]>>;
   pumps: Pump[];
   setPumps: React.Dispatch<React.SetStateAction<Pump[]>>;
+  pumpMachines?: PumpMachine[];
+  setPumpMachines?: React.Dispatch<React.SetStateAction<PumpMachine[]>>;
   employees: Employee[];
   setEmployees: React.Dispatch<React.SetStateAction<Employee[]>>;
   priceSchedules?: PriceSchedule[];
@@ -31,6 +34,8 @@ export default function AdminControlTab({
   setTanks,
   pumps,
   setPumps,
+  pumpMachines = [],
+  setPumpMachines,
   employees,
   setEmployees,
   priceSchedules = [],
@@ -62,8 +67,8 @@ export default function AdminControlTab({
   const [tankFormName, setTankFormName] = useState('');
   const [tankFormFuelType, setTankFormFuelType] = useState<FuelType>('Petrol 92');
   const [tankFormCapacity, setTankFormCapacity] = useState<number>(15000);
-  const [tankFormCurrentLevel, setTankFormCurrentLevel] = useState<number>(10000);
-  const [tankFormPrice, setTankFormPrice] = useState<number>(355);
+  const [tankFormCurrentLevel, setTankFormCurrentLevel] = useState<number>(0);
+  const [tankFormPrice, setTankFormPrice] = useState<number>(0);
   const [tankModalError, setTankModalError] = useState<string | null>(null);
 
   const handleOpenAddTankModal = () => {
@@ -71,8 +76,8 @@ export default function AdminControlTab({
     setTankFormName('');
     setTankFormFuelType('Petrol 92');
     setTankFormCapacity(15000);
-    setTankFormCurrentLevel(10000);
-    setTankFormPrice(355);
+    setTankFormCurrentLevel(0);
+    setTankFormPrice(0);
     setTankModalError(null);
     setIsAddTankModalOpen(true);
   };
@@ -90,17 +95,15 @@ export default function AdminControlTab({
 
   const handleSaveTankSubmit = async () => {
     if (!tankFormName.trim()) {
-      setTankModalError('Tank name is required.');
+      setTankModalError('Tank name is required (e.g. Tank 01 - Petrol 92).');
       return;
     }
     if (tankFormCapacity <= 0) {
       setTankModalError('Tank capacity must be greater than 0 liters.');
       return;
     }
-    if (tankFormCurrentLevel < 0 || tankFormCurrentLevel > tankFormCapacity) {
-      setTankModalError(`Current level must be between 0 and total capacity (${tankFormCapacity.toLocaleString()} L).`);
-      return;
-    }
+
+    const capVal = Number(tankFormCapacity) || 0;
 
     if (editingTank) {
       // Update existing tank
@@ -108,55 +111,35 @@ export default function AdminControlTab({
         ...editingTank,
         name: tankFormName.trim(),
         fuelType: tankFormFuelType,
-        capacity: tankFormCapacity,
-        currentLevel: tankFormCurrentLevel,
-        pricePerLiter: tankFormPrice > 0 ? tankFormPrice : 350
+        capacity: capVal,
+        currentLevel: Math.min(editingTank.currentLevel, capVal),
+        pricePerLiter: editingTank.pricePerLiter || 0
       };
 
-      setTanks(prev => prev.map(t => t.id === editingTank.id ? updatedTank : t));
+      const nextTanks = tanks.map(t => t.id === editingTank.id ? updatedTank : t);
+      setTanks(nextTanks);
+      try { localStorage.setItem('fms_tanks', JSON.stringify(nextTanks)); } catch (_) {}
 
-      try {
-        const tableName = getTanksTableName();
-        await supabase.from(tableName).upsert({
-          id: updatedTank.id,
-          name: updatedTank.name,
-          fueltype: updatedTank.fuelType,
-          capacity: updatedTank.capacity,
-          currentlevel: updatedTank.currentLevel,
-          priceperliter: updatedTank.pricePerLiter
-        });
-      } catch (err: any) {
-        console.warn("Error updating tank in Supabase:", err);
-      }
+      await saveFuelTank(supabase, updatedTank);
 
       setIsAddTankModalOpen(false);
       showToast(`Underground Tank "${updatedTank.name}" updated successfully.`);
     } else {
-      // Create new tank
+      // Create new tank - default initial volume strictly 0 L, default unit price strictly 0.00
       const newTank: FuelTank = {
         id: `tank-${Date.now().toString().slice(-6)}`,
         name: tankFormName.trim(),
         fuelType: tankFormFuelType,
-        capacity: tankFormCapacity,
-        currentLevel: tankFormCurrentLevel,
-        pricePerLiter: tankFormPrice > 0 ? tankFormPrice : 350
+        capacity: capVal,
+        currentLevel: 0,
+        pricePerLiter: 0
       };
 
-      setTanks(prev => [...prev, newTank]);
+      const nextTanks = [...tanks, newTank];
+      setTanks(nextTanks);
+      try { localStorage.setItem('fms_tanks', JSON.stringify(nextTanks)); } catch (_) {}
 
-      try {
-        const tableName = getTanksTableName();
-        await supabase.from(tableName).insert([{
-          id: newTank.id,
-          name: newTank.name,
-          fueltype: newTank.fuelType,
-          capacity: newTank.capacity,
-          currentlevel: newTank.currentLevel,
-          priceperliter: newTank.pricePerLiter
-        }]);
-      } catch (err: any) {
-        console.warn("Error inserting tank into Supabase:", err);
-      }
+      await saveFuelTank(supabase, newTank);
 
       setIsAddTankModalOpen(false);
       showToast(`Underground Tank "${newTank.name}" created successfully.`);
@@ -178,226 +161,119 @@ export default function AdminControlTab({
       }
     }
 
-    try {
-      const tableName = getTanksTableName();
-      await supabase.from(tableName).delete().eq('id', tankId);
-    } catch (err) {
-      console.warn("Supabase delete tank error:", err);
-    }
+    const nextTanks = tanks.filter(t => t.id !== tankId);
+    setTanks(nextTanks);
+    try { localStorage.setItem('fms_tanks', JSON.stringify(nextTanks)); } catch (_) {}
 
-    setTanks(prev => prev.filter(t => t.id !== tankId));
+    await deleteFuelTank(supabase, tankId);
+
     showToast(`Storage Tank "${targetTank.name}" deleted.`);
   };
 
   // -------------------------------------------------------------
-  // B) PUMP-TO-TANK MAPPING & PUMP MANAGEMENT (Add, Edit, Save, Delete)
+  // B) FUEL NOZZLES MANAGEMENT (Add, Edit, Save, Delete)
   // -------------------------------------------------------------
-  const [selectedPumpTankMap, setSelectedPumpTankMap] = useState<Record<string, string>>({});
-  const [isAddPumpModalOpen, setIsAddPumpModalOpen] = useState(false);
-  const [editingPump, setEditingPump] = useState<Pump | null>(null);
+  // Nozzle Modal State
+  const [isAddNozzleModalOpen, setIsAddNozzleModalOpen] = useState(false);
+  const [editingNozzle, setEditingNozzle] = useState<Pump | null>(null);
+  const [nozzleFormName, setNozzleFormName] = useState('');
+  const [nozzleFormFuelType, setNozzleFormFuelType] = useState<FuelType>('Petrol 92');
+  const [nozzleFormTankId, setNozzleFormTankId] = useState('');
+  const [nozzleFormStartMeter, setNozzleFormStartMeter] = useState<number>(10000);
+  const [nozzleFormStatus, setNozzleFormStatus] = useState<'Active' | 'Idle' | 'Maintenance'>('Active');
+  const [nozzleModalError, setNozzleModalError] = useState<string | null>(null);
 
-  // Form fields for Pump
-  const [pumpFormName, setPumpFormName] = useState('');
-  const [pumpFormFuelType, setPumpFormFuelType] = useState<FuelType>('Petrol 92');
-  const [pumpFormTankId, setPumpFormTankId] = useState('');
-  const [pumpFormStatus, setPumpFormStatus] = useState<'Active' | 'Inactive'>('Active');
-  const [pumpModalError, setPumpModalError] = useState<string | null>(null);
-
-  const handleOpenAddPumpModal = () => {
-    setEditingPump(null);
-    setPumpFormName('');
-    const firstTank = tanks[0];
-    setPumpFormFuelType(firstTank?.fuelType || 'Petrol 92');
-    setPumpFormTankId(firstTank?.id || '');
-    setPumpFormStatus('Active');
-    setPumpModalError(null);
-    setIsAddPumpModalOpen(true);
+  // --- NOZZLE HANDLERS ---
+  const handleOpenAddNozzleModal = (parentTankId?: string) => {
+    setEditingNozzle(null);
+    setNozzleFormName('');
+    const targetTank = tanks.find(t => t.id === parentTankId) || tanks[0];
+    setNozzleFormTankId(targetTank?.id || '');
+    setNozzleFormFuelType(targetTank?.fuelType || 'Petrol 92');
+    setNozzleFormStartMeter(0);
+    setNozzleFormStatus('Active');
+    setNozzleModalError(null);
+    setIsAddNozzleModalOpen(true);
   };
 
-  const handleOpenEditPumpModal = (pump: Pump) => {
-    setEditingPump(pump);
-    setPumpFormName(pump.name);
-    setPumpFormFuelType(pump.fuelType);
-    setPumpFormTankId(pump.tankId || '');
-    setPumpFormStatus(pump.status);
-    setPumpModalError(null);
-    setIsAddPumpModalOpen(true);
+  const handleOpenEditNozzleModal = (nozzle: Pump) => {
+    setEditingNozzle(nozzle);
+    setNozzleFormName(nozzle.name);
+    setNozzleFormFuelType(nozzle.fuelType);
+    setNozzleFormTankId(nozzle.tankId || '');
+    setNozzleFormStartMeter(nozzle.startMeter || 0);
+    setNozzleFormStatus(nozzle.status || 'Active');
+    setNozzleModalError(null);
+    setIsAddNozzleModalOpen(true);
   };
 
-  const handleSavePumpSubmit = async () => {
-    if (!pumpFormName.trim()) {
-      setPumpModalError('Pump name / identifier is required.');
+  const handleSaveNozzleSubmit = async () => {
+    if (!nozzleFormName.trim()) {
+      setNozzleModalError('Pump name is required (e.g. Pump 01 - Petrol 92).');
+      return;
+    }
+    if (!nozzleFormTankId) {
+      setNozzleModalError('Please select a target underground storage tank.');
       return;
     }
 
-    const selectedTank = tanks.find(t => t.id === pumpFormTankId);
-    const resolvedFuelType = selectedTank ? selectedTank.fuelType : pumpFormFuelType;
+    const selectedTank = tanks.find(t => t.id === nozzleFormTankId);
+    const resolvedFuelType = selectedTank ? selectedTank.fuelType : nozzleFormFuelType;
 
-    if (editingPump) {
-      // Edit Pump
-      const updatedPump: Pump = {
-        ...editingPump,
-        name: pumpFormName.trim(),
+    if (editingNozzle) {
+      const updatedNozzle: Pump = {
+        ...editingNozzle,
+        name: nozzleFormName.trim(),
         fuelType: resolvedFuelType,
-        tankId: pumpFormTankId || undefined,
-        status: pumpFormStatus
+        tankId: nozzleFormTankId,
+        startMeter: Number(nozzleFormStartMeter) || 0,
+        status: nozzleFormStatus || 'Active'
       };
 
-      try {
-        const payload: any = {
-          id: updatedPump.id,
-          name: updatedPump.name,
-          fueltype: updatedPump.fuelType,
-          status: updatedPump.status
-        };
-        if (updatedPump.tankId) payload.tankid = updatedPump.tankId;
+      const nextPumps = pumps.map(p => p.id === editingNozzle.id ? updatedNozzle : p);
+      setPumps(nextPumps);
+      try { localStorage.setItem('fms_pumps', JSON.stringify(nextPumps)); } catch (_) {}
 
-        let { error } = await supabase.from('pumps').upsert(payload);
-        
-        if (error && (error.message?.includes('tankid') || error.code === '42703' || error.message?.includes('schema cache'))) {
-          console.warn("pumps table missing 'tankid' column in Supabase schema cache. Retrying upsert without tankid.");
-          delete payload.tankid;
-          const retry = await supabase.from('pumps').upsert(payload);
-          error = retry.error;
-        }
+      await saveNozzle(supabase, updatedNozzle);
 
-        if (error) console.warn("Supabase edit pump error:", error);
-
-        const { data: latestPumps } = await supabase.from('pumps').select('*');
-        if (latestPumps) {
-          const mapped = latestPumps.map(p => ({
-            id: p.id,
-            name: p.name,
-            fuelType: p.fueltype,
-            tankId: p.tankid || undefined,
-            status: p.status
-          }));
-          setPumps(mapped as Pump[]);
-          localStorage.setItem('fms_pumps', JSON.stringify(mapped));
-        } else {
-          const next = pumps.map(p => p.id === editingPump.id ? updatedPump : p);
-          setPumps(next);
-          localStorage.setItem('fms_pumps', JSON.stringify(next));
-        }
-
-        setIsAddPumpModalOpen(false);
-        showToast(`Pump "${updatedPump.name}" updated successfully.`);
-      } catch (err) {
-        console.warn("Supabase edit pump error:", err);
-        const next = pumps.map(p => p.id === editingPump.id ? updatedPump : p);
-        setPumps(next);
-        localStorage.setItem('fms_pumps', JSON.stringify(next));
-        setIsAddPumpModalOpen(false);
-        showToast(`Pump "${updatedPump.name}" updated locally.`);
-      }
+      setIsAddNozzleModalOpen(false);
+      showToast(`Pump "${updatedNozzle.name}" updated successfully.`);
     } else {
-      // Add Pump
-      const newPump: Pump = {
-        id: `p-${Date.now().toString().slice(-4)}`,
-        name: pumpFormName.trim(),
+      const newNozzle: Pump = {
+        id: `noz-${Date.now().toString().slice(-4)}`,
+        name: nozzleFormName.trim(),
         fuelType: resolvedFuelType,
-        status: pumpFormStatus,
-        tankId: pumpFormTankId || undefined
+        tankId: nozzleFormTankId,
+        startMeter: 0,
+        status: 'Active'
       };
 
-      try {
-        const payload: any = {
-          id: newPump.id,
-          name: newPump.name,
-          fueltype: newPump.fuelType,
-          status: newPump.status
-        };
-        if (newPump.tankId) payload.tankid = newPump.tankId;
+      const nextPumps = [...pumps, newNozzle];
+      setPumps(nextPumps);
+      try { localStorage.setItem('fms_pumps', JSON.stringify(nextPumps)); } catch (_) {}
 
-        let { error } = await supabase.from('pumps').insert([payload]);
+      await saveNozzle(supabase, newNozzle);
 
-        if (error && (error.message?.includes('tankid') || error.code === '42703' || error.message?.includes('schema cache'))) {
-          console.warn("pumps table missing 'tankid' column in Supabase schema cache. Retrying insert without tankid.");
-          delete payload.tankid;
-          const retry = await supabase.from('pumps').insert([payload]);
-          error = retry.error;
-        }
-
-        if (error) console.warn("Supabase insert pump error:", error);
-
-        const { data: latestPumps } = await supabase.from('pumps').select('*');
-        if (latestPumps) {
-          const mapped = latestPumps.map(p => ({
-            id: p.id,
-            name: p.name,
-            fuelType: p.fueltype,
-            tankId: p.tankid || undefined,
-            status: p.status
-          }));
-          setPumps(mapped as Pump[]);
-          localStorage.setItem('fms_pumps', JSON.stringify(mapped));
-        } else {
-          const next = [...pumps, newPump];
-          setPumps(next);
-          localStorage.setItem('fms_pumps', JSON.stringify(next));
-        }
-
-        setIsAddPumpModalOpen(false);
-        showToast(`New Pump "${newPump.name}" added successfully.`);
-      } catch (err) {
-        console.warn("Supabase add pump error:", err);
-        const next = [...pumps, newPump];
-        setPumps(next);
-        localStorage.setItem('fms_pumps', JSON.stringify(next));
-        setIsAddPumpModalOpen(false);
-        showToast(`New Pump "${newPump.name}" added locally.`);
-      }
+      setIsAddNozzleModalOpen(false);
+      showToast(`New Nozzle "${newNozzle.name}" added directly to ${selectedTank?.name || 'Storage Tank'}.`);
     }
   };
 
-  const handleSaveSinglePumpMapping = async (pumpId: string) => {
-    const targetTankId = selectedPumpTankMap[pumpId] || pumps.find(p => p.id === pumpId)?.tankId || tanks[0]?.id;
-    if (!targetTankId) return;
+  const handleDeleteNozzle = async (nozzleId: string) => {
+    const target = pumps.find(p => p.id === nozzleId);
+    if (!target) return;
 
-    const targetTank = tanks.find(t => t.id === targetTankId);
-    if (!targetTank) return;
-
-    const pumpToUpdate = pumps.find(p => p.id === pumpId);
-    if (!pumpToUpdate) return;
-
-    const updatedPump: Pump = {
-      ...pumpToUpdate,
-      tankId: targetTank.id,
-      fuelType: targetTank.fuelType
-    };
-
-    try {
-      const payload: any = {
-        id: updatedPump.id,
-        name: updatedPump.name,
-        fueltype: updatedPump.fuelType,
-        status: updatedPump.status
-      };
-      if (updatedPump.tankId) payload.tankid = updatedPump.tankId;
-
-      let { error } = await supabase.from('pumps').upsert(payload);
-
-      if (error && (error.message?.includes('tankid') || error.code === '42703' || error.message?.includes('schema cache'))) {
-        console.warn("pumps table missing 'tankid' column in Supabase schema cache. Retrying upsert without tankid.");
-        delete payload.tankid;
-        const retry = await supabase.from('pumps').upsert(payload);
-        error = retry.error;
-      }
-
-      if (error) console.warn("Supabase pump mapping error:", error);
-
-      const nextPumps = pumps.map(p => p.id === pumpId ? updatedPump : p);
-      setPumps(nextPumps);
-      localStorage.setItem('fms_pumps', JSON.stringify(nextPumps));
-
-      showToast(`Saved! ${updatedPump.name} mapped to ${targetTank.name} (${targetTank.fuelType}).`);
-    } catch (err) {
-      console.warn("Supabase pump mapping save error:", err);
-      const nextPumps = pumps.map(p => p.id === pumpId ? updatedPump : p);
-      setPumps(nextPumps);
-      localStorage.setItem('fms_pumps', JSON.stringify(nextPumps));
-      showToast(`Saved locally! ${updatedPump.name} mapped to ${targetTank.name}.`);
+    if (!confirm(`Are you sure you want to delete nozzle "${target.name}"?`)) {
+      return;
     }
+
+    const nextPumps = pumps.filter(p => p.id !== nozzleId);
+    setPumps(nextPumps);
+    try { localStorage.setItem('fms_pumps', JSON.stringify(nextPumps)); } catch (_) {}
+
+    await deleteNozzle(supabase, nozzleId);
+
+    showToast(`Nozzle "${target.name}" deleted.`);
   };
 
   const handleDeletePump = async (pumpId: string) => {
@@ -771,8 +647,8 @@ export default function AdminControlTab({
               : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200/60'
           }`}
         >
-          <Layers className="w-4 h-4" />
-          <span>Pump-to-Tank Mapping & Pumps ({pumps.length})</span>
+          <Gauge className="w-4 h-4" />
+          <span>Storage Tanks & Fuel Nozzles ({pumps.length} Nozzles)</span>
         </button>
 
         <button
@@ -817,13 +693,7 @@ export default function AdminControlTab({
       {/* ========================================================================= */}
       {adminSection === 'tanks' && (
         <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
-            <div>
-              <h2 className="text-lg font-bold text-[#1C1C1C]">Underground Storage Tanks</h2>
-              <p className="text-xs text-gray-500 mt-0.5">
-                Configure subterranean fuel vessels, max capacities, current volumes, and retail unit prices
-              </p>
-            </div>
+          <div className="flex justify-end">
             <button
               onClick={handleOpenAddTankModal}
               className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm"
@@ -834,214 +704,249 @@ export default function AdminControlTab({
           </div>
 
           {/* Tanks Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            {tanks.map((tank) => {
-              const pct = Math.round((tank.currentLevel / tank.capacity) * 100);
-              const mappedPumpsList = pumps.filter(p => p.tankId === tank.id || (!p.tankId && p.fuelType === tank.fuelType));
-
-              return (
-                <div key={tank.id} className="bg-white rounded-2xl border border-gray-100 p-6 space-y-4 shadow-sm hover:border-gray-200 transition-all">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
-                          tank.fuelType.includes('Petrol') 
-                            ? 'bg-amber-500/10 text-amber-700 border-amber-500/20' 
-                            : 'bg-blue-500/10 text-blue-700 border-blue-500/20'
-                        }`}>
-                          {tank.fuelType}
-                        </span>
-                        <span className="text-xs font-semibold text-gray-400">ID: {tank.id}</span>
-                      </div>
-                      <h3 className="text-lg font-extrabold text-[#1C1C1C] mt-1.5">{tank.name}</h3>
-                    </div>
-
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => handleOpenEditTankModal(tank)}
-                        className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-colors"
-                        title="Edit Tank"
-                      >
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => handleDeleteTank(tank.id)}
-                        className="p-2 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors"
-                        title="Delete Tank"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Level Progress Bar */}
-                  <div className="space-y-1.5">
-                    <div className="flex justify-between text-xs font-bold">
-                      <span className="text-gray-500">Current Fill Volume</span>
-                      <span className={`tabular-nums ${pct < 20 ? 'text-rose-600 font-extrabold' : 'text-[#1C1C1C]'}`}>
-                        {pct}% ({tank.currentLevel.toLocaleString()} L)
-                      </span>
-                    </div>
-                    <div className="w-full bg-gray-100 h-2.5 rounded-full overflow-hidden">
-                      <div 
-                        className={`h-full rounded-full transition-all duration-500 ${
-                          pct < 20 ? 'bg-rose-500' : pct < 40 ? 'bg-amber-500' : 'bg-emerald-500'
-                        }`}
-                        style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Details Matrix */}
-                  <div className="grid grid-cols-2 gap-3 pt-2 text-xs border-t border-gray-100">
-                    <div className="bg-gray-50 p-3 rounded-xl">
-                      <span className="text-gray-400 font-semibold block text-[10px] uppercase">Total Capacity</span>
-                      <span className="text-[#1C1C1C] font-bold tabular-nums text-sm">{tank.capacity.toLocaleString()} L</span>
-                    </div>
-
-                    <div className="bg-gray-50 p-3 rounded-xl">
-                      <span className="text-gray-400 font-semibold block text-[10px] uppercase">Price / Liter</span>
-                      <span className="text-blue-600 font-bold tabular-nums text-sm">{formatCurrency(tank.pricePerLiter)}</span>
-                    </div>
-                  </div>
-
-                  {/* Connected Pumps Badge */}
-                  <div className="flex items-center justify-between text-xs text-gray-500 bg-blue-50/50 p-3 rounded-xl border border-blue-100/50">
-                    <span className="font-medium text-gray-600 flex items-center gap-1.5">
-                      <Gauge className="w-3.5 h-3.5 text-blue-600" />
-                      <span>Mapped Pumps ({mappedPumpsList.length}):</span>
-                    </span>
-                    <span className="font-bold text-blue-700 truncate max-w-[180px]">
-                      {mappedPumpsList.length > 0 ? mappedPumpsList.map(p => p.name).join(', ') : 'None'}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* SECTION B: PUMP-TO-TANK MAPPING & PUMP MANAGEMENT */}
-      {/* ========================================================================= */}
-      {adminSection === 'mapping' && (
-        <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
-            <div>
-              <div className="flex items-center gap-2 text-blue-600">
-                <Layers className="w-5 h-5" />
-                <h2 className="text-lg font-bold text-[#1C1C1C]">Pump Dispenser & Tank Mapping Management</h2>
-              </div>
-              <p className="text-xs text-gray-500 mt-1">
-                Link each pump nozzle to its target subterranean tank. Use "Save Mapping" to update the binding. Automatic sales deductions will be deducted from the mapped tank.
-              </p>
-            </div>
-
-            <button
-              onClick={handleOpenAddPumpModal}
-              className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm whitespace-nowrap"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Add Pump / Nozzle</span>
-            </button>
-          </div>
-
-          {pumps.length === 0 ? (
+          {tanks.length === 0 ? (
             <div className="bg-white p-12 text-center rounded-2xl border border-gray-100 space-y-4 shadow-sm">
               <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mx-auto">
-                <Gauge className="w-6 h-6" />
+                <Database className="w-6 h-6" />
               </div>
               <div className="space-y-1">
-                <h3 className="text-sm font-bold text-[#1C1C1C]">No Fuel Pumps Configured</h3>
+                <h3 className="text-sm font-bold text-[#1C1C1C]">No Underground Storage Tanks Configured</h3>
                 <p className="text-xs text-gray-500 max-w-sm mx-auto">
-                  There are no pumps recorded in the station database. Click below to add a fuel dispenser pump and assign its target storage tank.
+                  Click '+ Add Storage Tank' to create your first storage tank (e.g. LAD Tank, New 92 Tank).
                 </p>
               </div>
               <button
-                onClick={handleOpenAddPumpModal}
+                onClick={handleOpenAddTankModal}
                 className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm"
               >
                 <Plus className="w-4 h-4" />
-                <span>Add Pump / Nozzle</span>
+                <span>Add Storage Tank</span>
               </button>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              {pumps.map((pump) => {
-                const currentTank = tanks.find(t => t.id === (selectedPumpTankMap[pump.id] || pump.tankId)) || tanks.find(t => t.fuelType === pump.fuelType) || tanks[0];
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {tanks.map((tank) => {
+                const pct = tank.capacity > 0 ? Math.round((tank.currentLevel / tank.capacity) * 100) : 0;
+                const mappedPumpsList = pumps.filter(p => p.tankId === tank.id || (!p.tankId && p.fuelType === tank.fuelType));
+
+                const getFuelTypeBadgeStyle = (fuelType: string) => {
+                  if (fuelType.includes('92')) return 'bg-amber-500/10 text-amber-700 border-amber-500/20';
+                  if (fuelType.includes('95')) return 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20';
+                  if (fuelType.includes('Super Diesel')) return 'bg-purple-500/10 text-purple-700 border-purple-500/20';
+                  if (fuelType.includes('Auto Diesel')) return 'bg-blue-500/10 text-blue-700 border-blue-500/20';
+                  if (fuelType.includes('Ordinary') || fuelType.includes('LAD')) return 'bg-teal-500/10 text-teal-700 border-teal-500/20';
+                  return 'bg-slate-500/10 text-slate-700 border-slate-500/20';
+                };
 
                 return (
-                  <div key={pump.id} className="bg-white p-5 rounded-2xl border border-gray-100 space-y-4 shadow-sm hover:border-gray-200 transition-all">
-                    <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+                  <div key={tank.id} className="bg-white rounded-xl border border-gray-100 p-4 space-y-3 shadow-sm hover:border-gray-200 transition-all">
+                    <div className="flex items-start justify-between gap-2">
                       <div className="flex items-center gap-2.5">
-                        <div className="w-9 h-9 rounded-xl bg-gray-100 text-[#1C1C1C] flex items-center justify-center font-bold text-xs shadow-inner">
-                          {pump.id.replace('p-', '#')}
+                        <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0 font-bold">
+                          <Database className="w-4 h-4" />
                         </div>
                         <div>
-                          <h4 className="font-extrabold text-[#1C1C1C] text-sm">{pump.name}</h4>
-                          <span className="text-[10px] text-gray-400 block font-mono">{pump.id}</span>
+                          <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${getFuelTypeBadgeStyle(tank.fuelType)}`}>
+                            {tank.fuelType}
+                          </span>
+                          <h3 className="text-sm font-extrabold text-[#1C1C1C] leading-snug mt-0.5">{tank.name}</h3>
                         </div>
                       </div>
 
                       <div className="flex items-center gap-1.5">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                          pump.status === 'Active' ? 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20' : 'bg-amber-500/10 text-amber-700 border-amber-500/20'
-                        }`}>
-                          {pump.status}
-                        </span>
-
                         <button
-                          onClick={() => handleOpenEditPumpModal(pump)}
+                          onClick={() => handleOpenEditTankModal(tank)}
                           className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                          title="Edit Pump Details"
+                          title="Edit Tank"
                         >
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
-
                         <button
-                          onClick={() => handleDeletePump(pump.id)}
+                          onClick={() => handleDeleteTank(tank.id)}
                           className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                          title="Delete Pump"
+                          title="Delete Tank"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </div>
 
-                    {/* Mapping Selector + Explicit Save Button */}
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">
-                        Target Underground Storage Tank
-                      </label>
-                      <div className="flex items-center gap-2">
-                        <select
-                          value={selectedPumpTankMap[pump.id] || pump.tankId || (currentTank?.id || '')}
-                          onChange={(e) => setSelectedPumpTankMap(prev => ({ ...prev, [pump.id]: e.target.value }))}
-                          className="flex-1 px-3 py-2 bg-gray-50 border border-gray-200 text-[#1C1C1C] rounded-xl text-xs font-semibold focus:outline-none focus:border-blue-500 focus:bg-white transition-all"
-                        >
-                          {tanks.map((t) => (
-                            <option key={t.id} value={t.id}>
-                              {t.name} ({t.fuelType})
-                            </option>
-                          ))}
-                        </select>
-
-                        <button
-                          onClick={() => handleSaveSinglePumpMapping(pump.id)}
-                          className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 whitespace-nowrap"
-                          title="Persist mapping to Supabase"
-                        >
-                          <Save className="w-3.5 h-3.5" />
-                          <span>Save Mapping</span>
-                        </button>
+                    {/* Level Progress Bar */}
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-xs font-bold">
+                        <span className="text-gray-500">Current Fill Volume</span>
+                        <span className={`tabular-nums ${pct < 20 ? 'text-rose-600 font-extrabold' : 'text-[#1C1C1C]'}`}>
+                          {pct}% ({tank.currentLevel.toLocaleString()} L)
+                        </span>
+                      </div>
+                      <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden">
+                        <div 
+                          className={`h-full rounded-full transition-all duration-500 ${
+                            pct < 20 ? 'bg-rose-500' : pct < 40 ? 'bg-amber-500' : 'bg-emerald-500'
+                          }`}
+                          style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
+                        />
                       </div>
                     </div>
 
-                    {/* Current Mapped Grade */}
-                    <div className="bg-blue-50/50 p-3 rounded-xl border border-blue-100/60 flex items-center justify-between text-xs">
-                      <span className="text-gray-500 font-medium">Mapped Fuel Grade:</span>
-                      <span className="font-bold text-blue-700">{pump.fuelType}</span>
+                    {/* Details Matrix */}
+                    <div className="grid grid-cols-2 gap-2 text-xs border-t border-gray-100 pt-2">
+                      <div className="bg-gray-50 p-2 rounded-lg">
+                        <span className="text-gray-400 font-semibold block text-[9px] uppercase">Total Capacity</span>
+                        <span className="text-[#1C1C1C] font-bold tabular-nums text-xs">{tank.capacity.toLocaleString()} L</span>
+                      </div>
+
+                      <div className="bg-gray-50 p-2 rounded-lg">
+                        <span className="text-gray-400 font-semibold block text-[9px] uppercase">Price / Liter</span>
+                        <span className="text-blue-600 font-bold tabular-nums text-xs">{formatCurrency(tank.pricePerLiter)}</span>
+                      </div>
+                    </div>
+
+                    {/* Connected Pumps Badge */}
+                    <div className="flex items-center justify-between text-xs text-gray-500 bg-blue-50/50 p-2 rounded-lg border border-blue-100/50">
+                      <span className="font-medium text-gray-600 flex items-center gap-1.5 text-[11px]">
+                        <Gauge className="w-3.5 h-3.5 text-blue-600" />
+                        <span>Mapped Nozzles ({mappedPumpsList.length}):</span>
+                      </span>
+                      <span className="font-bold text-blue-700 truncate max-w-[160px] text-xs">
+                        {mappedPumpsList.length > 0 ? mappedPumpsList.map(p => p.name).join(', ') : 'None'}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* SECTION B: STORAGE TANKS & FUEL NOZZLES DIRECT MAPPING */}
+      {/* ========================================================================= */}
+      {adminSection === 'mapping' && (
+        <div className="space-y-6">
+          {/* Tanks with Attached Nozzles List */}
+          {tanks.length === 0 ? (
+            <div className="bg-white p-12 text-center rounded-2xl border border-gray-100 space-y-4 shadow-sm">
+              <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mx-auto">
+                <Database className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-[#1C1C1C]">No Underground Storage Tanks Configured</h3>
+                <p className="text-xs text-gray-500 max-w-sm mx-auto">
+                  Create storage tanks first in the "Underground Storage Tanks" tab before attaching fuel nozzles.
+                </p>
+              </div>
+              <button
+                onClick={() => setAdminSection('tanks')}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Go to Storage Tanks Tab</span>
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-5">
+              {tanks.map((tank) => {
+                const attachedNozzles = pumps.filter(p => p.tankId === tank.id || (!p.tankId && p.fuelType === tank.fuelType));
+
+                const getFuelTypeBadgeStyle = (fuelType: string) => {
+                  if (fuelType.includes('92')) return 'bg-amber-500/10 text-amber-700 border-amber-500/20';
+                  if (fuelType.includes('95')) return 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20';
+                  if (fuelType.includes('Super Diesel')) return 'bg-purple-500/10 text-purple-700 border-purple-500/20';
+                  if (fuelType.includes('Auto Diesel')) return 'bg-blue-500/10 text-blue-700 border-blue-500/20';
+                  if (fuelType.includes('Ordinary') || fuelType.includes('LAD')) return 'bg-teal-500/10 text-teal-700 border-teal-500/20';
+                  return 'bg-slate-500/10 text-slate-700 border-slate-500/20';
+                };
+
+                return (
+                  <div key={tank.id} className="bg-white rounded-xl border border-gray-200/80 shadow-sm overflow-hidden">
+                    {/* Tank Header */}
+                    <div className="p-4 bg-gray-50/80 border-b border-gray-200/80 flex items-center justify-between gap-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center font-black text-sm shadow-sm flex-shrink-0">
+                          <Database className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${getFuelTypeBadgeStyle(tank.fuelType)}`}>
+                              {tank.fuelType}
+                            </span>
+                            <h3 className="text-sm font-extrabold text-[#1C1C1C]">{tank.name}</h3>
+                          </div>
+                          <span className="text-xs font-medium text-gray-500 mt-0.5 block">
+                            Capacity: <strong className="text-gray-700">{tank.capacity.toLocaleString()} L</strong> • Current Fill: <strong className="text-emerald-600">{tank.currentLevel.toLocaleString()} L</strong> • Direct Nozzles: <strong className="text-blue-600">{attachedNozzles.length}</strong>
+                          </span>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => handleOpenAddNozzleModal(tank.id)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors shadow-xs flex-shrink-0 cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Add Fuel Pump</span>
+                      </button>
+                    </div>
+
+                    {/* Attached Nozzles Grid */}
+                    <div className="p-5">
+                      {attachedNozzles.length === 0 ? (
+                        <div className="py-4 px-6 text-center bg-gray-50/50 rounded-xl border border-dashed border-gray-200/80">
+                          <p className="text-xs text-gray-400 font-medium">No pumps attached to this tank</p>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                          {attachedNozzles.map((nozzle) => {
+                            return (
+                              <div key={nozzle.id} className="p-4 bg-white border border-gray-200 rounded-xl space-y-3 hover:border-blue-300 transition-all shadow-xs">
+                                <div className="flex items-start justify-between border-b border-gray-100 pb-2">
+                                  <div>
+                                    <h4 className="font-bold text-[#1C1C1C] text-xs">{nozzle.name}</h4>
+                                    <span className="text-[10px] text-gray-400 font-mono">{nozzle.id}</span>
+                                  </div>
+
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      onClick={() => handleOpenEditNozzleModal(nozzle)}
+                                      className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                                      title="Edit Pump"
+                                    >
+                                      <Edit2 className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      onClick={() => handleDeleteNozzle(nozzle.id)}
+                                      className="p-1 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors"
+                                      title="Delete Pump"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                                  <div className="bg-gray-50 p-2 rounded-lg">
+                                    <span className="text-gray-400 text-[9px] uppercase font-bold block">Fuel Grade</span>
+                                    <span className="font-extrabold text-blue-700">{nozzle.fuelType}</span>
+                                  </div>
+
+                                  <div className="bg-gray-50 p-2 rounded-lg">
+                                    <span className="text-gray-400 text-[9px] uppercase font-bold block">Start Meter</span>
+                                    <span className="font-bold text-[#1C1C1C] tabular-nums">
+                                      {(nozzle.startMeter || 0).toLocaleString()} L
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div className="text-[10px] text-gray-500 bg-blue-50/50 p-2 rounded-lg border border-blue-100/50 flex items-center justify-between">
+                                  <span>Bound Tank:</span>
+                                  <strong className="text-blue-900 truncate max-w-[140px]">{tank.name}</strong>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -1151,18 +1056,6 @@ export default function AdminControlTab({
       {/* ========================================================================= */}
       {adminSection === 'price' && (
         <div className="space-y-6">
-          <div className="bg-white p-6 rounded-2xl border border-gray-100 flex items-center justify-between shadow-sm">
-            <div>
-              <h2 className="text-lg font-bold text-[#1C1C1C]">Price & Tariff Rate Management</h2>
-              <p className="text-xs text-gray-500 mt-0.5">
-                Manage global retail selling rates per liter and schedule automated price changes
-              </p>
-            </div>
-            <div className="w-10 h-10 bg-emerald-50 rounded-2xl flex items-center justify-center text-emerald-600">
-              <Tag className="w-5 h-5" />
-            </div>
-          </div>
-
           {/* Current Retail Prices Table */}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
             <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/50">
@@ -1199,6 +1092,7 @@ export default function AdminControlTab({
                               type="number"
                               step="0.01"
                               value={tempPriceVal}
+                              onFocus={(e) => e.target.select()}
                               onChange={(e) => setTempPriceVal(parseFloat(e.target.value) || 0)}
                               className="w-28 px-3 py-1.5 border border-blue-500 bg-white text-[#1C1C1C] rounded-lg tabular-nums font-bold text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-right"
                               autoFocus
@@ -1277,6 +1171,7 @@ export default function AdminControlTab({
                       required
                       placeholder="350.00"
                       value={schedPrice || ''}
+                      onFocus={(e) => e.target.select()}
                       onChange={(e) => setSchedPrice(parseFloat(e.target.value) || 0)}
                       className="w-full pl-10 pr-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] tabular-nums font-bold focus:outline-none focus:border-blue-500"
                     />
@@ -1514,7 +1409,7 @@ export default function AdminControlTab({
           <div className="bg-white rounded-3xl p-6 max-w-md w-full space-y-5 shadow-2xl animate-scale-up">
             <div className="flex items-center justify-between border-b border-gray-100 pb-3">
               <h3 className="text-base font-extrabold text-[#1C1C1C] flex items-center gap-2">
-                <Fuel className="w-5 h-5 text-blue-600" />
+                <Database className="w-5 h-5 text-blue-600" />
                 <span>{editingTank ? 'Edit Underground Storage Tank' : 'Add Underground Storage Tank'}</span>
               </h3>
               <button 
@@ -1537,7 +1432,7 @@ export default function AdminControlTab({
                 <label className="font-bold text-gray-600 block mb-1">Tank Name / Identifier</label>
                 <input
                   type="text"
-                  placeholder="e.g. Tank 05 - Petrol 92 Reserve"
+                  placeholder="e.g. Tank 01 - Petrol 92"
                   value={tankFormName}
                   onChange={(e) => setTankFormName(e.target.value)}
                   className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] focus:outline-none focus:border-blue-500 font-medium"
@@ -1555,38 +1450,17 @@ export default function AdminControlTab({
                   <option value="Petrol 95">Petrol 95</option>
                   <option value="Auto Diesel">Auto Diesel</option>
                   <option value="Super Diesel">Super Diesel</option>
+                  <option value="Lanka Ordinary Diesel">Lanka Ordinary Diesel</option>
                 </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="font-bold text-gray-600 block mb-1">Max Capacity (L)</label>
-                  <input
-                    type="number"
-                    value={tankFormCapacity}
-                    onChange={(e) => setTankFormCapacity(Number(e.target.value))}
-                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] focus:outline-none focus:border-blue-500 tabular-nums font-bold"
-                  />
-                </div>
-
-                <div>
-                  <label className="font-bold text-gray-600 block mb-1">Current Reserve (L)</label>
-                  <input
-                    type="number"
-                    value={tankFormCurrentLevel}
-                    onChange={(e) => setTankFormCurrentLevel(Number(e.target.value))}
-                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] focus:outline-none focus:border-blue-500 tabular-nums font-bold"
-                  />
-                </div>
-              </div>
-
               <div>
-                <label className="font-bold text-gray-600 block mb-1">Retail Price per Liter (Rs.)</label>
+                <label className="font-bold text-gray-600 block mb-1">Max Capacity (L)</label>
                 <input
                   type="number"
-                  step="0.01"
-                  value={tankFormPrice}
-                  onChange={(e) => setTankFormPrice(Number(e.target.value))}
+                  value={tankFormCapacity}
+                  onFocus={(e) => e.target.select()}
+                  onChange={(e) => setTankFormCapacity(Number(e.target.value))}
                   className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] focus:outline-none focus:border-blue-500 tabular-nums font-bold"
                 />
               </div>
@@ -1611,88 +1485,83 @@ export default function AdminControlTab({
       )}
 
       {/* ========================================================================= */}
-      {/* MODAL: ADD / EDIT PUMP DISPENSER */}
+      {/* MODAL: ADD / EDIT NOZZLE */}
       {/* ========================================================================= */}
-      {isAddPumpModalOpen && (
+      {isAddNozzleModalOpen && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-6 max-w-md w-full space-y-5 shadow-2xl animate-scale-up">
             <div className="flex items-center justify-between border-b border-gray-100 pb-3">
               <h3 className="text-base font-extrabold text-[#1C1C1C] flex items-center gap-2">
                 <Gauge className="w-5 h-5 text-blue-600" />
-                <span>{editingPump ? 'Edit Pump / Dispenser' : 'Add New Pump / Dispenser'}</span>
+                <span>{editingNozzle ? 'Edit Fuel Nozzle' : 'Configure New Fuel Nozzle'}</span>
               </h3>
               <button 
-                onClick={() => setIsAddPumpModalOpen(false)}
+                onClick={() => setIsAddNozzleModalOpen(false)}
                 className="p-1 text-gray-400 hover:text-gray-600 rounded-lg"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {pumpModalError && (
+            {nozzleModalError && (
               <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl font-medium flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-                <span>{pumpModalError}</span>
+                <span>{nozzleModalError}</span>
               </div>
             )}
 
             <div className="space-y-4 text-xs">
               <div>
-                <label className="font-bold text-gray-600 block mb-1">Pump Dispenser Name</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Pump 07 - Petrol 92"
-                  value={pumpFormName}
-                  onChange={(e) => setPumpFormName(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] focus:outline-none focus:border-blue-500 font-medium"
-                />
-              </div>
-
-              <div>
                 <label className="font-bold text-gray-600 block mb-1">Target Underground Storage Tank</label>
                 <select
-                  value={pumpFormTankId}
+                  value={nozzleFormTankId}
                   onChange={(e) => {
                     const selId = e.target.value;
-                    setPumpFormTankId(selId);
+                    setNozzleFormTankId(selId);
                     const selected = tanks.find(t => t.id === selId);
-                    if (selected) setPumpFormFuelType(selected.fuelType);
+                    if (selected) setNozzleFormFuelType(selected.fuelType);
                   }}
                   className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] focus:outline-none focus:border-blue-500 font-semibold"
                 >
-                  {tanks.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name} ({t.fuelType})
-                    </option>
-                  ))}
+                  {tanks.length === 0 ? (
+                    <option value="">-- No Storage Tanks Configured --</option>
+                  ) : (
+                    <>
+                      <option value="">-- Select Source Tank --</option>
+                      {tanks.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name} ({t.fuelType}) - {t.capacity.toLocaleString()} L Capacity
+                        </option>
+                      ))}
+                    </>
+                  )}
                 </select>
               </div>
 
               <div>
-                <label className="font-bold text-gray-600 block mb-1">Status</label>
-                <select
-                  value={pumpFormStatus}
-                  onChange={(e) => setPumpFormStatus(e.target.value as 'Active' | 'Inactive')}
-                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] focus:outline-none focus:border-blue-500 font-semibold"
-                >
-                  <option value="Active">Active</option>
-                  <option value="Inactive">Inactive / Maintenance</option>
-                </select>
+                <label className="font-bold text-gray-600 block mb-1">Pump</label>
+                <input
+                  type="text"
+                  placeholder="Pump 01 - Petrol 92"
+                  value={nozzleFormName}
+                  onChange={(e) => setNozzleFormName(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] focus:outline-none focus:border-blue-500 font-medium"
+                />
               </div>
             </div>
 
             <div className="flex gap-3 pt-2">
               <button
-                onClick={() => setIsAddPumpModalOpen(false)}
+                onClick={() => setIsAddNozzleModalOpen(false)}
                 className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition-colors"
               >
                 Cancel
               </button>
               <button
-                onClick={handleSavePumpSubmit}
+                onClick={handleSaveNozzleSubmit}
                 className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm"
               >
-                {editingPump ? 'Update Pump' : 'Add Pump'}
+                {editingNozzle ? 'Update Nozzle' : 'Save Nozzle'}
               </button>
             </div>
           </div>

@@ -5,8 +5,8 @@
 
 import React, { useMemo } from 'react';
 import { 
-  Fuel, TrendingUp, AlertTriangle, Users, ArrowUpRight, 
-  Calendar, CheckCircle2, ShoppingBag, Droplet, Clock, Info
+  Database, TrendingUp, AlertTriangle, Users, ArrowUpRight, 
+  Calendar, CheckCircle2, ShoppingBag, Droplet, Clock, Info, Fuel
 } from 'lucide-react';
 import { 
   ResponsiveContainer, 
@@ -39,7 +39,7 @@ export default function DashboardTab({
   // Computations
   const totalStockLitres = useMemo(() => tanks.reduce((acc, t) => acc + t.currentLevel, 0), [tanks]);
   const totalStockCapacity = useMemo(() => tanks.reduce((acc, t) => acc + t.capacity, 0), [tanks]);
-  const stockPercentage = Math.round((totalStockLitres / totalStockCapacity) * 100);
+  const stockPercentage = totalStockCapacity > 0 ? Math.round((totalStockLitres / totalStockCapacity) * 100) : 0;
 
   const lowStockTanks = useMemo(() => {
     return tanks.filter(t => (t.currentLevel / t.capacity) < 0.40);
@@ -241,7 +241,7 @@ export default function DashboardTab({
               </span>
             </div>
             <div className="p-3 bg-white shadow-sm rounded-xl text-emerald-600">
-              <Fuel className="w-5 h-5" />
+              <Database className="w-5 h-5" />
             </div>
           </div>
           <div className="mt-4 flex items-center gap-2.5 text-xs text-gray-500">

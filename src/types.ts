@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export type FuelType = 'Petrol 92' | 'Petrol 95' | 'Auto Diesel' | 'Super Diesel' | 'Oil & Lubricants';
+export type FuelType = 'Petrol 92' | 'Petrol 95' | 'Auto Diesel' | 'Super Diesel' | 'Lanka Ordinary Diesel' | 'Oil & Lubricants';
 
 export interface AuthUser {
   id: string;
@@ -43,12 +43,22 @@ export interface FuelTank {
   pricePerLiter: number; // e.g. Rs. or USD
 }
 
+export interface PumpMachine {
+  id: string;
+  name: string;
+  status: 'Active' | 'Inactive' | 'Maintenance';
+  location?: string;
+}
+
 export interface Pump {
   id: string;
   name: string;
   fuelType: FuelType;
   tankId: string; // Linked underground storage tank ID (e.g. 'tank-petrol92')
   status: 'Active' | 'Idle' | 'Maintenance';
+  machineId?: string; // Linked Dispenser Machine ID (e.g. 'mach-01')
+  machineName?: string; // Linked Dispenser Machine Name (e.g. 'Pump Machine 01')
+  startMeter?: number; // Configured start meter reading (liters)
 }
 
 export interface PumpReading {
@@ -56,6 +66,8 @@ export interface PumpReading {
   pumpName: string;
   fuelType: FuelType;
   tankId?: string; // Linked underground storage tank ID
+  machineId?: string;
+  machineName?: string;
   assignedPumperId: string | null; // null if unassigned
   replacementPumperId?: string | null; // Mid-shift replacement pumper
   initialPumperCash?: number; // Cash handed over by initial pumper

@@ -6,6 +6,7 @@
 import React from 'react';
 import { LayoutDashboard, Clock, Fuel, BarChart3, FileText, Users, Tag, ShieldCheck, LogOut } from 'lucide-react';
 import { AuthUser, resolveUserRole } from '../types';
+import FuelLogo from './FuelLogo';
 
 interface SidebarProps {
   activeTab: string;
@@ -44,19 +45,7 @@ export default function Sidebar({ activeTab, setActiveTab, user, onLogout }: Sid
     <div id="sidebar-container" className="w-64 h-screen bg-white border-r border-gray-100 flex flex-col fixed left-0 top-0 z-20">
       {/* Brand Logo */}
       <div id="brand-logo" className="p-6 pb-2 w-full flex justify-center">
-        <svg viewBox="0 0 230 65" className="w-full max-w-[160px] h-auto drop-shadow-sm mix-blend-multiply" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <linearGradient id="fGradient" x1="0%" y1="100%" x2="100%" y2="0%">
-              <stop offset="0%" stopColor="#111827" />
-              <stop offset="100%" stopColor="#2563EB" />
-            </linearGradient>
-          </defs>
-          <path d="M 12 62 L 12 16 C 12 7.2 19.2 0 28 0 L 50 0 L 36 14 L 26 14 L 26 24 L 42 24 L 28 38 L 26 38 L 26 48 Z" fill="url(#fGradient)" />
-          <text x="62" y="42" fontFamily="Inter, system-ui, sans-serif" fontSize="32" fontWeight="800" letterSpacing="-0.5">
-            <tspan fill="#111827">Fuel</tspan>
-            <tspan fill="#3B82F6">Flow</tspan>
-          </text>
-        </svg>
+        <FuelLogo variant="full" size="md" />
       </div>
 
       {/* Navigation Menu Links */}

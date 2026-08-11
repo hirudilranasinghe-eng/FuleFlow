@@ -1,5 +1,5 @@
-import { supabase } from './supabase';
-import { PumpReading } from '../types';
+import { supabase, getTanksTableName } from './supabase';
+import { PumpReading, FuelTank } from '../types';
 
 export { supabase };
 
@@ -390,3 +390,214 @@ export async function syncCreditAndCardSales(client: any, readings: PumpReading[
     }
   }
 }
+
+/**
+ * Syncs a Dispenser Machine to Supabase 'pump_machines' table with 'machines' fallback.
+ */
+export async function savePumpMachine(client: any, machine: { id: string; name: string; status?: string; location?: string }) {
+  if (!machine || !machine.id) return { data: null, error: null };
+  const payload = {
+    id: machine.id,
+    name: machine.name,
+    status: machine.status || 'Active',
+    location: machine.location || ''
+  };
+
+  try {
+    let { data, error } = await client.from('pump_machines').upsert([payload]);
+    if (error && (error.code === 'PGRST205' || error.message?.includes('schema cache') || error.message?.includes('Could not find'))) {
+      const retry = await client.from('machines').upsert([payload]);
+      data = retry.data;
+      error = retry.error;
+    }
+    return { data, error };
+  } catch (err: any) {
+    console.warn("savePumpMachine sync notice:", err?.message || err);
+    return { data: null, error: err };
+  }
+}
+
+/**
+ * Deletes a Dispenser Machine from Supabase 'pump_machines' table with 'machines' fallback.
+ */
+export async function deletePumpMachine(client: any, machineId: string) {
+  if (!machineId) return { data: null, error: null };
+  try {
+    let { data, error } = await client.from('pump_machines').delete().eq('id', machineId);
+    if (error && (error.code === 'PGRST205' || error.message?.includes('schema cache'))) {
+      const retry = await client.from('machines').delete().eq('id', machineId);
+      data = retry.data;
+      error = retry.error;
+    }
+    return { data, error };
+  } catch (err: any) {
+    console.warn("deletePumpMachine sync notice:", err?.message || err);
+    return { data: null, error: err };
+  }
+}
+
+/**
+ * Syncs a Nozzle / Pump to Supabase 'nozzles' and 'pumps' tables with multi-column fallback.
+ */
+export async function saveNozzle(client: any, nozzle: {
+  id: string;
+  name: string;
+  fuelType: string;
+  tankId?: string;
+  status?: string;
+  machineId?: string;
+  machineName?: string;
+  startMeter?: number;
+}) {
+  if (!nozzle || !nozzle.id) return { data: null, error: null };
+
+  const snakePayload: any = {
+    id: nozzle.id,
+    name: nozzle.name,
+    fuel_type: nozzle.fuelType,
+    status: nozzle.status || 'Active',
+    machine_id: nozzle.machineId || null,
+    machine_name: nozzle.machineName || null,
+    start_meter: nozzle.startMeter || 0
+  };
+  if (nozzle.tankId) snakePayload.tank_id = nozzle.tankId;
+
+  const lowerPayload: any = {
+    id: nozzle.id,
+    name: nozzle.name,
+    fueltype: nozzle.fuelType,
+    status: nozzle.status || 'Active',
+    machineid: nozzle.machineId || null,
+    machinename: nozzle.machineName || null,
+    startmeter: nozzle.startMeter || 0
+  };
+  if (nozzle.tankId) lowerPayload.tankid = nozzle.tankId;
+
+  // Try saving to 'nozzles' table first
+  try {
+    let { data, error } = await client.from('nozzles').upsert([snakePayload]);
+    if (error) {
+      const retry = await client.from('nozzles').upsert([lowerPayload]);
+      if (!retry.error) {
+        data = retry.data;
+        error = null;
+      }
+    }
+    
+    // Also save to 'pumps' table for backwards compatibility
+    try {
+      let pRetry = await client.from('pumps').upsert([lowerPayload]);
+      if (pRetry.error) {
+        await client.from('pumps').upsert([snakePayload]);
+      }
+    } catch (_) {}
+
+    return { data, error: null };
+  } catch (err: any) {
+    // If nozzles table missing, try pumps table
+    try {
+      let pRetry = await client.from('pumps').upsert([lowerPayload]);
+      if (pRetry.error) {
+        await client.from('pumps').upsert([snakePayload]);
+      }
+    } catch (_) {}
+    return { data: null, error: err };
+  }
+}
+
+/**
+ * Deletes a Nozzle / Pump from Supabase 'nozzles' and 'pumps' tables.
+ */
+export async function deleteNozzle(client: any, nozzleId: string) {
+  if (!nozzleId) return { data: null, error: null };
+  try {
+    await client.from('nozzles').delete().eq('id', nozzleId);
+  } catch (_) {}
+  try {
+    await client.from('pumps').delete().eq('id', nozzleId);
+  } catch (_) {}
+  return { data: null, error: null };
+}
+
+/**
+ * Carry-over Meter Sync: Updates nozzles' start_meter in Supabase upon shift completion.
+ */
+export async function updateNozzleMeterCarryover(client: any, readings: { pumpId: string; endMeter: number }[]) {
+  if (!readings || readings.length === 0) return;
+
+  for (const r of readings) {
+    if (r.endMeter !== undefined && r.endMeter > 0) {
+      const endVal = Number(r.endMeter);
+      // Update nozzles table
+      try {
+        const { error } = await client.from('nozzles').update({ start_meter: endVal }).eq('id', r.pumpId);
+        if (error) {
+          await client.from('nozzles').update({ startmeter: endVal }).eq('id', r.pumpId);
+        }
+      } catch (_) {}
+
+      // Update pumps table
+      try {
+        const { error } = await client.from('pumps').update({ startmeter: endVal }).eq('id', r.pumpId);
+        if (error) {
+          await client.from('pumps').update({ start_meter: endVal }).eq('id', r.pumpId);
+        }
+      } catch (_) {}
+    }
+  }
+}
+
+/**
+ * Syncs a Fuel Tank to Supabase 'fuel_tanks' / 'tanks' table with multi-column fallback.
+ */
+export async function saveFuelTank(client: any, tank: FuelTank) {
+  if (!tank || !tank.id) return { data: null, error: null };
+  const snakePayload = {
+    id: tank.id,
+    name: tank.name,
+    fuel_type: tank.fuelType,
+    capacity: tank.capacity,
+    current_level: tank.currentLevel,
+    price_per_liter: tank.pricePerLiter
+  };
+  const lowerPayload = {
+    id: tank.id,
+    name: tank.name,
+    fueltype: tank.fuelType,
+    capacity: tank.capacity,
+    currentlevel: tank.currentLevel,
+    priceperliter: tank.pricePerLiter
+  };
+
+  const tableName = getTanksTableName();
+  try {
+    let { data, error } = await client.from(tableName).upsert([lowerPayload]);
+    if (error) {
+      const retry = await client.from(tableName).upsert([snakePayload]);
+      if (!retry.error) {
+        data = retry.data;
+        error = null;
+      }
+    }
+    return { data, error };
+  } catch (err: any) {
+    console.warn("saveFuelTank sync notice:", err?.message || err);
+    return { data: null, error: err };
+  }
+}
+
+/**
+ * Deletes a Fuel Tank from Supabase 'fuel_tanks' / 'tanks' table.
+ */
+export async function deleteFuelTank(client: any, tankId: string) {
+  if (!tankId) return { data: null, error: null };
+  const tableName = getTanksTableName();
+  try {
+    const { data, error } = await client.from(tableName).delete().eq('id', tankId);
+    return { data, error };
+  } catch (err: any) {
+    console.warn("deleteFuelTank sync notice:", err?.message || err);
+    return { data: null, error: err };
+  }
+}
+

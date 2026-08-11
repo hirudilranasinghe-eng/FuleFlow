@@ -11,7 +11,7 @@ import {
   Lock, Unlock, Edit2, ArrowLeft, Users, Package
 } from 'lucide-react';
 import { supabase, saveCreditSale, saveCardSale, syncCreditAndCardSales, upsertPumpReadings } from '../lib/supabaseClient';
-import { Employee, FuelTank, Pump, PumpReading, Shift, FuelType } from '../types';
+import { Employee, FuelTank, Pump, PumpMachine, PumpReading, Shift, FuelType } from '../types';
 
 interface ShiftManagementTabProps {
   employees: Employee[];
@@ -19,6 +19,7 @@ interface ShiftManagementTabProps {
   setTanks?: React.Dispatch<React.SetStateAction<FuelTank[]>>;
   pumps?: Pump[];
   setPumps?: React.Dispatch<React.SetStateAction<Pump[]>>;
+  pumpMachines?: PumpMachine[];
   activeShift: Shift | null;
   setActiveShift: React.Dispatch<React.SetStateAction<Shift | null>>;
   shiftHistory?: Shift[];
@@ -26,24 +27,13 @@ interface ShiftManagementTabProps {
   onStartShift: (newShift: Omit<Shift, 'totalFuelSold' | 'totalNetSold' | 'totalNetSales'>) => void;
 }
 
-const defaultPumpsList: Pump[] = [
-  { id: 'pump-101', name: 'Pump 01', fuelType: 'Petrol 92', tankId: 'tank-petrol92', status: 'Active' },
-  { id: 'pump-102', name: 'Pump 02', fuelType: 'Petrol 92', tankId: 'tank-petrol92', status: 'Active' },
-  { id: 'pump-103', name: 'Pump 03', fuelType: 'Petrol 95', tankId: 'tank-petrol95', status: 'Active' },
-  { id: 'pump-104', name: 'Pump 04', fuelType: 'Petrol 95', tankId: 'tank-petrol95', status: 'Active' },
-  { id: 'pump-105', name: 'Pump 05', fuelType: 'Auto Diesel', tankId: 'tank-autodiesel', status: 'Active' },
-  { id: 'pump-106', name: 'Pump 06', fuelType: 'Auto Diesel', tankId: 'tank-autodiesel', status: 'Active' },
-  { id: 'pump-107', name: 'Pump 07', fuelType: 'Super Diesel', tankId: 'tank-superdiesel', status: 'Active' },
-  { id: 'pump-108', name: 'Pump 08', fuelType: 'Super Diesel', tankId: 'tank-superdiesel', status: 'Active' },
-  { id: 'pump-oil-bay', name: 'Oil & Lubricants Bay', fuelType: 'Oil & Lubricants', tankId: '', status: 'Active' }
-];
-
 export default function ShiftManagementTab({
   employees,
   tanks,
   setTanks,
-  pumps,
+  pumps = [],
   setPumps,
+  pumpMachines = [],
   activeShift,
   setActiveShift,
   shiftHistory,
@@ -173,7 +163,7 @@ export default function ShiftManagementTab({
   // Sync draft states when activeShift changes
   React.useEffect(() => {
     if (activeShift) {
-      const availablePumpsList = (pumps && pumps.length > 0) ? pumps : defaultPumpsList;
+      const availablePumpsList = pumps || [];
       const availablePumps = availablePumpsList.some(p => p.id === 'pump-oil-bay')
         ? availablePumpsList
         : [...availablePumpsList, { id: 'pump-oil-bay', name: 'Oil & Lubricants Bay', fuelType: 'Oil & Lubricants' as FuelType, tankId: '', status: 'Active' }];
@@ -185,6 +175,8 @@ export default function ShiftManagementTab({
           return readingMap.get(p.id)!;
         }
         const carryForward = getPreviousEndMeterForPump(p.id);
+        const pStartMeter = (p as Pump).startMeter;
+        const initialMeter = pStartMeter !== undefined && pStartMeter > 0 ? Math.max(carryForward, pStartMeter) : carryForward;
         const tank = tanks.find(t => t.id === p.tankId || t.fuelType === p.fuelType);
         return {
           pumpId: p.id,
@@ -192,7 +184,7 @@ export default function ShiftManagementTab({
           fuelType: p.fuelType,
           tankId: p.tankId || tank?.id || '',
           assignedPumperId: null,
-          startMeter: carryForward,
+          startMeter: initialMeter,
           endMeter: 0,
           testingQty: 0,
           status: 'Idle',
@@ -294,21 +286,9 @@ export default function ShiftManagementTab({
         }
       }
 
-      // Merge with shiftHistory prop and local storage
-      const localHistory: any[] = (() => {
-        try {
-          return JSON.parse(localStorage.getItem('fms_shiftHistory') || localStorage.getItem('fuelflow_history') || '[]');
-        } catch (e) {
-          return [];
-        }
-      })();
-
       const combinedMap = new Map<string, any>();
       (shiftHistory || []).forEach(s => {
         if (!s.isActive) combinedMap.set(s.id, s);
-      });
-      localHistory.forEach(s => {
-        if (!s.isActive && !combinedMap.has(s.id)) combinedMap.set(s.id, s);
       });
       fetched.forEach(s => {
         combinedMap.set(s.id, s);
@@ -383,26 +363,6 @@ export default function ShiftManagementTab({
       }
     }
 
-    // 4. Check fms_shiftHistory & fuelflow_history in localStorage
-    try {
-      const keys = ['fms_shiftHistory', 'fuelflow_history'];
-      for (const k of keys) {
-        const savedStr = localStorage.getItem(k);
-        if (savedStr) {
-          const history: Shift[] = JSON.parse(savedStr);
-          for (const shift of history) {
-            if (shift.pumpReadings) {
-              const reading = shift.pumpReadings.find((pr: any) => (pr.pumpId || pr.pumpid) === pumpId);
-              const endM = reading ? (reading.endMeter !== undefined ? reading.endMeter : (reading as any).endmeter) : null;
-              if (endM !== null && endM !== undefined && Number(endM) > 0) {
-                return Number(endM);
-              }
-            }
-          }
-        }
-      }
-    } catch (e) {}
-
     return 0;
   };
 
@@ -439,7 +399,7 @@ export default function ShiftManagementTab({
   const getPriceForFuelType = (type: string) => {
     if (type === 'Oil & Lubricants') return 0;
     const tank = tanks.find(t => t.fuelType === type);
-    return tank ? tank.pricePerLiter : 1.50;
+    return tank ? tank.pricePerLiter : 0;
   };
 
   // Pre-populate supervisor
@@ -1157,7 +1117,7 @@ export default function ShiftManagementTab({
     const randSuffix = Math.floor(10 + Math.random() * 90);
     const newShiftId = `SH-${dateStr}-${randSuffix}`;
 
-    const pumpsListRaw = (pumps && pumps.length > 0) ? pumps : defaultPumpsList;
+    const pumpsListRaw = pumps || [];
     const pumpsList = pumpsListRaw.some(p => p.id === 'pump-oil-bay')
       ? pumpsListRaw
       : [...pumpsListRaw, { id: 'pump-oil-bay', name: 'Oil & Lubricants Bay', fuelType: 'Oil & Lubricants' as FuelType, tankId: '', status: 'Active' }];
@@ -2478,7 +2438,7 @@ export default function ShiftManagementTab({
                         ) : (
                           <tr>
                             <td colSpan={6} className="py-12 text-center text-gray-400 font-medium text-xs">
-                              No completed shifts recorded yet.
+                              No shift logs found. Click '+ Open New Shift' to record your first shift
                             </td>
                           </tr>
                         )}

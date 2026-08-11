@@ -6,7 +6,8 @@
 import React, { useState } from 'react';
 import { 
   Plus, Calendar, ShieldCheck, AlertTriangle, Truck, 
-  DollarSign, RefreshCcw, Info, Fuel, X, CheckCircle2, Trash2
+  DollarSign, RefreshCcw, Info, Fuel, X, CheckCircle2, Trash2,
+  ShoppingBag, ShoppingCart, Database
 } from 'lucide-react';
 import { FuelTank, StockDelivery, FuelType, Pump } from '../types';
 import { supabase, getTanksTableName } from '../lib/supabase';
@@ -33,9 +34,10 @@ export default function FuelStockTab({
   const [isDeliveryModalOpen, setIsDeliveryModalOpen] = useState(false);
   const [selectedTankId, setSelectedTankId] = useState<string>('');
   const [deliveryFuelType, setDeliveryFuelType] = useState<FuelType>('Petrol 92');
-  const [deliveryQty, setDeliveryQty] = useState<number>(5000);
-  const [deliverySupplier, setDeliverySupplier] = useState('Lanka IOC PLC');
-  const [deliveryCost, setDeliveryCost] = useState<number>(6500);
+  const [deliveryQty, setDeliveryQty] = useState<number | ''>('');
+  const [deliverySupplier, setDeliverySupplier] = useState('Ceylon Petroleum Corporation');
+  const [deliveryInvoiceNo, setDeliveryInvoiceNo] = useState<string>('');
+  const [deliveryDate, setDeliveryDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [modalError, setModalError] = useState<string | null>(null);
 
   // Price Edit State
@@ -116,9 +118,10 @@ export default function FuelStockTab({
   };
 
   // Handle adding delivery
-  const handleAddDeliverySubmit = () => {
-    if (deliveryQty <= 0) {
-      setModalError('Delivery quantity must be a positive number.');
+  const handleAddDeliverySubmit = async () => {
+    const numQty = typeof deliveryQty === 'number' ? deliveryQty : parseFloat(deliveryQty) || 0;
+    if (numQty <= 0) {
+      setModalError('Delivery volume must be a positive number.');
       return;
     }
     
@@ -130,17 +133,19 @@ export default function FuelStockTab({
     }
 
     const freeSpace = targetTank.capacity - targetTank.currentLevel;
-    if (deliveryQty > freeSpace) {
-      setModalError(`Delivery volume (${deliveryQty.toLocaleString()} L) exceeds target tank free space (${freeSpace.toFixed(1)} L) for ${targetTank.name}! Max volume you can add is ${freeSpace.toFixed(1)} L.`);
+    if (numQty > freeSpace) {
+      setModalError(`Delivery volume (${numQty.toLocaleString()} L) exceeds target tank free space (${freeSpace.toFixed(1)} L) for ${targetTank.name}! Max volume you can add is ${freeSpace.toFixed(1)} L.`);
       return;
     }
 
-    // Update target tank current level
+    const updatedLevel = Math.min(targetTank.capacity, targetTank.currentLevel + numQty);
+
+    // Update target tank current level locally
     const updatedTanks = tanks.map(t => {
       if (t.id === targetTank.id) {
         return {
           ...t,
-          currentLevel: Math.min(t.capacity, t.currentLevel + deliveryQty)
+          currentLevel: updatedLevel
         };
       }
       return t;
@@ -148,20 +153,65 @@ export default function FuelStockTab({
 
     setTanks(updatedTanks);
 
-    // Create delivery record with target tank details
+    const autoCost = Math.round(numQty * (targetTank.pricePerLiter || 0));
+    const deliveryId = deliveryInvoiceNo.trim() || `DEL-${Date.now().toString().slice(-6)}`;
+    const deliveryIsoDate = deliveryDate ? new Date(deliveryDate).toISOString() : new Date().toISOString();
+    const supplierName = deliverySupplier.trim() || 'Ceylon Petroleum Corporation';
+
+    // Create delivery record with target tank details locally
     const newDelivery: StockDelivery = {
-      id: `del-${Date.now().toString().slice(-6)}`,
-      date: new Date().toISOString(),
+      id: deliveryId,
+      date: deliveryIsoDate,
       fuelType: targetTank.fuelType,
       tankId: targetTank.id,
       tankName: targetTank.name,
-      quantity: deliveryQty,
-      supplier: deliverySupplier || 'Lanka IOC PLC',
-      cost: deliveryCost
+      quantity: numQty,
+      supplier: supplierName,
+      cost: autoCost
     };
 
     setDeliveries([newDelivery, ...deliveries]);
+
+    // Persist changes directly to Supabase tables
+    try {
+      // 1. Save purchase row to stock_deliveries strictly with valid columns (cost omitted)
+      const deliveryPayload = {
+        id: deliveryId,
+        date: deliveryIsoDate,
+        fueltype: targetTank.fuelType,
+        quantity: numQty,
+        supplier: supplierName
+      };
+
+      const { data, error } = await supabase.from('stock_deliveries').upsert([deliveryPayload]).select();
+      if (error) {
+        console.error('Purchase Save Error:', error);
+      } else {
+        console.log('Purchase Saved:', data);
+      }
+
+      // 2. Auto-increment tank level in fuel_tanks table in Supabase
+      const tankPayload = {
+        id: targetTank.id,
+        name: targetTank.name,
+        fueltype: targetTank.fuelType,
+        capacity: targetTank.capacity,
+        currentlevel: updatedLevel,
+        priceperliter: targetTank.pricePerLiter
+      };
+
+      const { error: tankErr } = await supabase.from(getTanksTableName()).upsert([tankPayload]);
+      if (tankErr) {
+        console.warn("Supabase fuel_tanks level auto-increment notice:", tankErr.message || tankErr);
+      }
+    } catch (err: any) {
+      console.error("Supabase purchase persistence error:", err?.message || err);
+    }
+
     setIsDeliveryModalOpen(false);
+    setDeliveryQty('');
+    setDeliveryInvoiceNo('');
+    setDeliverySupplier('Ceylon Petroleum Corporation');
     setModalError(null);
   };
 
@@ -241,12 +291,15 @@ export default function FuelStockTab({
           id="btn-trigger-delivery"
           onClick={() => {
             setModalError(null);
+            setDeliveryQty('');
+            setDeliveryInvoiceNo('');
+            setDeliverySupplier('Ceylon Petroleum Corporation');
             setIsDeliveryModalOpen(true);
           }}
           className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-blue-500 text-white font-bold text-sm rounded-xl hover:brightness-110 transition-all shadow-md shadow-blue-500/10 cursor-pointer"
         >
-          <Truck className="w-4 h-4" />
-          <span>Log Supplier Delivery</span>
+          <ShoppingBag className="w-4 h-4" />
+          <span>New Purchase</span>
         </button>
       </div>
 
@@ -256,6 +309,15 @@ export default function FuelStockTab({
           const fillPercent = Math.round((tank.currentLevel / tank.capacity) * 100);
           const isLowStock = fillPercent < 40;
           const isCritical = fillPercent < 15;
+
+          const getFuelTypeBadgeStyle = (fuelType: string) => {
+            if (fuelType.includes('92')) return 'bg-amber-500/10 text-amber-700 border-amber-500/20';
+            if (fuelType.includes('95')) return 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20';
+            if (fuelType.includes('Super Diesel')) return 'bg-purple-500/10 text-purple-700 border-purple-500/20';
+            if (fuelType.includes('Auto Diesel')) return 'bg-blue-500/10 text-blue-700 border-blue-500/20';
+            if (fuelType.includes('Ordinary') || fuelType.includes('LAD')) return 'bg-teal-500/10 text-teal-700 border-teal-500/20';
+            return 'bg-slate-500/10 text-slate-700 border-slate-500/20';
+          };
 
           // Determine color profiles based on fuel level state
           let progressColor = 'bg-[#00BFFF]';
@@ -279,28 +341,35 @@ export default function FuelStockTab({
           return (
             <div 
               key={tank.id} 
-              className={`glass-panel rounded-2xl p-5 shadow-sm transition-all duration-300 ${borderHoverColor} flex flex-col justify-between`}
+              className={`glass-panel rounded-2xl p-4 shadow-sm transition-all duration-300 ${borderHoverColor} flex flex-col justify-between`}
             >
               <div>
                 {/* Tank Metadata */}
-                <div className="flex items-start justify-between">
-                  <div>
-                    <span className="text-[10px] tabular-nums font-semibold text-gray-500 font-bold tracking-wider uppercase block">{tank.id}</span>
-                    <h3 className="font-bold text-[#1C1C1C] text-base mt-0.5">{tank.name}</h3>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
+                      <Database className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${getFuelTypeBadgeStyle(tank.fuelType)} mb-0.5`}>
+                        {tank.fuelType}
+                      </span>
+                      <h3 className="font-bold text-[#1C1C1C] text-sm leading-tight">{tank.name}</h3>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1">
                     {isCritical ? (
-                      <span className="inline-flex px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30 text-[9px] font-extrabold uppercase animate-pulse">Critical</span>
+                      <span className="inline-flex px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30 text-[9px] font-extrabold uppercase animate-pulse">Critical</span>
                     ) : isLowStock ? (
-                      <span className="inline-flex px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[9px] font-bold uppercase">Low Stock</span>
+                      <span className="inline-flex px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[9px] font-bold uppercase">Low Stock</span>
                     ) : (
-                      <span className="inline-flex px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[9px] font-bold uppercase">Secure</span>
+                      <span className="inline-flex px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[9px] font-bold uppercase">Secure</span>
                     )}
                   </div>
                 </div>
 
                 {/* VISUAL LIQUID GAUGE (Simulated underground tank cylindrical view) */}
-                <div className="my-6 relative w-full h-40 bg-gray-100 border border-gray-100 rounded-2xl overflow-hidden flex items-end justify-center group shadow-inner">
+                <div className="my-3 relative w-full h-24 bg-gray-100 border border-gray-100 rounded-xl overflow-hidden flex items-end justify-center group shadow-inner">
                   {/* Grid Lines inside tank */}
                   <div className="absolute inset-x-0 top-1/4 border-t border-gray-100 pointer-events-none" />
                   <div className="absolute inset-x-0 top-2/4 border-t border-gray-100 pointer-events-none" />
@@ -311,8 +380,8 @@ export default function FuelStockTab({
                     className={`absolute inset-x-0 bottom-0 bg-gradient-to-t ${liquidWaveColor} transition-all duration-1000 ease-out overflow-hidden`}
                     style={{ height: `${fillPercent}%` }}
                   >
-                    <div className="absolute top-0 left-0 right-0 h-4 bg-white/20 animate-pulse"></div>
-                    <svg className="absolute -top-1 w-full h-4 opacity-50" preserveAspectRatio="none" viewBox="0 0 100 10">
+                    <div className="absolute top-0 left-0 right-0 h-3 bg-white/20 animate-pulse"></div>
+                    <svg className="absolute -top-1 w-full h-3 opacity-50" preserveAspectRatio="none" viewBox="0 0 100 10">
                        <path d="M0,5 Q25,0 50,5 T100,5 L100,10 L0,10 Z" fill="currentColor" className="text-white">
                          <animate attributeName="d" dur="3s" repeatCount="indefinite" values="M0,5 Q25,0 50,5 T100,5 L100,10 L0,10 Z; M0,5 Q25,10 50,5 T100,5 L100,10 L0,10 Z; M0,5 Q25,0 50,5 T100,5 L100,10 L0,10 Z"/>
                        </path>
@@ -321,8 +390,8 @@ export default function FuelStockTab({
                   </div>
 
                   {/* Centered Volume Overlay */}
-                  <div className="z-10 text-center select-none p-4 bg-gray-50/95 backdrop-blur-md rounded-xl shadow-md border border-gray-200 mb-4 transition-transform duration-300 group-hover:scale-105">
-                    <span className="text-xl tabular-nums font-extrabold text-[#1C1C1C] block">{fillPercent}%</span>
+                  <div className="z-10 text-center select-none px-3 py-1.5 bg-gray-50/95 backdrop-blur-md rounded-lg shadow-sm border border-gray-200 mb-2 transition-transform duration-300 group-hover:scale-105">
+                    <span className="text-base tabular-nums font-extrabold text-[#1C1C1C] block leading-tight">{fillPercent}%</span>
                     <span className="text-[10px] text-gray-500 font-sans font-medium">{formatLiters(tank.currentLevel)}</span>
                   </div>
                 </div>
@@ -331,9 +400,9 @@ export default function FuelStockTab({
                 {(() => {
                   const linkedPumps = (pumps || []).filter(p => p.tankId === tank.id || (!p.tankId && p.fuelType === tank.fuelType));
                   return (
-                    <div className="flex justify-between items-center text-xs text-gray-500 border-b border-gray-100 py-2">
+                    <div className="flex justify-between items-center text-xs text-gray-500 border-b border-gray-100 py-1.5">
                       <span>Mapped Pumps:</span>
-                      <span className="font-bold text-blue-600 text-right truncate max-w-[180px]" title={linkedPumps.map(p => `${p.name} (${p.fuelType})`).join(', ')}>
+                      <span className="font-bold text-blue-600 text-right truncate max-w-[160px]" title={linkedPumps.map(p => `${p.name} (${p.fuelType})`).join(', ')}>
                         {linkedPumps.length > 0 ? linkedPumps.map(p => p.name).join(', ') : 'None'}
                       </span>
                     </div>
@@ -341,50 +410,19 @@ export default function FuelStockTab({
                 })()}
 
                 {/* Capacity stats */}
-                <div className="flex justify-between items-center text-xs text-gray-500 border-b border-gray-100 py-2">
+                <div className="flex justify-between items-center text-xs text-gray-500 border-b border-gray-100 py-1.5">
                   <span>Tank Capacity:</span>
                   <span className="tabular-nums font-semibold text-[#1C1C1C]">{formatLiters(tank.capacity)}</span>
                 </div>
               </div>
 
               {/* Dynamic Price Controller Section */}
-              <div className="mt-4 pt-1 flex items-center justify-between">
+              <div className="mt-2 pt-2 flex items-center justify-between border-t border-gray-100">
                 <div>
-                  <span className="text-[10px] text-gray-500 block font-bold uppercase tracking-wider">Unit Price</span>
-                  {editingTankId === tank.id ? (
-                    <div className="flex items-center gap-1.5 mt-1">
-                      <span className="text-sm font-bold text-gray-500">$</span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={tempPrice}
-                        onChange={(e) => setTempPrice(parseFloat(e.target.value) || 0)}
-                        className="w-16 px-1.5 py-0.5 border border-blue-500 bg-white text-[#1C1C1C] rounded-md tabular-nums font-semibold text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-center"
-                      />
-                    </div>
-                  ) : (
-                    <span className="tabular-nums font-extrabold text-lg text-[#1C1C1C] mt-0.5 block">
-                      {formatCurrency(tank.pricePerLiter)} <span className="text-[10px] text-gray-500 font-sans font-medium">/ L</span>
-                    </span>
-                  )}
-                </div>
-
-                <div>
-                  {editingTankId === tank.id ? (
-                    <button
-                      onClick={() => handleSavePrice(tank.id)}
-                      className="px-2.5 py-1 bg-gradient-to-r from-blue-600 to-blue-500 hover:brightness-110 text-white text-[11px] font-bold rounded-lg transition-colors cursor-pointer"
-                    >
-                      Save
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => handleStartEditPrice(tank)}
-                      className="text-xs text-blue-600 hover:text-blue-300 hover:underline font-bold cursor-pointer"
-                    >
-                      Edit Board Price
-                    </button>
-                  )}
+                  <span className="text-[9px] text-gray-400 block font-bold uppercase tracking-wider">Unit Price</span>
+                  <span className="tabular-nums font-extrabold text-base text-[#1C1C1C] block leading-tight">
+                    {formatCurrency(tank.pricePerLiter)} <span className="text-[10px] text-gray-500 font-sans font-medium">/ L</span>
+                  </span>
                 </div>
               </div>
             </div>
@@ -392,97 +430,17 @@ export default function FuelStockTab({
         })}
       </div>
 
-      {/* Deliveries & Instructions Block */}
-      <div id="stock-lower-grid" className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Deliveries History List */}
-        <div className="glass-panel p-6 rounded-2xl lg:col-span-2 space-y-4">
-          <div>
-            <h3 className="font-bold text-[#1C1C1C] text-base">Wholesale Deliveries History</h3>
-            <p className="text-xs text-gray-500 mt-0.5">Audit log of recent fuel supply shipments received</p>
-          </div>
+      {/* Deliveries History moved to Reports Tab */}
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left">
-              <thead>
-                <tr className="border-b border-gray-100 text-gray-500 font-bold text-[11px] uppercase tracking-wider">
-                  <th className="pb-3">Delivery ID</th>
-                  <th className="pb-3">Target Tank</th>
-                  <th className="pb-3">Fuel Type</th>
-                  <th className="pb-3 text-right">Volume</th>
-                  <th className="pb-3">Supplier</th>
-                  <th className="pb-3 text-right">Wholesale Cost</th>
-                  <th className="pb-3">Date</th>
-                  <th className="pb-3 text-center">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 text-xs">
-                {deliveries.map((del) => (
-                  <tr key={del.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="py-3.5 tabular-nums font-bold text-blue-600">{del.id}</td>
-                    <td className="py-3.5 font-bold text-[#1C1C1C]">
-                      {del.tankName || tanks.find(t => t.id === del.tankId)?.name || del.fuelType}
-                    </td>
-                    <td className="py-3.5">
-                      <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-semibold border ${
-                        del.fuelType.includes('Petrol') 
-                          ? 'bg-blue-500/10 text-blue-600 border-blue-500/20' 
-                          : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
-                      }`}>
-                        {del.fuelType}
-                      </span>
-                    </td>
-                    <td className="py-3.5 text-right tabular-nums font-semibold text-gray-600">{formatLiters(del.quantity)}</td>
-                    <td className="py-3.5 text-gray-600 font-medium">{del.supplier}</td>
-                    <td className="py-3.5 text-right tabular-nums font-bold text-[#1C1C1C]">{formatCurrency(del.cost)}</td>
-                    <td className="py-3.5 text-gray-500">{new Date(del.date).toLocaleDateString()}</td>
-                    <td className="py-3.5 text-center">
-                      <button
-                        onClick={() => handleDeleteDelivery(del.id)}
-                        className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors cursor-pointer"
-                        title="Delete Delivery Record"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Informative instructions / leakage control */}
-        <div className="glass-panel p-6 rounded-2xl flex flex-col justify-between">
-          <div>
-            <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-600 flex items-center justify-center mb-4">
-              <ShieldCheck className="w-5 h-5" />
-            </div>
-            <h3 className="font-bold text-[#1C1C1C] text-base">Leakage & Evaporation Audit</h3>
-            <p className="text-xs text-gray-500 mt-1 leading-relaxed">
-              FuelFlow maintains automatic telemetry constraints. Every time an active shift is officially closed on the Shift Management page, the physical fuel sales (Net Sold) are immediately deducted from these underground tank values.
-            </p>
-          </div>
-
-          <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100 text-xs text-gray-500 mt-4 space-y-2">
-            <div className="flex gap-2">
-              <span className="font-bold text-blue-600">Tip:</span>
-              <span>Keep board prices updated in accordance with governmental tariff adjustments to maximize margins instantly.</span>
-            </div>
-            <div className="flex gap-2">
-              <span className="font-bold text-emerald-400">Automated:</span>
-              <span>All sales computations globally reference these dynamic prices in real-time.</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* --- SUPPLIER STOCK DELIVERY LOG MODAL --- */}
+      {/* --- SUPPLIER STOCK PURCHASE MODAL --- */}
       {isDeliveryModalOpen && (
         <div id="delivery-modal-overlay" className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-fade-in">
           <div id="delivery-modal-card" className="bg-gray-50 rounded-2xl max-w-md w-full shadow-2xl border border-gray-200 overflow-hidden">
             <div className="px-6 py-4 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
-              <h3 className="font-bold text-[#1C1C1C] text-lg">Log Wholesale Stock Delivery</h3>
+              <h3 className="font-bold text-[#1C1C1C] text-lg flex items-center gap-2">
+                <ShoppingBag className="w-5 h-5 text-blue-600" />
+                <span>New Fuel Purchase</span>
+              </h3>
               <button onClick={() => setIsDeliveryModalOpen(false)} className="text-gray-500 hover:text-[#1C1C1C] cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
@@ -499,10 +457,11 @@ export default function FuelStockTab({
               {/* Target Storage Tank Selector */}
               <div>
                 <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1.5 flex items-center justify-between">
-                  <span>Select Target Storage Tank</span>
+                  <span>Target Storage Tank</span>
                   <span className="text-blue-600 text-[11px] font-bold">Required</span>
                 </label>
                 <select
+                  id="purchase-target-tank"
                   value={selectedTankId || (tanks[0]?.id || '')}
                   onChange={(e) => {
                     const tId = e.target.value;
@@ -510,7 +469,7 @@ export default function FuelStockTab({
                     const tank = tanks.find(t => t.id === tId);
                     if (tank) setDeliveryFuelType(tank.fuelType);
                   }}
-                  className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-[#1C1C1C] text-sm font-semibold focus:outline-none focus:border-blue-500"
+                  className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-[#1C1C1C] text-sm font-semibold focus:outline-none focus:border-blue-500 cursor-pointer"
                 >
                   {tanks.map((t) => {
                     const freeSpace = Math.max(0, t.capacity - t.currentLevel);
@@ -526,13 +485,16 @@ export default function FuelStockTab({
               {/* Volume Quantity to add */}
               <div>
                 <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1.5">
-                  Delivered Fuel Volume (Liters)
+                  Delivery Volume (Liters)
                 </label>
                 <input
+                  id="purchase-delivery-qty"
                   type="number"
                   step="0.01"
                   value={deliveryQty}
-                  onChange={(e) => setDeliveryQty(parseFloat(e.target.value) || 0)}
+                  onFocus={(e) => e.target.select()}
+                  onChange={(e) => setDeliveryQty(e.target.value === '' ? '' : parseFloat(e.target.value) || 0)}
+                  placeholder="e.g. 5000"
                   className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-[#1C1C1C] text-sm tabular-nums font-semibold focus:outline-none focus:border-blue-500"
                 />
               </div>
@@ -540,27 +502,44 @@ export default function FuelStockTab({
               {/* Supplier name */}
               <div>
                 <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1.5">
-                  Supplier
+                  Supplier Name
                 </label>
                 <input
+                  id="purchase-supplier-name"
                   type="text"
                   value={deliverySupplier}
                   onChange={(e) => setDeliverySupplier(e.target.value)}
                   className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-[#1C1C1C] text-sm focus:outline-none focus:border-blue-500"
+                  placeholder="e.g. Ceylon Petroleum Corporation"
                 />
               </div>
 
-              {/* Wholesale cost */}
+              {/* Invoice Number */}
               <div>
                 <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1.5">
-                  Wholesale Cost (Rs.)
+                  Invoice / Ref Number
                 </label>
                 <input
-                  type="number"
-                  step="0.01"
-                  value={deliveryCost}
-                  onChange={(e) => setDeliveryCost(parseFloat(e.target.value) || 0)}
-                  className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-[#1C1C1C] text-sm tabular-nums font-semibold focus:outline-none focus:border-blue-500"
+                  id="purchase-invoice-no"
+                  type="text"
+                  value={deliveryInvoiceNo}
+                  onChange={(e) => setDeliveryInvoiceNo(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-[#1C1C1C] text-sm font-mono focus:outline-none focus:border-blue-500"
+                  placeholder="e.g. INV-2026-8891"
+                />
+              </div>
+
+              {/* Delivery Date */}
+              <div>
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1.5">
+                  Delivery Date
+                </label>
+                <input
+                  id="purchase-delivery-date"
+                  type="date"
+                  value={deliveryDate}
+                  onChange={(e) => setDeliveryDate(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-[#1C1C1C] text-sm font-mono focus:outline-none focus:border-blue-500"
                 />
               </div>
             </div>
@@ -574,9 +553,9 @@ export default function FuelStockTab({
               </button>
               <button
                 onClick={handleAddDeliverySubmit}
-                className="px-5 py-2 bg-gradient-to-r from-blue-600 to-blue-500 text-white font-bold text-xs rounded-lg hover:brightness-110 transition-all cursor-pointer"
+                className="px-5 py-2 bg-gradient-to-r from-blue-600 to-blue-500 text-white font-bold text-xs rounded-lg hover:brightness-110 transition-all cursor-pointer shadow-sm"
               >
-                Accept Delivery & Fill
+                Confirm Purchase & Receive Stock
               </button>
             </div>
           </div>
@@ -639,6 +618,7 @@ export default function FuelStockTab({
                   min="0"
                   step="1"
                   value={newTankCapacity || ''}
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) => setNewTankCapacity(parseInt(e.target.value) || 0)}
                   className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-[#1C1C1C] text-sm tabular-nums font-semibold focus:outline-none focus:border-blue-500"
                 />
@@ -653,6 +633,7 @@ export default function FuelStockTab({
                   min="0"
                   step="1"
                   value={newTankCurrentLevel || ''}
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) => setNewTankCurrentLevel(parseInt(e.target.value) || 0)}
                   className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-[#1C1C1C] text-sm tabular-nums font-semibold focus:outline-none focus:border-blue-500"
                 />

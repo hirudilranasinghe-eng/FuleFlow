@@ -3,13 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   FileText, Truck, Calendar, Search, 
   CheckCircle2, AlertTriangle, Clock, ChevronDown, 
   CreditCard, Wallet 
 } from 'lucide-react';
 import { Shift, StockDelivery, FuelTank, Pump, Employee, FuelType, Customer, CreditTransaction, CreditPayment } from '../types';
+import { supabase } from '../lib/supabase';
 
 interface ReportsTabProps {
   shiftHistory: Shift[];
@@ -51,8 +52,43 @@ export default function ReportsTab({
 
   // Additional Filter States
   const [selectedFuelType, setSelectedFuelType] = useState<string>('all');
+  const [selectedSupplier, setSelectedSupplier] = useState<string>('all');
   const [selectedPumper, setSelectedPumper] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
+
+  // Real-time deliveries state synced with Supabase
+  const [realTimeDeliveries, setRealTimeDeliveries] = useState<StockDelivery[]>(deliveries || []);
+
+  useEffect(() => {
+    if (deliveries && deliveries.length > 0) {
+      setRealTimeDeliveries(deliveries);
+    }
+  }, [deliveries]);
+
+  useEffect(() => {
+    const fetchLatestDeliveries = async () => {
+      try {
+        const { data, error } = await supabase.from('stock_deliveries').select('*').order('date', { ascending: false });
+        if (!error && data && data.length > 0) {
+          const mapped: StockDelivery[] = data.map((d: any) => ({
+            id: d.id,
+            date: d.date,
+            fuelType: d.fueltype || d.fuelType || 'Petrol 92',
+            tankId: d.tankid || d.tankId || '',
+            tankName: d.tankname || d.tankName || '',
+            quantity: Number(d.quantity || 0),
+            supplier: d.supplier || 'Ceylon Petroleum Corporation',
+            cost: Number(d.cost || 0)
+          }));
+          setRealTimeDeliveries(mapped);
+        }
+      } catch (err) {
+        console.warn("Notice: stock_deliveries fetch error:", err);
+      }
+    };
+
+    fetchLatestDeliveries();
+  }, [activeSubTab]);
 
   // Uniform Currency & Volume Formatters (Sri Lankan Rs. with tabular digit spacing)
   const formatCurrency = (val: number) => {
@@ -170,6 +206,9 @@ export default function ReportsTab({
 
   // 2. Fallback Mock Deliveries if empty
   const allDeliveries = useMemo(() => {
+    if (realTimeDeliveries && realTimeDeliveries.length > 0) {
+      return realTimeDeliveries;
+    }
     if (deliveries && deliveries.length > 0) {
       return deliveries;
     }
@@ -216,7 +255,18 @@ export default function ReportsTab({
         cost: 1417500
       }
     ];
-  }, [deliveries]);
+  }, [realTimeDeliveries, deliveries]);
+
+  // Unique list of suppliers for filter
+  const supplierOptions = useMemo(() => {
+    const set = new Set<string>();
+    allDeliveries.forEach(d => {
+      if (d.supplier && d.supplier.trim()) {
+        set.add(d.supplier.trim());
+      }
+    });
+    return Array.from(set);
+  }, [allDeliveries]);
 
   // 3. Fallback Mock Customers if empty
   const allCustomers = useMemo(() => {
@@ -382,6 +432,8 @@ export default function ReportsTab({
 
       if (selectedFuelType !== 'all' && d.fuelType !== selectedFuelType) return false;
 
+      if (selectedSupplier !== 'all' && d.supplier !== selectedSupplier) return false;
+
       const q = searchQuery.toLowerCase().trim();
       if (q) {
         const matchId = d.id.toLowerCase().includes(q);
@@ -392,7 +444,7 @@ export default function ReportsTab({
       }
       return true;
     });
-  }, [allDeliveries, startDate, endDate, selectedFuelType, searchQuery]);
+  }, [allDeliveries, startDate, endDate, selectedFuelType, selectedSupplier, searchQuery]);
 
   // Sub-Tab 3: Filtered Card & Credit Sales Rows
   const filteredCardCreditRows = useMemo(() => {
@@ -709,8 +761,8 @@ export default function ReportsTab({
           </div>
         </div>
 
-        {/* Bottom Row: Fuel Type, Pumper, and Customer Search Filters */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+        {/* Bottom Row: Fuel Type, Supplier Name, Pumper, and Customer Search Filters */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
           {/* Fuel Type Dropdown */}
           <div className="relative">
             <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Fuel Type</label>
@@ -727,6 +779,30 @@ export default function ReportsTab({
                 <option value="Auto Diesel">Auto Diesel</option>
                 <option value="Super Diesel">Super Diesel</option>
                 <option value="Oil & Lubricants">Oil & Lubricants</option>
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-gray-400 absolute right-2 top-2.5 pointer-events-none" />
+            </div>
+          </div>
+
+          {/* Supplier Name Dropdown */}
+          <div className="relative">
+            <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Supplier Name</label>
+            <div className="relative">
+              <select
+                id="filter-supplier-name"
+                value={selectedSupplier}
+                onChange={(e) => setSelectedSupplier(e.target.value)}
+                className="w-full bg-gray-50 border border-gray-200 text-gray-800 text-xs font-bold py-1.5 pl-2.5 pr-7 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer appearance-none"
+              >
+                <option value="all">All Suppliers</option>
+                <option value="Ceylon Petroleum Corporation">Ceylon Petroleum Corporation</option>
+                <option value="Lanka IOC PLC">Lanka IOC PLC</option>
+                <option value="Sinopec Fuel Oil">Sinopec Fuel Oil</option>
+                {supplierOptions.map(sup => (
+                  !['Ceylon Petroleum Corporation', 'Lanka IOC PLC', 'Sinopec Fuel Oil'].includes(sup) && (
+                    <option key={sup} value={sup}>{sup}</option>
+                  )
+                ))}
               </select>
               <ChevronDown className="w-3.5 h-3.5 text-gray-400 absolute right-2 top-2.5 pointer-events-none" />
             </div>
@@ -759,7 +835,7 @@ export default function ReportsTab({
               <input
                 type="text"
                 id="filter-search-query"
-                placeholder="Search customer, pumper, invoice, shift..."
+                placeholder="Search supplier, invoice, fuel, shift..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full bg-gray-50 border border-gray-200 text-gray-800 text-xs font-medium pl-7 pr-2.5 py-1.5 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -779,7 +855,7 @@ export default function ReportsTab({
                 <span>Shift Fuel Sales Audit Report (With Date Fuel Prices)</span>
               </h2>
               <p className="text-[11px] text-gray-500 mt-0.5">
-                Full nozzle meter readings, fuel prices on date, testing deductions, and net cash sales breakdown.
+                Full pump meter readings, fuel prices on date, testing deductions, and net cash sales breakdown.
               </p>
             </div>
             <span className="text-[11px] font-bold text-gray-600 bg-gray-100 px-2.5 py-0.5 rounded-md font-mono tabular-nums">
@@ -792,7 +868,7 @@ export default function ReportsTab({
               <thead>
                 <tr className="bg-gray-50/80 text-gray-500 font-bold border-b border-gray-100 uppercase tracking-wider text-[10px]">
                   <th className="py-2.5 px-3">Shift & Date</th>
-                  <th className="py-2.5 px-3">Pump / Nozzle</th>
+                  <th className="py-2.5 px-3">Pump</th>
                   <th className="py-2.5 px-3">Fuel Product</th>
                   <th className="py-2.5 px-3">Assigned Pumper</th>
                   <th className="py-2.5 px-3 text-right">Liters Dispensed</th>
@@ -891,68 +967,55 @@ export default function ReportsTab({
             <table className="w-full text-left border-collapse text-xs">
               <thead>
                 <tr className="bg-gray-50/80 text-gray-500 font-bold border-b border-gray-100 uppercase tracking-wider text-[10px]">
-                  <th className="py-2.5 px-3">Delivery Date & Time</th>
+                  <th className="py-2.5 px-3">Date</th>
+                  <th className="py-2.5 px-3">Target Tank / Fuel Type</th>
+                  <th className="py-2.5 px-3 text-right">Delivery Volume (L)</th>
                   <th className="py-2.5 px-3">Supplier Name</th>
-                  <th className="py-2.5 px-3">Invoice / Ref No</th>
-                  <th className="py-2.5 px-3">Fuel / Product</th>
-                  <th className="py-2.5 px-3">Target Tank</th>
-                  <th className="py-2.5 px-3 text-right">Delivered Volume (L)</th>
-                  <th className="py-2.5 px-3 text-right">Base Rate (Rs/L)</th>
-                  <th className="py-2.5 px-3 text-right">Total Purchase Cost</th>
+                  <th className="py-2.5 px-3">Invoice / Ref Number</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {filteredPurchasesRows.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-10 text-center text-gray-400 font-medium">
+                    <td colSpan={5} className="py-10 text-center text-gray-400 font-medium">
                       No stock deliveries found matching your search and filter criteria.
                     </td>
                   </tr>
                 ) : (
-                  filteredPurchasesRows.map((d) => {
-                    const rate = d.quantity ? (d.cost / d.quantity) : 0;
-                    return (
-                      <tr key={d.id} className="hover:bg-gray-50/80 transition-colors">
-                        <td className="py-2.5 px-3 font-bold text-gray-800 font-mono tabular-nums text-[11px]">
-                          {new Date(d.date).toLocaleString()}
-                        </td>
-                        <td className="py-2.5 px-3 font-semibold text-gray-900">{d.supplier}</td>
-                        <td className="py-2.5 px-3 font-mono font-bold text-blue-600 text-[11px]">
-                          {`INV-${d.id.slice(-6)}`}
-                        </td>
-                        <td className="py-2.5 px-3">
+                  filteredPurchasesRows.map((d) => (
+                    <tr key={d.id} className="hover:bg-gray-50/80 transition-colors">
+                      <td className="py-2.5 px-3 font-bold text-gray-800 font-mono tabular-nums text-[11px]">
+                        {new Date(d.date).toLocaleDateString()} <span className="text-[10px] text-gray-400 font-normal">{new Date(d.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      </td>
+                      <td className="py-2.5 px-3 font-semibold text-gray-900">
+                        <div className="flex items-center gap-2">
+                          <span>{d.tankName || tanks.find(t => t.id === d.tankId)?.name || 'Main Storage Tank'}</span>
                           <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-700">
                             {d.fuelType}
                           </span>
-                        </td>
-                        <td className="py-2.5 px-3 text-gray-600 font-medium">{d.tankName || d.tankId || 'Main Storage Tank'}</td>
-                        <td className="py-2.5 px-3 text-right font-bold text-gray-900 font-mono tabular-nums">
-                          {d.quantity.toLocaleString()} L
-                        </td>
-                        <td className="py-2.5 px-3 text-right text-gray-700 font-mono tabular-nums">
-                          Rs. {rate.toFixed(2)}
-                        </td>
-                        <td className="py-2.5 px-3 text-right font-black text-gray-900 font-mono tabular-nums">
-                          {formatCurrency(d.cost)}
-                        </td>
-                      </tr>
-                    );
-                  })
+                        </div>
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-bold text-gray-900 font-mono tabular-nums">
+                        {formatLiters(d.quantity)}
+                      </td>
+                      <td className="py-2.5 px-3 font-semibold text-gray-800">{d.supplier}</td>
+                      <td className="py-2.5 px-3 font-mono font-bold text-blue-600 text-[11px]">
+                        {d.id}
+                      </td>
+                    </tr>
+                  ))
                 )}
               </tbody>
               {filteredPurchasesRows.length > 0 && (
                 <tfoot>
                   <tr className="bg-gray-900 text-white font-bold">
-                    <td colSpan={5} className="py-3 px-3 text-right uppercase tracking-wider text-[10px]">
-                      Total Delivered Volume & Stock Expenditure:
+                    <td colSpan={2} className="py-3 px-3 text-right uppercase tracking-wider text-[10px]">
+                      Total Filtered Delivery Volume:
                     </td>
                     <td className="py-3 px-3 text-right font-mono tabular-nums text-purple-300 text-xs">
                       {formatLiters(purchasesTotals.liters)}
                     </td>
-                    <td className="py-3 px-3"></td>
-                    <td className="py-3 px-3 text-right font-mono tabular-nums text-purple-300 text-xs">
-                      {formatCurrency(purchasesTotals.cost)}
-                    </td>
+                    <td colSpan={2} className="py-3 px-3"></td>
                   </tr>
                 </tfoot>
               )}
