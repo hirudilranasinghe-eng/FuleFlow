@@ -15,6 +15,7 @@ import {
 import { FuelTank, OilTank, Employee, Shift, StockDelivery, Customer, CreditTransaction, CreditPayment } from '../types';
 import { supabase } from '../lib/supabase';
 import { SUPABASE_SQL } from '../lib/sqlSchema';
+import { formatSriLankanPhoneNumber, dispatchTextLKSMS, SMSDispatchResult } from '../lib/smsService';
 
 interface SettingsTabProps {
   tanks: FuelTank[];
@@ -98,7 +99,8 @@ export default function SettingsTab({
       provider: 'Text.lk (Sri Lanka Direct Gateway)',
       apiKey: 'tlk_live_948271038a8f4c2e81',
       senderMask: 'SAMSE_AUTO',
-      endpoint: 'https://app.text.lk/api/http/sms/send',
+      fallbackSenderMask: 'TextLK',
+      endpoint: 'https://app.text.lk/api/v3/sms/send',
       ownerPhones: '+94771234567, +94719876543',
       triggers: {
         creditFueling: true,      // Credit Fueling Notification
@@ -110,20 +112,18 @@ export default function SettingsTab({
   });
 
   const [showApiKey, setShowApiKey] = useState(false);
-  const [testRecipient, setTestRecipient] = useState('+94 77 123 4567');
+  const [testRecipient, setTestRecipient] = useState('0768657349');
   const [isSendingTest, setIsSendingTest] = useState(false);
-  const [testResult, setTestResult] = useState<{
-    success: boolean;
-    message: string;
-    timestamp: string;
-    messageId: string;
-    details?: string;
-  } | null>(null);
+  const [testResult, setTestResult] = useState<SMSDispatchResult | null>(null);
+
+  const formattedTestRecipientPreview = useMemo(() => {
+    return formatSriLankanPhoneNumber(testRecipient);
+  }, [testRecipient]);
 
   const handleProviderChange = (newProvider: string) => {
     let newEndpoint = smsConfig.endpoint;
     if (newProvider === 'Text.lk (Sri Lanka Direct Gateway)') {
-      newEndpoint = 'https://app.text.lk/api/http/sms/send';
+      newEndpoint = 'https://app.text.lk/api/v3/sms/send';
     } else if (newProvider === 'Notify.lk (Sri Lanka Direct Gateway)') {
       newEndpoint = 'https://api.notify.lk/v1/send';
     } else if (newProvider === 'Textware (Dialog Axiata Business)') {
@@ -155,71 +155,34 @@ export default function SettingsTab({
     setIsSendingTest(true);
     setTestResult(null);
 
-    const cleanPhone = testRecipient.replace(/[^0-9+]/g, '');
-    const messageText = `[${smsConfig.senderMask || 'SAMSE_AUTO'}] FuelFlow Alert: Test notification from ${stationProfile.stationName}. Gateway is ACTIVE & operational.`;
-    const endpoint = smsConfig.endpoint || 'https://app.text.lk/api/http/sms/send';
+    const messageText = `Samse Auto Mart: Test SMS alert from ${stationProfile.stationName}. Gateway is ACTIVE & operational.`;
 
     try {
-      let simulated = false;
-      let responsePayload: any = null;
-
-      // Attempt live dispatch if Text.lk or HTTP Webhook is selected
-      if (smsConfig.provider === 'Text.lk (Sri Lanka Direct Gateway)') {
-        try {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 4000);
-
-          const res = await fetch(endpoint, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-              'Authorization': `Bearer ${smsConfig.apiKey}`
-            },
-            body: JSON.stringify({
-              recipient: cleanPhone,
-              sender_id: smsConfig.senderMask || 'SAMSE_AUTO',
-              message: messageText
-            }),
-            signal: controller.signal
-          });
-          clearTimeout(timeoutId);
-
-          if (res.ok) {
-            responsePayload = await res.json().catch(() => null);
-          } else {
-            // If CORS or auth failed on third-party host
-            simulated = true;
-          }
-        } catch (_) {
-          // Browser sandbox / CORS safety fallback
-          simulated = true;
-        }
-      } else {
-        // Other gateways simulation delay
-        await new Promise(r => setTimeout(r, 1000));
-        simulated = true;
-      }
-
-      const generatedId = responsePayload?.data?.uid || responsePayload?.message_id || `TLK-${Math.floor(100000 + Math.random() * 900000)}`;
-
-      setTestResult({
-        success: true,
-        message: simulated
-          ? `Dispatched test payload to ${testRecipient} via ${smsConfig.provider} using Sender ID "${smsConfig.senderMask}" (Bearer Token Auth verified).`
-          : `Live SMS dispatched successfully to ${testRecipient} via Text.lk API (HTTP 200 OK).`,
-        timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        messageId: generatedId,
-        details: `Endpoint: ${endpoint} | Recipient: ${cleanPhone} | Mask: ${smsConfig.senderMask}`
+      const result = await dispatchTextLKSMS(testRecipient, messageText, {
+        provider: smsConfig.provider,
+        apiKey: smsConfig.apiKey,
+        senderMask: smsConfig.senderMask,
+        fallbackSenderMask: smsConfig.fallbackSenderMask || 'TextLK',
+        endpoint: smsConfig.endpoint
       });
 
-      showToast(`Test SMS transmitted successfully! ID: ${generatedId}`);
+      setTestResult(result);
+
+      if (result.success) {
+        showToast(`Test SMS sent successfully! ID: ${result.messageId}`);
+      } else {
+        showToast(`SMS Dispatch Failed: ${result.message}`);
+      }
     } catch (err: any) {
+      const formatted = formatSriLankanPhoneNumber(testRecipient);
       setTestResult({
         success: false,
-        message: `Transmission failed: ${err.message || 'Network error'}`,
-        timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        messageId: 'ERR-TRANSMIT-FAIL'
+        httpStatus: 500,
+        messageId: 'ERR-EXCEPTION',
+        message: `Transmission exception: ${err.message || 'Unknown network failure'}`,
+        recipientFormatted: formatted,
+        senderUsed: smsConfig.senderMask || 'TextLK',
+        errorDetail: err.stack || err.message
       });
       showToast(`Failed to send test SMS.`);
     } finally {
@@ -710,16 +673,39 @@ export default function SettingsTab({
               </div>
 
               <div>
-                <label className="font-bold text-gray-700 block mb-1.5">
-                  Sender Mask / Alphanumeric ID <span className="text-gray-400 font-normal">(Approved Mask)</span>
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="font-bold text-gray-700">
+                    Sender Mask / ID <span className="text-gray-400 font-normal">(Approved Alphanumeric Mask)</span>
+                  </label>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setSmsConfig({ ...smsConfig, senderMask: 'SAMSE_AUTO' })}
+                      className="text-[10px] bg-gray-100 hover:bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded font-mono cursor-pointer"
+                      title="Set Custom Station Mask"
+                    >
+                      SAMSE_AUTO
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSmsConfig({ ...smsConfig, senderMask: 'TextLK' })}
+                      className="text-[10px] bg-emerald-100 hover:bg-emerald-200 text-emerald-800 px-1.5 py-0.5 rounded font-mono font-bold cursor-pointer"
+                      title="Set Text.lk Default Approved Sender"
+                    >
+                      TextLK (Default)
+                    </button>
+                  </div>
+                </div>
                 <input
                   type="text"
                   value={smsConfig.senderMask}
                   onChange={(e) => setSmsConfig({ ...smsConfig, senderMask: e.target.value.toUpperCase() })}
                   className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-mono font-bold focus:outline-none focus:border-blue-500 uppercase"
-                  placeholder="e.g. SAMSE_AUTO"
+                  placeholder="e.g. TextLK or SAMSE_AUTO"
                 />
+                <p className="text-[10px] text-gray-500 mt-1">
+                  * Tip: If your custom mask is pending TRCSL registration, use <strong>TextLK</strong> as default sender ID.
+                </p>
               </div>
 
               <div>
@@ -753,7 +739,7 @@ export default function SettingsTab({
                   value={smsConfig.endpoint}
                   onChange={(e) => setSmsConfig({ ...smsConfig, endpoint: e.target.value })}
                   className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-mono text-[11px] focus:outline-none focus:border-blue-500"
-                  placeholder="https://app.text.lk/api/http/sms/send"
+                  placeholder="https://app.text.lk/api/v3/sms/send"
                 />
               </div>
 
@@ -766,7 +752,7 @@ export default function SettingsTab({
                   value={smsConfig.ownerPhones}
                   onChange={(e) => setSmsConfig({ ...smsConfig, ownerPhones: e.target.value })}
                   className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-mono focus:outline-none focus:border-blue-500"
-                  placeholder="+94771234567, +94719876543"
+                  placeholder="0771234567, 0719876543"
                 />
               </div>
             </div>
@@ -885,14 +871,19 @@ export default function SettingsTab({
                 <Send className="w-4 h-4 text-blue-600" />
                 <span>Gateway Diagnostics: Send Test SMS</span>
               </h3>
-              <span className="text-[10px] text-gray-500 font-mono">Carrier Direct Testing</span>
+              <span className="text-[10px] text-gray-500 font-mono">Carrier Direct Testing (Text.lk)</span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end text-xs">
               <div className="sm:col-span-2">
-                <label className="font-bold text-gray-700 block mb-1.5">
-                  Test Recipient Mobile Number
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="font-bold text-gray-700">
+                    Test Recipient Mobile Number
+                  </label>
+                  <span className="text-[10px] font-mono text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded font-bold">
+                    Target: {formattedTestRecipientPreview || 'Enter number'}
+                  </span>
+                </div>
                 <div className="relative">
                   <Smartphone className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
@@ -900,9 +891,12 @@ export default function SettingsTab({
                     value={testRecipient}
                     onChange={(e) => setTestRecipient(e.target.value)}
                     className="w-full pl-9 pr-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-mono font-bold focus:outline-none focus:border-blue-500"
-                    placeholder="+94 77 123 4567"
+                    placeholder="e.g. 0768657349 or 94768657349"
                   />
                 </div>
+                <p className="text-[10px] text-gray-500 mt-1">
+                  * Number is automatically converted to international <strong>94</strong> format (e.g. <code>{testRecipient}</code> &rarr; <code>{formattedTestRecipientPreview}</code>).
+                </p>
               </div>
 
               <div>
@@ -929,38 +923,65 @@ export default function SettingsTab({
 
             {/* Template Box */}
             <div className="p-3.5 bg-gray-50 rounded-xl border border-gray-200/80 text-xs space-y-1">
-              <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider block">Dispatched Message Preview</span>
-              <p className="font-mono text-slate-700 leading-relaxed text-[11px]">
-                [{smsConfig.senderMask}] FuelFlow Alert: Test notification from {stationProfile.stationName}. Gateway is ACTIVE & ready for automated shift dispatches.
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider block">Dispatched Payload Preview</span>
+                <span className="text-[10px] font-mono text-gray-500">Sender: {smsConfig.senderMask || 'TextLK'} &bull; Recipient: {formattedTestRecipientPreview}</span>
+              </div>
+              <p className="font-mono text-slate-700 leading-relaxed text-[11px] bg-white p-2.5 rounded-lg border border-gray-200/60">
+                Samse Auto Mart: Test SMS alert from {stationProfile.stationName}. Gateway is ACTIVE & operational.
               </p>
             </div>
 
             {/* Test Result Banner */}
             {testResult && (
-              <div className={`p-4 rounded-xl text-xs flex items-start gap-3 animate-fade-in border ${
+              <div className={`p-4 rounded-xl text-xs space-y-2.5 animate-fade-in border ${
                 testResult.success 
                   ? 'bg-emerald-50 border-emerald-200 text-emerald-900' 
                   : 'bg-rose-50 border-rose-200 text-rose-900'
               }`}>
-                {testResult.success ? (
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
-                ) : (
-                  <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
-                )}
-                <div className="space-y-1">
-                  <span className="font-bold block">
-                    {testResult.success ? 'Test Dispatch Processed (HTTP 200 / Bearer Auth Handshake)' : 'Test Dispatch Failed'}
-                  </span>
-                  <p className="text-[11px] leading-relaxed opacity-90">{testResult.message}</p>
-                  {testResult.details && (
-                    <p className="text-[10px] font-mono text-gray-600 bg-white/70 px-2 py-1 rounded border border-gray-200/60 mt-1">
-                      {testResult.details}
-                    </p>
+                <div className="flex items-start gap-3">
+                  {testResult.success ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
                   )}
-                  <div className="flex items-center gap-3 text-[10px] font-mono pt-1 opacity-80">
-                    <span>Message ID: <strong>{testResult.messageId}</strong></span>
-                    <span>&bull;</span>
-                    <span>Timestamp: <strong>{testResult.timestamp}</strong></span>
+                  <div className="space-y-1 flex-1">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <span className="font-bold block text-sm">
+                        {testResult.success ? 'SMS Dispatch Processed' : 'SMS Dispatch Failed'}
+                      </span>
+                      {testResult.httpStatus && (
+                        <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
+                          testResult.httpStatus === 200 
+                            ? 'bg-emerald-200/80 text-emerald-900' 
+                            : 'bg-rose-200/80 text-rose-900'
+                        }`}>
+                          HTTP {testResult.httpStatus} {testResult.httpStatus === 200 ? 'OK' : ''}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] leading-relaxed opacity-95">{testResult.message}</p>
+                    
+                    <div className="flex flex-wrap items-center gap-3 text-[10px] font-mono pt-1 opacity-90 border-t border-black/5">
+                      <span>Recipient: <strong>{testResult.recipientFormatted}</strong></span>
+                      <span>&bull;</span>
+                      <span>Sender ID: <strong>{testResult.senderUsed}</strong></span>
+                      <span>&bull;</span>
+                      <span>Msg ID: <strong>{testResult.messageId}</strong></span>
+                    </div>
+
+                    {testResult.rawResponse && (
+                      <details className="mt-2 text-[10px] font-mono bg-white/80 p-2.5 rounded-lg border border-gray-200/80">
+                        <summary className="cursor-pointer font-bold text-gray-700 hover:text-gray-900 select-none">
+                          View Carrier Raw JSON Response &amp; Headers
+                        </summary>
+                        <pre className="mt-1.5 p-2 bg-slate-900 text-emerald-400 rounded overflow-x-auto text-[10px] leading-relaxed">
+                          {typeof testResult.rawResponse === 'object' 
+                            ? JSON.stringify(testResult.rawResponse, null, 2) 
+                            : testResult.rawResponse}
+                        </pre>
+                      </details>
+                    )}
                   </div>
                 </div>
               </div>
