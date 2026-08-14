@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { FuelTank, FuelType, PriceSchedule } from '../types';
 import { Calendar, Trash2, Clock, Tag, Edit2, Save, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
@@ -80,8 +80,13 @@ export default function PriceManagementTab({ tanks, setTanks, priceSchedules, se
     return `Rs. ${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val)}`;
   };
 
+  // Naturally sort tanks in ascending order (Tank 01, Tank 02, etc.)
+  const sortedTanks = useMemo(() => {
+    return [...tanks].sort((a, b) => (a.name || a.id || '').localeCompare(b.name || b.id || '', undefined, { numeric: true, sensitivity: 'base' }));
+  }, [tanks]);
+
   // Group tanks by fuel type to display nicely
-  const fuelTypes = Array.from(new Set(tanks.map(t => t.fuelType)));
+  const fuelTypes = Array.from(new Set(sortedTanks.map(t => t.fuelType)));
 
   return (
     <div id="price-management-root" className="space-y-4 w-full max-w-6xl mx-auto animate-fade-in pb-12">
@@ -100,7 +105,7 @@ export default function PriceManagementTab({ tanks, setTanks, priceSchedules, se
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50 text-sm">
-              {tanks.map((tank) => (
+              {sortedTanks.map((tank) => (
                 <tr key={tank.id} className="hover:bg-gray-50/50 transition-colors group">
                   <td className="py-4 px-6">
                     <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold ${

@@ -8,7 +8,7 @@ import {
   Search, Plus, Clock, Fuel, ArrowUpRight, DollarSign, 
   User, CheckCircle, AlertCircle, Sparkles, X, Download, RotateCcw,
   ShieldCheck, Check, Save, AlertTriangle, TrendingUp, RefreshCw,
-  Lock, Unlock, Edit2, ArrowLeft, Users, Package
+  Lock, Unlock, Edit2, ArrowLeft, Users, Package, ChevronDown, CheckSquare, Square, Calendar, Droplet
 } from 'lucide-react';
 import { supabase, saveCreditSale, saveCardSale, syncCreditAndCardSales, upsertPumpReadings } from '../lib/supabaseClient';
 import { Employee, FuelTank, Pump, PumpMachine, PumpReading, Shift, FuelType } from '../types';
@@ -61,6 +61,13 @@ export default function ShiftManagementTab({
   const [draftShiftName, setDraftShiftName] = useState('');
   const [draftStartTime, setDraftStartTime] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Pumper-Centric Architecture State
+  const [selectedActivePumperIds, setSelectedActivePumperIds] = useState<string[]>([]);
+  const [openPumpSelectorPumperId, setOpenPumpSelectorPumperId] = useState<string | null>(null);
+  const [isAddPumperModalOpen, setIsAddPumperModalOpen] = useState(false);
+  const [savedPumperIds, setSavedPumperIds] = useState<{ [key: string]: boolean }>({});
+  const [savedPumperCards, setSavedPumperCards] = useState<{ [key: string]: boolean }>({});
 
   // Debounce timer store for remote database syncing
   const debounceTimersRef = useRef<{ [key: string]: NodeJS.Timeout }>({});
@@ -502,6 +509,38 @@ export default function ShiftManagementTab({
     return totals;
   }, [activeShift, draftReadings, tanks]);
 
+  // Fuel badge color helper function
+  const getFuelBadgeStyles = (fuelType: string) => {
+    if (fuelType.includes('Petrol 92') || fuelType.includes('92')) {
+      return {
+        badge: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+        dot: 'bg-emerald-500',
+      };
+    }
+    if (fuelType.includes('Petrol 95') || fuelType.includes('95')) {
+      return {
+        badge: 'bg-rose-50 text-rose-700 border-rose-200',
+        dot: 'bg-rose-500',
+      };
+    }
+    if (fuelType.includes('Super Diesel')) {
+      return {
+        badge: 'bg-sky-50 text-sky-700 border-sky-200',
+        dot: 'bg-sky-500',
+      };
+    }
+    if (fuelType.includes('Auto Diesel') || fuelType.includes('Diesel')) {
+      return {
+        badge: 'bg-amber-50 text-amber-700 border-amber-200',
+        dot: 'bg-amber-500',
+      };
+    }
+    return {
+      badge: 'bg-slate-100 text-slate-700 border-slate-200',
+      dot: 'bg-slate-500',
+    };
+  };
+
   // Group draft readings by assigned pumper for cash reconciliation
   const activePumpersData = useMemo(() => {
     const pumperGroups: Record<string, {
@@ -781,6 +820,107 @@ export default function ShiftManagementTab({
       totalNetSold: totalNet,
       totalNetSales: totalSales
     });
+  };
+
+  // Explicitly commit/save a specific pumper's assigned pump readings & handed-over cash to Supabase
+  const handleSavePumperReadings = async (pumperId: string) => {
+    if (!activeShift) return;
+
+    const pumperObj = employees.find(e => e.id === pumperId);
+    const pumperName = pumperObj?.name || 'Pumper';
+    const pumperReadings = draftReadings.filter(r => r.assignedPumperId === pumperId);
+
+    // Save pump readings to Supabase pump_readings table
+    if (pumperReadings.length > 0) {
+      const readingsToSave = pumperReadings.map(r => ({
+        ...r,
+        status: 'Completed' as const,
+        isLocked: true
+      }));
+      await upsertPumpReadings(supabase, readingsToSave, activeShift.id);
+    }
+
+    // Save pumper assignment & handed over cash summary to Supabase shift_pumper_assignments
+    const pumperCard = pumperCardsData.find(p => p.pumperId === pumperId);
+    const actualCash = pumperCard ? (pumperCard.totalActualCash || 0) : 0;
+    const expCash = pumperCard ? (pumperCard.totalExpectedCash || 0) : 0;
+    const variance = pumperCard ? (pumperCard.cashVariance || 0) : 0;
+
+    try {
+      const assignmentPayload = {
+        id: `${activeShift.id}_${pumperId}`,
+        shift_id: activeShift.id,
+        pumper_id: pumperId,
+        pumper_name: pumperName,
+        actual_cash: actualCash,
+        expected_cash: expCash,
+        cash_variance: variance,
+        assigned_pumps_count: pumperReadings.length,
+        status: 'Saved',
+        updated_at: new Date().toISOString()
+      };
+
+      const { error } = await supabase.from('shift_pumper_assignments').upsert([assignmentPayload]);
+      if (error && (error.code === 'PGRST205' || error.message?.includes('schema cache') || error.message?.includes('Could not find'))) {
+        await supabase.from('pumper_assignments').upsert([{
+          id: `${activeShift.id}_${pumperId}`,
+          shift_id: activeShift.id,
+          pumper_id: pumperId,
+          actual_cash: actualCash,
+          status: 'Saved'
+        }]);
+      }
+    } catch (err) {
+      console.warn('shift_pumper_assignments sync note:', err);
+    }
+
+    // Mark assigned readings in draftReadings as Completed & locked for shift closure
+    const updatedDraftReadings = draftReadings.map(dr => {
+      if (dr.assignedPumperId === pumperId) {
+        return {
+          ...dr,
+          status: 'Completed' as const,
+          isLocked: true
+        };
+      }
+      return dr;
+    });
+
+    setDraftReadings(updatedDraftReadings);
+
+    // Update activeShift state in React
+    let totalFuel = 0;
+    let totalNet = 0;
+    let totalSales = 0;
+
+    updatedDraftReadings.forEach(dr => {
+      const fuel = Math.max(0, dr.endMeter - dr.startMeter);
+      const net = Math.max(0, fuel - dr.testingQty);
+      totalFuel += fuel;
+      totalNet += net;
+      totalSales += (net * getPriceForFuelType(dr.fuelType));
+    });
+
+    setActiveShift({
+      ...activeShift,
+      pumpReadings: updatedDraftReadings,
+      totalFuelSold: totalFuel,
+      totalNetSold: totalNet,
+      totalNetSales: totalSales
+    });
+
+    // Temporary green "Saved!" status indicator & toast notification
+    setSavedPumperIds(prev => ({ ...prev, [pumperId]: true }));
+    setSavedPumperCards(prev => ({ ...prev, [pumperId]: true }));
+    setToastMessage(`Saved readings & handed over cash for ${pumperName}!`);
+
+    setTimeout(() => {
+      setSavedPumperIds(prev => ({ ...prev, [pumperId]: false }));
+    }, 3000);
+
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 3000);
   };
 
   // Save and lock a single pump's starting readings (Assigned Pumper & Start Meter), marking it Active
@@ -1090,6 +1230,170 @@ export default function ShiftManagementTab({
     setTimeout(() => setToastMessage(null), 3000);
   };
 
+  // Handle Pump Assignment to Pumper
+  const handleAssignPumpToPumper = (pumpId: string, pumperId: string | null) => {
+    if (!activeShift) return;
+
+    const updatedReadings = draftReadings.map(r => {
+      if (r.pumpId === pumpId) {
+        return {
+          ...r,
+          assignedPumperId: pumperId
+        };
+      }
+      return r;
+    });
+
+    setDraftReadings(updatedReadings);
+
+    if (pumperId && !selectedActivePumperIds.includes(pumperId)) {
+      setSelectedActivePumperIds(prev => [...prev, pumperId]);
+    }
+
+    let totalFuel = 0;
+    let totalNet = 0;
+    let totalSales = 0;
+
+    updatedReadings.forEach(dr => {
+      const fuel = Math.max(0, dr.endMeter - dr.startMeter);
+      const net = Math.max(0, fuel - dr.testingQty);
+      totalFuel += fuel;
+      totalNet += net;
+      totalSales += (net * getPriceForFuelType(dr.fuelType));
+    });
+
+    setActiveShift({
+      ...activeShift,
+      pumpReadings: updatedReadings,
+      totalFuelSold: totalFuel,
+      totalNetSold: totalNet,
+      totalNetSales: totalSales
+    });
+
+    const pumperObj = employees.find(e => e.id === pumperId);
+    const pumpObj = draftReadings.find(r => r.pumpId === pumpId);
+    if (pumperId && pumperObj && pumpObj) {
+      setToastMessage(`Assigned ${pumpObj.pumpName} to ${pumperObj.name}`);
+    } else if (pumpObj) {
+      setToastMessage(`Unassigned ${pumpObj.pumpName}`);
+    }
+    setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  const handleTogglePumperPumpAssignment = (pumperId: string, pumpId: string) => {
+    const reading = draftReadings.find(r => r.pumpId === pumpId);
+    if (!reading) return;
+
+    if (reading.assignedPumperId === pumperId) {
+      handleAssignPumpToPumper(pumpId, null);
+    } else {
+      handleAssignPumpToPumper(pumpId, pumperId);
+    }
+  };
+
+  // Derive Unassigned Pumps
+  const unassignedReadings = useMemo(() => {
+    if (!activeShift || draftReadings.length === 0) return [];
+    const query = searchQuery.trim().toLowerCase();
+
+    return draftReadings.filter(r => {
+      if (r.assignedPumperId) return false;
+      if (!query) return true;
+      return (
+        r.pumpName.toLowerCase().includes(query) ||
+        r.fuelType.toLowerCase().includes(query)
+      );
+    });
+  }, [activeShift, draftReadings, searchQuery]);
+
+  // Sync active pumper IDs from draft readings
+  React.useEffect(() => {
+    if (activeShift && draftReadings.length > 0) {
+      const activePumperIds = Array.from(new Set(
+        draftReadings
+          .map(r => r.assignedPumperId)
+          .filter((id): id is string => !!id)
+      ));
+      setSelectedActivePumperIds(prev => Array.from(new Set([...prev, ...activePumperIds])));
+    }
+  }, [activeShift, draftReadings]);
+
+  // Derive Pumper Cards Data
+  const pumperCardsData = useMemo(() => {
+    const pumperIdsSet = new Set<string>();
+
+    draftReadings.forEach(r => {
+      if (r.assignedPumperId) pumperIdsSet.add(r.assignedPumperId);
+    });
+
+    selectedActivePumperIds.forEach(id => pumperIdsSet.add(id));
+
+    const pumperList = Array.from(pumperIdsSet);
+    const query = searchQuery.trim().toLowerCase();
+
+    return pumperList.map(pumperId => {
+      const emp = employees.find(e => e.id === pumperId);
+      const assignedReadings = draftReadings.filter(r => r.assignedPumperId === pumperId);
+
+      let totalGrossRevenue = 0;
+      let totalFuelRevenue = 0;
+      let totalOilSales = 0;
+      let totalNetLiters = 0;
+      let totalCreditSales = 0;
+      let totalCardSales = 0;
+      let totalExpectedCash = 0;
+      let totalActualCash = 0;
+
+      assignedReadings.forEach(r => {
+        const fuelPrice = getPriceForFuelType(r.fuelType);
+        const isOilBay = r.pumpId === 'pump-oil-bay' || r.fuelType === 'Oil & Lubricants' || r.pumpName.toLowerCase().includes('oil');
+        const fuelSold = isOilBay ? 0 : Math.max(0, r.endMeter - r.startMeter);
+        const netSold = isOilBay ? 0 : Math.max(0, fuelSold - r.testingQty);
+        const grossFuelRev = netSold * fuelPrice;
+        const oilSales = r.oilSalesAmount || 0;
+        const grossTotalRev = grossFuelRev + oilSales;
+        const creditVal = r.creditSalesAmount || 0;
+        const cardVal = r.cardSalesAmount || 0;
+        const netExp = Math.max(0, grossTotalRev - (creditVal + cardVal));
+        const actCash = r.actualCash || 0;
+
+        totalFuelRevenue += grossFuelRev;
+        totalOilSales += oilSales;
+        totalGrossRevenue += grossTotalRev;
+        totalNetLiters += netSold;
+        totalCreditSales += creditVal;
+        totalCardSales += cardVal;
+        totalExpectedCash += netExp;
+        totalActualCash += actCash;
+      });
+
+      const totalNonCash = totalCreditSales + totalCardSales;
+      const cashVariance = totalActualCash - totalExpectedCash;
+
+      return {
+        pumperId,
+        pumperName: emp?.name || 'Unassigned Pumper',
+        avatarColor: emp?.avatarColor || 'bg-blue-600',
+        assignedReadings,
+        totalNetLiters,
+        totalGrossRevenue,
+        totalNonCash,
+        totalCreditSales,
+        totalCardSales,
+        totalExpectedCash,
+        totalActualCash,
+        cashVariance
+      };
+    }).filter(p => {
+      if (!query) return true;
+      const matchPumper = p.pumperName.toLowerCase().includes(query);
+      const matchPumps = p.assignedReadings.some(r =>
+        r.pumpName.toLowerCase().includes(query) || r.fuelType.toLowerCase().includes(query)
+      );
+      return matchPumper || matchPumps;
+    });
+  }, [draftReadings, selectedActivePumperIds, employees, tanks, searchQuery]);
+
   // Filtered readings based on search and local draftReadings state
   const filteredReadings = useMemo(() => {
     if (!activeShift) return [];
@@ -1139,11 +1443,11 @@ export default function ShiftManagementTab({
       };
     });
 
-    const combinedShiftName = `${shiftNameInput} (${startTimeInput} - ${endTimeInput})`;
+    const combinedShiftName = 'Full Day Shift (08:00 AM - 08:00 AM)';
 
     const now = new Date();
     const datePart = now.toISOString().slice(0, 10);
-    const fullISOStart = `${datePart}T${startTimeInput}:00`;
+    const fullISOStart = `${datePart}T08:00:00`;
 
     onStartShift({
       id: newShiftId,
@@ -1173,13 +1477,13 @@ export default function ShiftManagementTab({
       errors.push("Shift Name / Label cannot be empty.");
     }
 
-    // Validate that all active pumps (assigned to a pumper) are Completed / locked
+    // Validate that all active pumps (assigned to a pumper) are saved / completed
     draftReadings.forEach(r => {
       if (r.assignedPumperId) {
-        if (r.status === 'Idle') {
-          errors.push(`${r.pumpName}: Please save the starting setup data first.`);
-        } else if (r.status === 'Active') {
-          errors.push(`${r.pumpName}: This pump shift is still active. Please click 'End Shift' at the bottom of the pump card first to close it.`);
+        const isSaved = r.status === 'Completed' || r.isLocked || !!savedPumperCards[r.assignedPumperId] || !!savedPumperIds[r.assignedPumperId];
+        if (!isSaved) {
+          const pumperName = employees.find(e => e.id === r.assignedPumperId)?.name || 'Pumper';
+          errors.push(`${r.pumpName}: Please click 'Save Pumper Readings' for ${pumperName} first.`);
         }
       }
     });
@@ -1308,7 +1612,7 @@ export default function ShiftManagementTab({
       {/* Control Header */}
       <div id="shift-header-section" className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 id="shift-title" className="text-xl sm:text-2xl font-bold text-[#1C1C1C] tracking-tight font-sans">
+          <h1 id="shift-title" className="text-lg font-bold text-slate-900 tracking-tight font-sans">
             Shift Management
           </h1>
           <p id="shift-subtitle" className="text-gray-500 text-xs sm:text-sm mt-0.5">
@@ -1319,21 +1623,12 @@ export default function ShiftManagementTab({
         {activeShift ? (
           <div className="flex flex-wrap items-center gap-3">
             <button
-              id="btn-export-report"
-              onClick={exportShiftReport}
-              className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 text-gray-700 font-medium text-sm rounded-xl hover:bg-gray-50 transition-all shadow-md cursor-pointer"
-            >
-              <Download className="w-4 h-4 text-gray-500" />
-              <span>Export Report</span>
-            </button>
-            
-            <button
               id="btn-close-shift"
               onClick={handleEndShiftClick}
-              className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-red-600 to-red-500 hover:brightness-110 text-white font-bold text-sm rounded-xl transition-all shadow-md cursor-pointer"
+              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-red-600 to-red-500 hover:brightness-110 text-white font-bold text-xs sm:text-sm rounded-xl transition-all shadow-md cursor-pointer"
             >
               <ShieldCheck className="w-4 h-4" />
-              <span>End Shift & Lock Ledger</span>
+              <span>Close Shift</span>
             </button>
           </div>
         ) : (
@@ -1354,17 +1649,17 @@ export default function ShiftManagementTab({
           <div id="shift-summary-grid" className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             
             {/* Total Sales Large Bento */}
-            <div className="bg-[#E8F1F5] p-6 rounded-2xl border border-[#D0E2EB] text-[#1C1C1C] shadow-sm flex flex-col justify-between">
+            <div className="bg-[#E8F1F5] p-6 rounded-2xl border border-[#D0E2EB] text-[#1C1C1C] shadow-sm flex flex-col justify-between font-sans">
               <div>
                 <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 block">
                   Total Expected Cash Revenue
                 </span>
-                <span className="text-4xl font-extrabold mt-3 block tabular-nums font-extrabold tracking-tight">
+                <span className="text-4xl font-mono tabular-nums font-extrabold mt-3 block tracking-tight">
                   {formatCurrency(stats.totalNetSales)}
                 </span>
               </div>
               <div className="mt-6 pt-4 border-t border-gray-200 flex items-center justify-between text-xs text-gray-500">
-                <span>Active Shift ID: <strong className="text-[#1C1C1C] tabular-nums font-semibold">{activeShift.id}</strong></span>
+                <span>Active Shift ID: <strong className="text-[#1C1C1C] font-mono tabular-nums font-semibold">{activeShift.id}</strong></span>
                 <span className="bg-white px-2 py-0.5 rounded-lg text-[10px] font-semibold text-blue-600 animate-pulse uppercase border border-blue-100 shadow-sm">
                   Live Syncing
                 </span>
@@ -1372,7 +1667,7 @@ export default function ShiftManagementTab({
             </div>
 
             {/* Liters Sold Categorized by Fuel Type */}
-            <div className="glass-panel p-5 rounded-2xl lg:col-span-2 flex flex-col justify-between">
+            <div className="glass-panel p-5 rounded-2xl lg:col-span-2 flex flex-col justify-between font-sans">
               <div>
                 <span className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-3">
                   Total Liters Sold (By Fuel Type)
@@ -1382,10 +1677,10 @@ export default function ShiftManagementTab({
                   {/* Petrol 92 */}
                   <div className="p-3 bg-blue-500/10 rounded-xl border border-blue-500/20">
                     <span className="text-[10px] font-bold text-blue-600 uppercase block">Petrol 92</span>
-                    <span className="text-lg font-bold text-[#1C1C1C] tabular-nums font-semibold mt-1 block">
+                    <span className="text-lg font-mono tabular-nums font-bold text-[#1C1C1C] mt-1 block">
                       {formatLiters(fuelTypeTotals['Petrol 92'].net)}
                     </span>
-                    <span className="text-[10px] text-gray-500 mt-0.5 block">
+                    <span className="text-[10px] text-gray-500 font-mono tabular-nums mt-0.5 block">
                       {formatCurrency(fuelTypeTotals['Petrol 92'].sales)}
                     </span>
                   </div>
@@ -1393,10 +1688,10 @@ export default function ShiftManagementTab({
                   {/* Petrol 95 */}
                   <div className="p-3 bg-purple-500/10 rounded-xl border border-purple-500/20">
                     <span className="text-[10px] font-bold text-purple-400 uppercase block">Petrol 95</span>
-                    <span className="text-lg font-bold text-[#1C1C1C] tabular-nums font-semibold mt-1 block">
+                    <span className="text-lg font-mono tabular-nums font-bold text-[#1C1C1C] mt-1 block">
                       {formatLiters(fuelTypeTotals['Petrol 95'].net)}
                     </span>
-                    <span className="text-[10px] text-gray-500 mt-0.5 block">
+                    <span className="text-[10px] text-gray-500 font-mono tabular-nums mt-0.5 block">
                       {formatCurrency(fuelTypeTotals['Petrol 95'].sales)}
                     </span>
                   </div>
@@ -1404,10 +1699,10 @@ export default function ShiftManagementTab({
                   {/* Auto Diesel */}
                   <div className="p-3 bg-amber-500/10 rounded-xl border border-amber-500/20">
                     <span className="text-[10px] font-bold text-amber-400 uppercase block">Auto Diesel</span>
-                    <span className="text-lg font-bold text-[#1C1C1C] tabular-nums font-semibold mt-1 block">
+                    <span className="text-lg font-mono tabular-nums font-bold text-[#1C1C1C] mt-1 block">
                       {formatLiters(fuelTypeTotals['Auto Diesel'].net)}
                     </span>
-                    <span className="text-[10px] text-gray-500 mt-0.5 block">
+                    <span className="text-[10px] text-gray-500 font-mono tabular-nums mt-0.5 block">
                       {formatCurrency(fuelTypeTotals['Auto Diesel'].sales)}
                     </span>
                   </div>
@@ -1415,824 +1710,548 @@ export default function ShiftManagementTab({
                   {/* Super Diesel */}
                   <div className="p-3 bg-emerald-500/10 rounded-xl border border-emerald-500/20">
                     <span className="text-[10px] font-bold text-emerald-400 uppercase block">Super Diesel</span>
-                    <span className="text-lg font-bold text-[#1C1C1C] tabular-nums font-semibold mt-1 block">
+                    <span className="text-lg font-mono tabular-nums font-bold text-[#1C1C1C] mt-1 block">
                       {formatLiters(fuelTypeTotals['Super Diesel'].net)}
                     </span>
-                    <span className="text-[10px] text-gray-500 mt-0.5 block">
+                    <span className="text-[10px] text-gray-500 font-mono tabular-nums mt-0.5 block">
                       {formatCurrency(fuelTypeTotals['Super Diesel'].sales)}
                     </span>
                   </div>
                 </div>
               </div>
 
-              <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between text-xs text-gray-500">
+              <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between text-xs text-gray-500 font-sans">
                 <span className="flex items-center gap-1">
                   <Fuel className="w-3.5 h-3.5 text-blue-500" />
-                  <span>Total Net Liters Sold: <strong className="text-[#1C1C1C]">{formatLiters(stats.totalNetSold)}</strong></span>
+                  <span>Total Net Liters Sold: <strong className="text-[#1C1C1C] font-mono tabular-nums">{formatLiters(stats.totalNetSold)}</strong></span>
                 </span>
-                <span>Active Pumps: <strong className="text-[#1C1C1C]">{stats.runningPumps} of {activeShift.pumpReadings.length}</strong></span>
+                <span>Active Pumps: <strong className="text-[#1C1C1C] font-mono tabular-nums">{stats.runningPumps} of {activeShift.pumpReadings.length}</strong></span>
               </div>
             </div>
           </div>
 
-          {/* Active Shift Details Banner (Fully Editable Phase 1 & 2 Config) */}
-          <div className="glass-panel p-5 grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
-            {/* Supervisor Selector */}
-            <div className="flex items-center gap-3">
-              <div className={`w-10 h-10 rounded-xl ${
-                employees.find(e => e.id === draftSupervisorId)?.avatarColor || 'bg-blue-600'
-              } text-[#1C1C1C] flex items-center justify-center font-bold text-sm shadow-sm flex-shrink-0`}>
-                {employees.find(e => e.id === draftSupervisorId)?.name.split(' ').map(n => n[0]).join('') || 'SV'}
-              </div>
-              <div className="flex-1">
-                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1">
-                  Station Supervisor
-                </label>
-                <select
-                  value={draftSupervisorId}
-                  onChange={(e) => setDraftSupervisorId(e.target.value)}
-                  className="w-full px-3 py-1.5 bg-white border border-gray-200 rounded-xl text-xs font-bold text-[#1C1C1C] focus:outline-none focus:border-blue-500"
-                >
-                  <option value="" disabled>-- Select Supervisor --</option>
-                  {supervisors.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/* Custom Shift Name/Times */}
-            <div>
-              <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1">
-                Shift Name / Times
-              </label>
-              <input
-                type="text"
-                value={draftShiftName}
-                onChange={(e) => setDraftShiftName(e.target.value)}
-                placeholder="e.g. Morning Shift (06:00 - 14:00)"
-                className="w-full px-3 py-1.5 bg-white border border-gray-200 rounded-xl text-xs font-bold text-[#1C1C1C] focus:outline-none focus:border-blue-500"
-              />
-            </div>
-
-            {/* Active Since / Start Time Input */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex-1">
-                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1">
-                  Start Date & Time
-                </label>
-                <input
-                  type="datetime-local"
-                  value={draftStartTime ? draftStartTime.slice(0, 16) : ''}
-                  onChange={(e) => setDraftStartTime(e.target.value)}
-                  className="w-full px-3 py-1.5 bg-white border border-gray-200 rounded-xl text-xs font-bold text-[#1C1C1C] focus:outline-none focus:border-blue-500"
-                />
-              </div>
-              <span className="px-3 py-1.5 bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[10px] font-bold uppercase tracking-wider rounded-lg flex items-center gap-1.5 self-start sm:self-auto h-fit">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                <span>Config / Draft Mode</span>
+          {/* Active Shift Details Banner (Ultra-Compact Single-Line Toolbar Strip) */}
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 bg-slate-100/90 border border-slate-200/80 rounded-lg shadow-sm mb-4 font-sans">
+            {/* Left Side: Small Supervisor static badge/chip with avatar pill */}
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider shrink-0">
+                SUPERVISOR:
               </span>
-            </div>
-          </div>
-
-          {/* INLINE LEDGER & PUMP MANAGEMENT GRID */}
-          <div className="space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div>
-                <h3 className="text-xl font-bold text-[#1C1C1C] tracking-tight">Active Pump Ledgers</h3>
-                <p className="text-xs text-gray-500 mt-0.5">Continuous digital entry. Changes are automatically updated in real-time totals and saved.</p>
-              </div>
-              
-              <div className="relative w-full sm:w-72">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
-                <input
-                  type="text"
-                  placeholder="Search pumps or pumpers..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-9 pr-4 py-2 bg-white border border-gray-200 rounded-xl text-[#1C1C1C] text-sm focus:outline-none focus:border-blue-500 transition-colors"
-                />
+              <div className="flex items-center gap-1.5 bg-white border border-slate-200/90 px-2.5 py-1 rounded-md shadow-2xs">
+                <div className={`w-5 h-5 rounded-full ${
+                  employees.find(e => e.id === draftSupervisorId)?.avatarColor || 'bg-blue-600'
+                } text-white flex items-center justify-center font-bold text-[9px] shrink-0`}>
+                  {employees.find(e => e.id === draftSupervisorId)?.name.split(' ').map(n => n[0]).join('') || 'SV'}
+                </div>
+                <span className="text-xs font-bold text-slate-800">
+                  {employees.find(e => e.id === draftSupervisorId)?.name || 'Supervisor'}
+                </span>
               </div>
             </div>
 
-            {/* Pump Cards Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
-              {filteredReadings.length > 0 ? (
-                filteredReadings.map((r) => {
-                  const isOilBay = r.pumpId === 'pump-oil-bay' || r.fuelType === 'Oil & Lubricants' || r.pumpName.toLowerCase().includes('oil');
-                  const fuelPrice = getPriceForFuelType(r.fuelType);
-                  const fuelSold = isOilBay ? 0 : Math.max(0, r.endMeter - r.startMeter);
-                  const netSold = isOilBay ? 0 : Math.max(0, fuelSold - r.testingQty);
-                  const expectedCash = isOilBay ? (r.oilSalesAmount || 0) : (netSold * fuelPrice);
-
-                  // Styling theme per fuel type
-                  const isPetrol = r.fuelType.includes('Petrol');
-                  const themeClasses = isOilBay
-                    ? { header: 'bg-amber-500/10 border-l-4 border-amber-500', text: 'text-amber-600' }
-                    : r.fuelType === 'Petrol 92'
-                    ? { header: 'bg-blue-500/10 border-l-4 border-blue-500', text: 'text-blue-600' }
-                    : r.fuelType === 'Petrol 95'
-                    ? { header: 'bg-purple-500/10 border-l-4 border-purple-500', text: 'text-purple-400' }
-                    : r.fuelType === 'Auto Diesel'
-                    ? { header: 'bg-amber-500/10 border-l-4 border-amber-500', text: 'text-amber-400' }
-                    : { header: 'bg-emerald-500/10 border-l-4 border-emerald-500', text: 'text-emerald-400' };
-
-                  const initialPumper = employees.find(e => e.id === r.assignedPumperId);
-                  const replacementPumper = employees.find(e => e.id === r.replacementPumperId);
-
-                  return (
-                    <div 
-                      key={r.pumpId} 
-                      className={`glass-panel rounded-2xl transition-all duration-300 overflow-hidden flex flex-col justify-between ${
-                        r.status === 'Completed' 
-                          ? 'border-emerald-500/30 shadow-emerald-500/5 bg-emerald-500/5' 
-                          : r.status === 'Active'
-                          ? isOilBay ? 'border-amber-500/30 shadow-amber-500/5 bg-amber-500/5' : 'border-blue-500/30 shadow-blue-500/5 bg-blue-500/5'
-                          : 'hover:border-blue-500/20 hover:shadow-[0_0_15px_rgba(0,123,255,0.15)]'
-                      }`}
-                    >
-                      {/* Card Header with Pump and Fuel Info */}
-                      <div className={`px-4 py-3 border-b border-gray-100 flex items-center justify-between ${themeClasses.header}`}>
-                        <div>
-                          <h4 className="font-extrabold text-[#1C1C1C] text-sm flex items-center gap-1.5">
-                            {isOilBay && <Package className="w-4 h-4 text-amber-600 shrink-0" />}
-                            <span>{r.pumpName}</span>
-                            {r.status === 'Completed' ? (
-                              <span className="flex items-center gap-1 px-1.5 py-0.5 bg-emerald-500/25 text-emerald-700 border border-emerald-500/35 text-[9px] font-extrabold uppercase rounded-md shadow-xs">
-                                <ShieldCheck className="w-3 h-3 text-emerald-600" />
-                                <span>{isOilBay ? 'Bay Closed / Locked' : 'Shift Completed / Locked'}</span>
-                              </span>
-                            ) : r.status === 'Active' ? (
-                              <span className="flex items-center gap-1 px-1.5 py-0.5 bg-amber-500/25 text-amber-700 border border-amber-500/35 text-[9px] font-extrabold uppercase rounded-md shadow-xs animate-pulse">
-                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping" />
-                                <span>{isOilBay ? 'Bay Active / In Progress' : 'Pump Active / In Progress'}</span>
-                              </span>
-                            ) : (
-                              <span className="flex items-center gap-1 px-1.5 py-0.5 bg-gray-100 text-gray-500 border border-gray-100 text-[9px] font-bold uppercase rounded-md">
-                                <span>Setup</span>
-                              </span>
-                            )}
-                          </h4>
-                          <span className="text-[10px] tabular-nums font-semibold text-gray-500">{r.pumpId}</span>
-                        </div>
-                        <div className="text-right">
-                          <span className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-bold ${themeClasses.header} ${themeClasses.text}`}>
-                            {isOilBay ? 'Oil & Lubricants' : r.fuelType}
-                          </span>
-                          {!isOilBay && (
-                            <span className="block text-[9px] text-gray-500 tabular-nums font-semibold mt-0.5">
-                              Price: {formatCurrency(fuelPrice)}/L
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Card Inputs body */}
-                      <div className="p-4 space-y-3.5">
-                        {/* Pumper Assignment Selector */}
-                        <div>
-                          <label className="text-[10px] font-bold text-gray-500 block mb-1 uppercase tracking-wider">
-                            Assigned Pumper
-                          </label>
-                          <select
-                            value={r.assignedPumperId || ''}
-                            disabled={r.status !== 'Idle'}
-                            onChange={(e) => handleUpdateReading(r.pumpId, 'assignedPumperId', e.target.value || null)}
-                            className="w-full px-3 py-2 bg-white border border-gray-200 text-[#1C1C1C] rounded-xl text-xs focus:outline-none focus:border-blue-500 disabled:bg-gray-50 disabled:text-gray-500 disabled:border-gray-100 font-medium"
-                          >
-                            <option value="">-- Unassigned (Idle) --</option>
-                            {pumpers.map((p) => (
-                              <option key={p.id} value={p.id}>
-                                {p.name}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        {/* Mid-shift transfer status badge if active */}
-                        {r.replacementPumperId && (
-                          <div className="p-2.5 rounded-xl bg-blue-50 border border-blue-200/80 text-[11px] space-y-1">
-                            <div className="flex justify-between items-center text-blue-900 font-bold">
-                              <span className="flex items-center gap-1 text-[10px] uppercase tracking-wide">
-                                <RefreshCw className="w-3 h-3 text-blue-600" /> Handover Transfer
-                              </span>
-                              <span className="tabular-nums text-blue-700 font-extrabold text-[10px]">
-                                {isOilBay ? `Sales at Transfer: ${formatCurrency(r.oilSalesAmount || 0)}` : `Meter: ${r.handoverMeter?.toFixed(2) || '0.00'} L`}
-                              </span>
-                            </div>
-                            <div className="text-gray-600 flex justify-between text-[10px]">
-                              <span>Outgoing Cash:</span>
-                              <span className="font-bold text-gray-800 tabular-nums">{formatCurrency(r.initialPumperCash || 0)}</span>
-                            </div>
-                            {r.handoverNotes && (
-                              <div className="text-[10px] text-gray-500 italic truncate">
-                                "{r.handoverNotes}"
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {isOilBay ? (
-                          /* Dedicated Oil & Lubricant Bay Inputs */
-                          <div className="space-y-2.5">
-                            <div className="p-3 bg-amber-50/80 border border-amber-200/90 rounded-xl space-y-2.5">
-                              <div className="flex items-center justify-between">
-                                <span className="text-[10px] font-extrabold text-amber-900 uppercase tracking-wider flex items-center gap-1.5">
-                                  <Package className="w-3.5 h-3.5 text-amber-600" />
-                                  <span>Oil & Lube Sales Entry</span>
-                                </span>
-                                <span className="text-[9px] font-bold text-amber-800 bg-amber-100/80 px-2 py-0.5 rounded-full">
-                                  Virtual Bay
-                                </span>
-                              </div>
-
-                              {/* Primary Sales Entry: Total Oil Sales (Rs.) */}
-                              <div>
-                                <label className="text-[10px] font-extrabold text-gray-700 block mb-1 uppercase tracking-wider flex items-center justify-between">
-                                  <span>Total Oil / Lube Sales (Rs.)</span>
-                                  {r.status !== 'Completed' && <Edit2 className="w-2.5 h-2.5 text-amber-600" />}
-                                </label>
-                                <div className="relative">
-                                  <input
-                                    type="number"
-                                    step="any"
-                                    value={r.oilSalesAmount ?? 0}
-                                    disabled={r.status === 'Completed'}
-                                    placeholder="0.00"
-                                    onFocus={(e) => e.target.select()}
-                                    onChange={(e) => handleUpdateReading(r.pumpId, 'oilSalesAmount', parseFloat(e.target.value) || 0)}
-                                    className="w-full px-3 py-2 bg-white border border-amber-300 text-[#1C1C1C] rounded-xl text-xs sm:text-sm tabular-nums font-extrabold text-right focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 disabled:bg-gray-50 disabled:text-gray-500 disabled:border-gray-200 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none min-w-0"
-                                  />
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Non-Cash Collections Section */}
-                            <div className="p-2.5 bg-purple-50/60 border border-purple-100 rounded-xl space-y-2">
-                              <span className="text-[10px] font-extrabold text-purple-900 uppercase tracking-wider block">
-                                Oil Bay Non-Cash Collections
-                              </span>
-                              
-                              <div className="flex items-center justify-between gap-2">
-                                <label className="text-[10px] font-bold text-gray-600 flex-1 min-w-0">
-                                  Credit Sales (Rs.)
-                                </label>
-                                <div className="w-28 sm:w-32">
-                                  <input
-                                    type="number"
-                                    step="any"
-                                    value={r.creditSalesAmount ?? 0}
-                                    disabled={r.status === 'Completed'}
-                                    placeholder="0.00"
-                                    onFocus={(e) => e.target.select()}
-                                    onChange={(e) => handleUpdateReading(r.pumpId, 'creditSalesAmount', parseFloat(e.target.value) || 0)}
-                                    className="w-full px-2.5 py-1 bg-white border border-gray-200 text-[#1C1C1C] rounded-lg text-xs tabular-nums font-extrabold text-right focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 disabled:bg-gray-100 disabled:text-gray-400 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none min-w-0"
-                                  />
-                                </div>
-                              </div>
-
-                              <div className="flex items-center justify-between gap-2">
-                                <label className="text-[10px] font-bold text-gray-600 flex-1 min-w-0">
-                                  Card Sales (Rs.)
-                                </label>
-                                <div className="w-28 sm:w-32">
-                                  <input
-                                    type="number"
-                                    step="any"
-                                    value={r.cardSalesAmount ?? 0}
-                                    disabled={r.status === 'Completed'}
-                                    placeholder="0.00"
-                                    onFocus={(e) => e.target.select()}
-                                    onChange={(e) => handleUpdateReading(r.pumpId, 'cardSalesAmount', parseFloat(e.target.value) || 0)}
-                                    className="w-full px-2.5 py-1 bg-white border border-gray-200 text-[#1C1C1C] rounded-lg text-xs tabular-nums font-extrabold text-right focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 disabled:bg-gray-100 disabled:text-gray-400 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none min-w-0"
-                                  />
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        ) : (
-                          /* Standard Fuel Pump Inputs Grid */
-                          <div className="space-y-2.5">
-                            {/* Start Meter & End Meter prominent 2-column layout for maximum digit width */}
-                            <div className="grid grid-cols-2 gap-2.5">
-                              <div>
-                                <label className="text-[10px] font-extrabold text-gray-500 block mb-1 uppercase tracking-wider flex items-center justify-between">
-                                  <span>Start Meter</span>
-                                  {r.status !== 'Idle' && <Lock className="w-2.5 h-2.5 text-gray-400" />}
-                                </label>
-                                <input
-                                  type="number"
-                                  step="any"
-                                  value={r.startMeter ?? 0}
-                                  disabled={r.status !== 'Idle'}
-                                  onFocus={(e) => e.target.select()}
-                                  onChange={(e) => handleUpdateReading(r.pumpId, 'startMeter', parseFloat(e.target.value) || 0)}
-                                  className="w-full px-3 py-2 bg-white border border-gray-200 text-[#1C1C1C] rounded-xl text-xs sm:text-sm tabular-nums font-extrabold text-center focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-gray-50 disabled:text-gray-500 disabled:border-gray-200 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none min-w-0"
-                                />
-                              </div>
-
-                              <div>
-                                <label className="text-[10px] font-extrabold text-gray-500 block mb-1 uppercase tracking-wider flex items-center justify-between">
-                                  <span>End Meter</span>
-                                  {r.status === 'Active' && <Edit2 className="w-2.5 h-2.5 text-blue-500" />}
-                                </label>
-                                <input
-                                  type="number"
-                                  step="any"
-                                  value={r.endMeter ?? 0}
-                                  disabled={r.status !== 'Active'}
-                                  placeholder="0.000"
-                                  onFocus={(e) => e.target.select()}
-                                  onChange={(e) => handleUpdateReading(r.pumpId, 'endMeter', parseFloat(e.target.value) || 0)}
-                                  className="w-full px-3 py-2 bg-white border border-gray-200 text-[#1C1C1C] rounded-xl text-xs sm:text-sm tabular-nums font-extrabold text-center focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-gray-50 disabled:text-gray-500 disabled:border-gray-200 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none min-w-0"
-                                />
-                              </div>
-                            </div>
-
-                            {/* Calibration Test (Testing Qty) field */}
-                            <div className="flex items-center justify-between bg-gray-50/80 px-3 py-2 rounded-xl border border-gray-100 gap-2">
-                              <div className="flex-1 min-w-0">
-                                <span className="text-[10px] font-extrabold text-gray-500 uppercase tracking-wider block">
-                                  Calibration Test (L)
-                                </span>
-                              </div>
-                              <div className="w-28 sm:w-32">
-                                <input
-                                  type="number"
-                                  step="any"
-                                  value={r.testingQty ?? 0}
-                                  disabled={r.status !== 'Active'}
-                                  onFocus={(e) => e.target.select()}
-                                  onChange={(e) => handleUpdateReading(r.pumpId, 'testingQty', parseFloat(e.target.value) || 0)}
-                                  className="w-full px-2.5 py-1.5 bg-white border border-gray-200 text-[#1C1C1C] rounded-lg text-xs sm:text-sm tabular-nums font-bold text-center focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-gray-100 disabled:text-gray-400 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                />
-                              </div>
-                            </div>
-
-                            {/* Engine Oil / Lubricant Sales Section */}
-                            <div className="p-2.5 bg-amber-50/70 border border-amber-200/80 rounded-xl space-y-2">
-                              <span className="text-[10px] font-extrabold text-amber-900 uppercase tracking-wider block flex items-center gap-1">
-                                <Package className="w-3 h-3 text-amber-600" />
-                                <span>Engine Oil / Lubricant Sales</span>
-                              </span>
-                              
-                              {/* Oil/Lube Sales (Rs.) */}
-                              <div className="flex items-center justify-between gap-2">
-                                <label className="text-[10px] font-bold text-gray-700 flex-1 min-w-0">
-                                  Oil/Lube Sales (Rs.)
-                                </label>
-                                <div className="w-28 sm:w-32">
-                                  <input
-                                    type="number"
-                                    step="any"
-                                    value={r.oilSalesAmount ?? 0}
-                                    disabled={r.status !== 'Active'}
-                                    placeholder="0.00"
-                                    onFocus={(e) => e.target.select()}
-                                    onChange={(e) => handleUpdateReading(r.pumpId, 'oilSalesAmount', parseFloat(e.target.value) || 0)}
-                                    className="w-full px-2.5 py-1 bg-white border border-amber-200 text-[#1C1C1C] rounded-lg text-xs tabular-nums font-extrabold text-right focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 disabled:bg-gray-100 disabled:text-gray-400 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none min-w-0"
-                                  />
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Pumper Non-Cash Collections: Credit Sales and Card Sales */}
-                            <div className="p-2.5 bg-purple-50/60 border border-purple-100 rounded-xl space-y-2">
-                              <span className="text-[10px] font-extrabold text-purple-900 uppercase tracking-wider block">
-                                Pumper Non-Cash Collections
-                              </span>
-                              
-                              {/* Credit Sales (Rs.) */}
-                              <div className="flex items-center justify-between gap-2">
-                                <label className="text-[10px] font-bold text-gray-600 flex-1 min-w-0">
-                                  Credit Sales (Rs.)
-                                </label>
-                                <div className="w-28 sm:w-32">
-                                  <input
-                                    type="number"
-                                    step="any"
-                                    value={r.creditSalesAmount ?? 0}
-                                    disabled={r.status !== 'Active'}
-                                    placeholder="0.00"
-                                    onFocus={(e) => e.target.select()}
-                                    onChange={(e) => handleUpdateReading(r.pumpId, 'creditSalesAmount', parseFloat(e.target.value) || 0)}
-                                    className="w-full px-2.5 py-1 bg-white border border-gray-200 text-[#1C1C1C] rounded-lg text-xs tabular-nums font-extrabold text-right focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 disabled:bg-gray-100 disabled:text-gray-400 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none min-w-0"
-                                  />
-                                </div>
-                              </div>
-
-                              {/* Card Sales (Rs.) */}
-                              <div className="flex items-center justify-between gap-2">
-                                <label className="text-[10px] font-bold text-gray-600 flex-1 min-w-0">
-                                  Card Sales (Rs.)
-                                </label>
-                                <div className="w-28 sm:w-32">
-                                  <input
-                                    type="number"
-                                    step="any"
-                                    value={r.cardSalesAmount ?? 0}
-                                    disabled={r.status !== 'Active'}
-                                    placeholder="0.00"
-                                    onFocus={(e) => e.target.select()}
-                                    onChange={(e) => handleUpdateReading(r.pumpId, 'cardSalesAmount', parseFloat(e.target.value) || 0)}
-                                    className="w-full px-2.5 py-1 bg-white border border-gray-200 text-[#1C1C1C] rounded-lg text-xs tabular-nums font-extrabold text-right focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 disabled:bg-gray-100 disabled:text-gray-400 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none min-w-0"
-                                  />
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Visual calculations feed & Cash breakdown */}
-                        {(() => {
-                          if (isOilBay) {
-                            const oilSalesAmount = r.oilSalesAmount || 0;
-                            const creditSalesAmount = r.creditSalesAmount || 0;
-                            const cardSalesAmount = r.cardSalesAmount || 0;
-                            const netPhysicalCashDue = Math.max(0, oilSalesAmount - (creditSalesAmount + cardSalesAmount));
-
-                            return (
-                              <div className={`p-3 rounded-xl text-[11px] space-y-1.5 font-sans border transition-colors ${
-                                r.status === 'Completed'
-                                  ? 'bg-emerald-500/10 border-emerald-500/20'
-                                  : r.status === 'Active'
-                                  ? 'bg-amber-500/10 border-amber-500/20'
-                                  : 'bg-gray-50 border-gray-100'
-                              }`}>
-                                <div className="flex justify-between font-extrabold text-amber-900">
-                                  <span>Total Oil Revenue:</span>
-                                  <span className="tabular-nums font-extrabold text-amber-700">{formatCurrency(oilSalesAmount)}</span>
-                                </div>
-                                <div className="flex justify-between text-gray-500">
-                                  <span>(-) Credit Sales:</span>
-                                  <span className="tabular-nums font-semibold text-purple-600">-{formatCurrency(creditSalesAmount)}</span>
-                                </div>
-                                <div className="flex justify-between text-gray-500">
-                                  <span>(-) Card Payments:</span>
-                                  <span className="tabular-nums font-semibold text-indigo-600">-{formatCurrency(cardSalesAmount)}</span>
-                                </div>
-                                <hr className="border-gray-200/80 my-1" />
-                                <div className="flex justify-between font-extrabold text-[#1C1C1C]">
-                                  <span>= Net Physical Cash Due:</span>
-                                  <span className="tabular-nums text-blue-600">{formatCurrency(netPhysicalCashDue)}</span>
-                                </div>
-                              </div>
-                            );
-                          }
-
-                          const grossFuelRevenue = netSold * fuelPrice;
-                          const oilSalesAmount = r.oilSalesAmount || 0;
-                          const totalGrossRevenue = grossFuelRevenue + oilSalesAmount;
-                          const creditSalesAmount = r.creditSalesAmount || 0;
-                          const cardSalesAmount = r.cardSalesAmount || 0;
-                          const netPhysicalCashDue = Math.max(0, totalGrossRevenue - (creditSalesAmount + cardSalesAmount));
-
-                          return (
-                            <div className={`p-3 rounded-xl text-[11px] space-y-1.5 font-sans border transition-colors ${
-                              r.status === 'Completed'
-                                ? 'bg-emerald-500/10 border-emerald-500/20'
-                                : r.status === 'Active'
-                                ? 'bg-blue-500/10 border-blue-500/20'
-                                : 'bg-gray-50 border-gray-100'
-                            }`}>
-                              <div className="flex justify-between text-gray-500">
-                                <span>Gross Fuel Liters:</span>
-                                <span className="tabular-nums font-semibold text-gray-600">{fuelSold.toFixed(2)} L</span>
-                              </div>
-                              <div className="flex justify-between text-gray-500">
-                                <span>Calibration Test:</span>
-                                <span className="tabular-nums font-semibold text-red-400">-{r.testingQty.toFixed(1)} L</span>
-                              </div>
-                              <div className="flex justify-between font-bold text-gray-700">
-                                <span>Net Fuel Sold:</span>
-                                <span className="tabular-nums text-gray-900">{netSold.toFixed(2)} L</span>
-                              </div>
-                              <hr className="border-gray-200/60 my-1" />
-                              <div className="flex justify-between text-gray-600 font-medium">
-                                <span>Fuel Revenue:</span>
-                                <span className="tabular-nums font-bold text-gray-800">{formatCurrency(grossFuelRevenue)}</span>
-                              </div>
-                              <div className="flex justify-between text-amber-700 font-semibold">
-                                <span>(+) Oil/Lube Sales:</span>
-                                <span className="tabular-nums font-bold text-amber-600">+{formatCurrency(oilSalesAmount)}</span>
-                              </div>
-                              <div className="flex justify-between text-gray-500">
-                                <span>(-) Credit Sales:</span>
-                                <span className="tabular-nums font-semibold text-purple-600">-{formatCurrency(creditSalesAmount)}</span>
-                              </div>
-                              <div className="flex justify-between text-gray-500">
-                                <span>(-) Card Payments:</span>
-                                <span className="tabular-nums font-semibold text-indigo-600">-{formatCurrency(cardSalesAmount)}</span>
-                              </div>
-                              <hr className="border-gray-200/80 my-1" />
-                              <div className="flex justify-between font-extrabold text-[#1C1C1C]">
-                                <span>= Net Physical Cash Due:</span>
-                                <span className="tabular-nums text-blue-600">{formatCurrency(netPhysicalCashDue)}</span>
-                              </div>
-                            </div>
-                          );
-                        })()}
-
-                        {/* Pump Card Action Controls */}
-                        <div className="pt-2 border-t border-gray-100">
-                          {r.status === 'Idle' ? (
-                            <button
-                              id={`btn-lock-${r.pumpId}`}
-                              onClick={() => handleSavePumpData(r.pumpId)}
-                              className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-gradient-to-r from-blue-600 to-[#00BFFF] text-white text-xs font-extrabold rounded-xl transition-all shadow-md hover:brightness-110 cursor-pointer animate-pulse"
-                            >
-                              <Save className="w-3.5 h-3.5" />
-                              <span>Save Pump Data</span>
-                            </button>
-                          ) : r.status === 'Active' ? (
-                            <div className="flex flex-col gap-1.5 w-full">
-                              <div className="grid grid-cols-2 gap-1.5">
-                                <button
-                                  id={`btn-transfer-${r.pumpId}`}
-                                  onClick={() => handleOpenHandoverModal(r)}
-                                  className="flex items-center justify-center gap-1.5 py-1.5 px-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-[11px] font-bold rounded-xl transition-all cursor-pointer shadow-xs"
-                                >
-                                  <RefreshCw className="w-3.5 h-3.5" />
-                                  <span>Transfer Pumper</span>
-                                </button>
-                                <button
-                                  id={`btn-unlock-${r.pumpId}`}
-                                  onClick={() => handleUnlockPumpData(r.pumpId)}
-                                  className="flex items-center justify-center gap-1 py-1.5 px-2 bg-gray-50 hover:bg-gray-100 text-gray-600 hover:text-[#1C1C1C] border border-gray-200 text-[11px] font-bold rounded-xl transition-all cursor-pointer"
-                                >
-                                  <Edit2 className="w-3 h-3" />
-                                  <span>Edit Setup</span>
-                                </button>
-                              </div>
-                              <button
-                                id={`btn-end-pump-${r.pumpId}`}
-                                onClick={() => handleClosePumpShift(r.pumpId)}
-                                className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-red-600 hover:bg-red-700 text-white text-xs font-extrabold rounded-xl transition-all shadow-sm cursor-pointer"
-                              >
-                                <ShieldCheck className="w-3.5 h-3.5" />
-                                <span>End Pump Shift</span>
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="w-full text-center py-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 text-xs font-extrabold rounded-xl flex items-center justify-center gap-1.5">
-                              <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                              <span>Completed & Locked</span>
-                            </div>
-                          )}
-                        </div>
-
-                      </div>
-
-                      {/* Card Footer expected revenue display, actual cash handover input & live variance */}
-                      <div className={`px-4 py-3 border-t border-gray-100 transition-colors space-y-2.5 ${
-                        r.status === 'Completed' 
-                          ? 'bg-emerald-500/10' 
-                          : r.status === 'Active'
-                          ? 'bg-blue-500/10'
-                          : 'bg-gray-50'
-                      }`}>
-                        {/* Net Expected Physical Cash Display */}
-                        {(() => {
-                          const grossFuelRevenue = netSold * fuelPrice;
-                          const oilSalesAmount = r.oilSalesAmount || 0;
-                          const totalGrossRevenue = grossFuelRevenue + oilSalesAmount;
-                          const creditSalesAmount = r.creditSalesAmount || 0;
-                          const cardSalesAmount = r.cardSalesAmount || 0;
-                          const netExpCash = Math.max(0, totalGrossRevenue - (creditSalesAmount + cardSalesAmount));
-
-                          return (
-                            <div className="flex items-center justify-between">
-                              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
-                                {r.status === 'Completed' ? 'Final Net Cash Due' : 'Expected Physical Cash'}
-                              </span>
-                              <span className={`tabular-nums font-extrabold text-sm transition-colors ${
-                                r.status === 'Completed' ? 'text-emerald-600' : 'text-blue-600'
-                              }`}>
-                                {formatCurrency(netExpCash)}
-                              </span>
-                            </div>
-                          );
-                        })()}
-
-                        {/* Manual Physical Cash Handover Input Field */}
-                        <div className="pt-2 border-t border-gray-200/60 space-y-1.5">
-                          <div className="flex items-center justify-between gap-2">
-                            <label className="text-[10px] font-extrabold text-gray-600 uppercase tracking-wider flex-1 min-w-0">
-                              Actual Cash Handed Over (Rs.)
-                            </label>
-                            <div className="w-28 sm:w-32">
-                              <input
-                                type="number"
-                                step="any"
-                                value={r.actualCash ?? 0}
-                                disabled={r.status === 'Completed'}
-                                onFocus={(e) => e.target.select()}
-                                onChange={(e) => handleUpdateReading(r.pumpId, 'actualCash', parseFloat(e.target.value) || 0)}
-                                className="w-full px-2.5 py-1 bg-white border border-gray-200 text-[#1C1C1C] rounded-lg text-xs sm:text-sm tabular-nums font-extrabold text-right focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-gray-100 disabled:text-gray-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none min-w-0"
-                              />
-                            </div>
-                          </div>
-
-                          {/* Dynamic Live Variance Status */}
-                          <div className="flex items-center justify-between pt-1">
-                            <span className="text-[10px] font-extrabold text-gray-500 uppercase tracking-wider">
-                              Cash Variance
-                            </span>
-                            {(() => {
-                              const actCash = r.actualCash ?? 0;
-                              const grossFuelRevenue = netSold * fuelPrice;
-                              const oilSalesAmount = r.oilSalesAmount || 0;
-                              const totalGrossRevenue = grossFuelRevenue + oilSalesAmount;
-                              const creditSalesAmount = r.creditSalesAmount || 0;
-                              const cardSalesAmount = r.cardSalesAmount || 0;
-                              const netExpCash = Math.max(0, totalGrossRevenue - (creditSalesAmount + cardSalesAmount));
-                              const varVal = actCash - netExpCash;
-                              const absFormatted = formatCurrency(Math.abs(varVal));
-
-                              if (varVal < -0.01) {
-                                return (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-extrabold bg-red-500/10 text-red-600 border border-red-500/20 tabular-nums">
-                                    - {absFormatted} (Shortage)
-                                  </span>
-                                );
-                              } else if (varVal > 0.01) {
-                                return (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-extrabold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 tabular-nums">
-                                    + {absFormatted} (Excess)
-                                  </span>
-                                );
-                              } else {
-                                return (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-extrabold bg-gray-100 text-gray-600 border border-gray-200 tabular-nums">
-                                    Rs. 0.00 (Balanced)
-                                  </span>
-                                );
-                              }
-                            })()}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })
-              ) : (
-                <div className="col-span-full py-12 text-center text-gray-500 text-sm italic">
-                  No pumps found matching your search query.
+            {/* Center/Right: "Full Day Shift (08:00 AM - 08:00 AM)" & Start Date inline as subtle muted text chips */}
+            <div className="flex items-center gap-2 flex-wrap text-xs text-slate-600 font-medium">
+              <div className="flex items-center gap-1.5 bg-white/80 border border-slate-200/70 px-2.5 py-1 rounded-md">
+                <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <span className="font-semibold text-slate-700">Full Day Shift (08:00 AM - 08:00 AM)</span>
+              </div>
+              {draftStartTime && (
+                <div className="flex items-center gap-1.5 bg-white/80 border border-slate-200/70 px-2.5 py-1 rounded-md">
+                  <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span className="tabular-nums font-semibold text-slate-700">
+                    {new Date(draftStartTime).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} {new Date(draftStartTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
                 </div>
               )}
             </div>
 
-            {/* Consolidated Multi-Pump Summary Widget */}
-            {multiPumpersData.length > 0 && (
-              <div className="mt-8 pt-6 border-t border-gray-200/80 space-y-4">
-                <div className="flex items-center gap-2.5">
-                  <div className="p-2 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl text-white shadow-sm">
-                    <Users className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-bold text-[#1C1C1C] tracking-tight">
-                      Pumper Consolidated Multi-Pump Summary
-                    </h3>
-                    <p className="text-xs text-gray-500">
-                      Combined sales breakdown & single cash handover option for pumpers managing 2 or more pumps.
-                    </p>
-                  </div>
+            {/* Far Right: Minimal active pulse badge */}
+            <div className="px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-800 text-[10px] font-extrabold uppercase tracking-wider rounded-md flex items-center gap-1.5 shrink-0">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
+              <span>ACTIVE SHIFT</span>
+            </div>
+          </div>
+
+          {/* INLINE LEDGER & PUMPER-CENTRIC MANAGEMENT */}
+          <div className="space-y-4">
+            {/* Top Toolbar */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-extrabold text-[#1C1C1C] tracking-tight">Active Shift Pumper Assignments</h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Assign pumps, enter meter readings, record non-cash sales, and reconcile cash per pumper.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2.5 w-full sm:w-auto">
+                <div className="relative flex-1 sm:w-60">
+                  <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                  <input
+                    type="text"
+                    placeholder="Search pumper or pump..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full pl-8 pr-3 py-1.5 bg-white border border-gray-200 rounded-xl text-[#1C1C1C] text-xs font-medium focus:outline-none focus:border-blue-500 transition-colors"
+                  />
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {pumperStats.map(p => {
-                    const absVar = Math.abs(p.totalCashVariance);
-                    const absVarFormatted = formatCurrency(absVar);
+                {/* Add Pumper Button */}
+                <div className="relative">
+                  <button
+                    onClick={() => setIsAddPumperModalOpen(!isAddPumperModalOpen)}
+                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer shrink-0"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Pumper</span>
+                  </button>
 
-                    return (
-                      <div
-                        key={`multi-pumper-${p.pumperId}`}
-                        className="bg-white border border-blue-100/80 rounded-2xl shadow-sm overflow-hidden flex flex-col justify-between transition-all hover:border-blue-300"
-                      >
-                        {/* Banner Header */}
-                        <div className="p-4 bg-gradient-to-r from-blue-50/80 via-indigo-50/30 to-purple-50/20 border-b border-blue-100 flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div className={`w-9 h-9 rounded-xl text-white font-bold text-sm flex items-center justify-center shadow-sm shrink-0 ${p.avatarColor}`}>
-                              {p.pumperName.charAt(0)}
+                  {/* Add Pumper Dropdown Menu (ONLY showing Pumpers) */}
+                  {isAddPumperModalOpen && (
+                    <div className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-xl border border-gray-200 p-2 z-30 space-y-1 animate-in fade-in zoom-in-95">
+                      <div className="px-2 py-1.5 border-b border-gray-100 flex items-center justify-between">
+                        <span className="text-[11px] font-extrabold text-gray-700 uppercase tracking-wider">
+                          Select Available Pumper
+                        </span>
+                        <button
+                          onClick={() => setIsAddPumperModalOpen(false)}
+                          className="text-gray-400 hover:text-gray-600 p-0.5 cursor-pointer"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <div className="max-h-48 overflow-y-auto space-y-0.5">
+                        {pumpers.map(emp => {
+                          const isAlreadyActive = selectedActivePumperIds.includes(emp.id);
+                          return (
+                            <button
+                              key={`add-pumper-opt-${emp.id}`}
+                              disabled={isAlreadyActive}
+                              onClick={() => {
+                                if (!selectedActivePumperIds.includes(emp.id)) {
+                                  setSelectedActivePumperIds(prev => [...prev, emp.id]);
+                                }
+                                setIsAddPumperModalOpen(false);
+                                setToastMessage(`Added ${emp.name} to active pumper cards.`);
+                                setTimeout(() => setToastMessage(null), 2500);
+                              }}
+                              className={`w-full text-left px-2.5 py-1.5 rounded-xl text-xs flex items-center justify-between transition-colors ${
+                                isAlreadyActive
+                                  ? 'opacity-50 bg-gray-50 cursor-not-allowed text-gray-400'
+                                  : 'hover:bg-blue-50 text-gray-800 font-semibold cursor-pointer'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2">
+                                <div className={`w-5 h-5 rounded-md text-white font-bold text-[10px] flex items-center justify-center ${emp.avatarColor || 'bg-blue-600'}`}>
+                                  {emp.name.charAt(0)}
+                                </div>
+                                <span>{emp.name}</span>
+                              </div>
+                              {isAlreadyActive && <span className="text-[10px] font-bold text-gray-400">Added</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* PUMPER-CENTRIC CARDS GRID */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {pumperCardsData.length > 0 ? (
+                pumperCardsData.map(p => {
+                  const pumperId = p.pumperId;
+                  const pumperName = p.pumperName;
+                  const assignedReadings = p.assignedReadings;
+
+                  return (
+                    <div
+                      key={`pumper-card-${pumperId}`}
+                      className="glass-panel p-4 rounded-xl space-y-3 border border-gray-200/90 transition-all shadow-2xs hover:border-blue-300 flex flex-col justify-between"
+                    >
+                      <div className="space-y-3">
+                        {/* Pumper Card Header */}
+                        <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-gray-100">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className={`w-8 h-8 rounded-lg text-white font-bold text-xs flex items-center justify-center shadow-2xs shrink-0 ${p.avatarColor}`}>
+                              {pumperName.split(' ').map(n => n[0]).join('')}
                             </div>
                             <div className="min-w-0">
-                              <h4 className="font-bold text-[#1C1C1C] text-sm truncate">
-                                {p.pumperName}
-                              </h4>
-                              <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
-                                <span className="text-[10px] font-extrabold px-2 py-0.5 bg-blue-100 text-blue-800 rounded-md uppercase tracking-wider">
-                                  {p.readings.length} Pumps Assigned
+                              <div className="flex items-center gap-1.5">
+                                <h3 className="font-extrabold text-[#1C1C1C] text-sm truncate">{pumperName}</h3>
+                                <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 border border-blue-100 text-[9px] font-extrabold uppercase rounded shrink-0">
+                                  Pumper
                                 </span>
                               </div>
+                              <p className="text-[11px] text-gray-500 font-medium truncate">
+                                {assignedReadings.length} {assignedReadings.length === 1 ? 'Pump Assigned' : 'Pumps Assigned'}
+                              </p>
                             </div>
                           </div>
-                          
-                          {/* Pump Pills */}
-                          <div className="flex items-center gap-1 flex-wrap justify-end">
-                            {p.readings.map(r => (
-                              <span
-                                key={`p-pill-${r.pumpId}`}
-                                className="text-[10px] font-bold px-2 py-0.5 bg-white border border-gray-200 text-gray-700 rounded-lg shadow-2xs tabular-nums"
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            {/* Dropdown Pump Assignment Menu */}
+                            <div className="relative">
+                              <button
+                                onClick={() => setOpenPumpSelectorPumperId(openPumpSelectorPumperId === pumperId ? null : pumperId)}
+                                className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 text-xs font-bold rounded-lg flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
                               >
-                                Pump {r.pumpId.replace('pump-', '')} ({r.fuelType})
-                              </span>
-                            ))}
+                                <Fuel className="w-3.5 h-3.5" />
+                                <span>Assign Pumps</span>
+                                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${openPumpSelectorPumperId === pumperId ? 'rotate-180' : ''}`} />
+                              </button>
+
+                              {/* Dropdown Checklist */}
+                              {openPumpSelectorPumperId === pumperId && (
+                                <div className="absolute right-0 mt-1.5 w-64 bg-white rounded-xl shadow-xl border border-gray-200 p-2.5 z-30 space-y-2 animate-in fade-in zoom-in-95">
+                                  <div className="flex items-center justify-between pb-1.5 border-b border-gray-100">
+                                    <span className="text-[11px] font-extrabold text-gray-800 uppercase tracking-wider">
+                                      Assign Pumps: {pumperName.split(' ')[0]}
+                                    </span>
+                                    <button
+                                      onClick={() => setOpenPumpSelectorPumperId(null)}
+                                      className="text-gray-400 hover:text-gray-600 p-0.5 cursor-pointer"
+                                    >
+                                      <X className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                  <div className="max-h-56 overflow-y-auto space-y-1 pr-0.5">
+                                    {draftReadings.map(pumpR => {
+                                      const isAssignedToThis = pumpR.assignedPumperId === pumperId;
+                                      const isAssignedToOther = pumpR.assignedPumperId && pumpR.assignedPumperId !== pumperId;
+                                      const otherPumperName = isAssignedToOther ? employees.find(e => e.id === pumpR.assignedPumperId)?.name : null;
+
+                                      return (
+                                        <label
+                                          key={`popover-pump-${pumpR.pumpId}`}
+                                          className={`flex items-center justify-between p-1.5 rounded-lg text-xs cursor-pointer transition-colors ${
+                                            isAssignedToThis ? 'bg-blue-50 border border-blue-200 font-bold' : 'hover:bg-gray-50 border border-transparent'
+                                          }`}
+                                        >
+                                          <div className="flex items-center gap-2 min-w-0">
+                                            <input
+                                              type="checkbox"
+                                              checked={isAssignedToThis}
+                                              onChange={() => handleTogglePumperPumpAssignment(pumperId, pumpR.pumpId)}
+                                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5 cursor-pointer shrink-0"
+                                            />
+                                            <div className="min-w-0">
+                                              <span className="font-extrabold text-gray-900 block truncate">{pumpR.pumpName}</span>
+                                              <span className="text-[10px] text-gray-500 block truncate">{pumpR.fuelType}</span>
+                                            </div>
+                                          </div>
+                                          {isAssignedToOther && (
+                                            <span className="text-[9px] text-amber-600 font-semibold px-1.5 py-0.5 bg-amber-50 rounded shrink-0">
+                                              {otherPumperName?.split(' ')[0]}
+                                            </span>
+                                          )}
+                                        </label>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </div>
 
-                        {/* Metrics Breakdown */}
-                        <div className="p-4 space-y-3 bg-white">
-                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
-                            <div className="p-2.5 bg-gray-50 rounded-xl border border-gray-100">
-                              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-0.5">
-                                Net Fuel Sold
-                              </span>
-                              <span className="font-extrabold text-[#1C1C1C] text-sm tabular-nums">
-                                {p.totalNetLiters.toFixed(2)} L
-                              </span>
+                        {/* Assigned Pumps Meter Entry Cards */}
+                        <div className="space-y-1">
+                          {assignedReadings.length === 0 ? (
+                            <div className="p-3 bg-gray-50/80 rounded-xl text-center text-xs text-gray-500 italic border border-dashed border-gray-200 space-y-1">
+                              <p>No pumps assigned to {pumperName} yet.</p>
+                              <p className="text-[11px] text-gray-400">
+                                Click <strong>"Assign Pumps"</strong> above to select pumps for {pumperName}.
+                              </p>
                             </div>
+                          ) : (
+                            assignedReadings.map((r, pumpIndex) => {
+                              const isOilBay = r.pumpId === 'pump-oil-bay' || r.fuelType === 'Oil & Lubricants' || r.pumpName.toLowerCase().includes('oil');
+                              const fuelPrice = getPriceForFuelType(r.fuelType);
+                              const fuelSold = isOilBay ? 0 : Math.max(0, r.endMeter - r.startMeter);
+                              const netSold = isOilBay ? 0 : Math.max(0, fuelSold - r.testingQty);
+                              const fuelRevenue = netSold * fuelPrice;
+                              const oilRevenue = r.oilSalesAmount || 0;
+                              const totalPumpGross = fuelRevenue + oilRevenue;
+                              const creditSales = r.creditSalesAmount || 0;
+                              const cardSales = r.cardSalesAmount || 0;
+                              const pumpExpCash = Math.max(0, totalPumpGross - (creditSales + cardSales));
+                              const fuelBadge = getFuelBadgeStyles(r.fuelType);
 
-                            <div className="p-2.5 bg-gray-50 rounded-xl border border-gray-100">
-                              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-0.5">
-                                Gross Revenue
-                              </span>
-                              <span className="font-extrabold text-[#1C1C1C] text-sm tabular-nums">
-                                {formatCurrency(p.totalGrossRevenue)}
-                              </span>
+                              return (
+                                <React.Fragment key={`assigned-pump-frag-${r.pumpId}`}>
+                                  {/* Visual Divider Between Multiple Pumps */}
+                                  {pumpIndex > 0 && (
+                                    <div className="relative py-1.5 flex items-center justify-center">
+                                      <div className="w-full border-t border-dashed border-slate-300" />
+                                      <span className="absolute px-2 bg-white text-[9px] font-extrabold uppercase text-slate-400 tracking-wider">
+                                        Next Pump
+                                      </span>
+                                    </div>
+                                  )}
+
+                                  {/* Distinct Inner Pump Card Container */}
+                                  <div
+                                    key={`assigned-pump-${r.pumpId}`}
+                                    className="bg-slate-50/90 border border-slate-200 rounded-xl p-3.5 mb-3 shadow-xs space-y-3 transition-all hover:border-slate-300"
+                                  >
+                                    {/* Pump Row Header with Prominent Fuel-Specific Badge */}
+                                    <div className="flex items-center justify-between pb-2 border-b border-slate-200/80 gap-2">
+                                      <div className="flex items-center gap-2 flex-wrap min-w-0">
+                                        <div className={`px-2.5 py-1 rounded-lg border text-[11px] font-extrabold flex items-center gap-1.5 shadow-2xs ${fuelBadge.badge}`}>
+                                          <Droplet className="w-3 h-3 shrink-0" />
+                                          <span className="truncate">{r.pumpName.toUpperCase()} • {r.fuelType}</span>
+                                        </div>
+                                        {!isOilBay && (
+                                          <span className="text-[11px] text-slate-500 tabular-nums font-bold font-mono">
+                                            (Rs. {fuelPrice.toFixed(2)}/L)
+                                          </span>
+                                        )}
+                                      </div>
+                                      <button
+                                        onClick={() => handleAssignPumpToPumper(r.pumpId, null)}
+                                        className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                        title="Unassign Pump"
+                                      >
+                                        <X className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+
+                                    {/* Meter Inputs */}
+                                    {!isOilBay ? (
+                                      <div className="grid grid-cols-3 gap-2 text-xs">
+                                        <div>
+                                          {(() => {
+                                            const isStartMeterLocked = !!savedPumperCards[pumperId] || r.status === 'Saved' || r.status === 'Completed';
+                                            return (
+                                              <>
+                                                <label className="text-[10px] font-extrabold text-slate-600 mb-0.5 uppercase flex items-center justify-between">
+                                                  <span>Start Meter</span>
+                                                  {isStartMeterLocked && (
+                                                    <Lock className="w-2.5 h-2.5 text-slate-400 shrink-0" title="Start Meter Locked" />
+                                                  )}
+                                                </label>
+                                                <input
+                                                  type="number"
+                                                  step="any"
+                                                  value={r.startMeter ?? 0}
+                                                  disabled={isStartMeterLocked}
+                                                  onFocus={(e) => e.target.select()}
+                                                  onChange={(e) => handleUpdateReading(r.pumpId, 'startMeter', parseFloat(e.target.value) || 0)}
+                                                  className={`w-full px-2 py-1 border rounded-lg text-xs font-bold text-center font-mono tabular-nums transition-colors ${
+                                                    isStartMeterLocked
+                                                      ? 'bg-slate-100 border-slate-200 text-slate-500 cursor-not-allowed select-none'
+                                                      : 'bg-white border-slate-200 text-slate-800 focus:bg-white focus:outline-none focus:border-blue-500'
+                                                  }`}
+                                                />
+                                              </>
+                                            );
+                                          })()}
+                                        </div>
+                                        <div>
+                                          <label className="text-[10px] font-extrabold text-slate-600 block mb-0.5 uppercase">End Meter</label>
+                                          <input
+                                            type="number"
+                                            step="any"
+                                            value={r.endMeter ?? 0}
+                                            disabled={r.status === 'Completed'}
+                                            onFocus={(e) => e.target.select()}
+                                            onChange={(e) => handleUpdateReading(r.pumpId, 'endMeter', parseFloat(e.target.value) || 0)}
+                                            className="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-center font-mono tabular-nums focus:outline-none focus:border-blue-500 disabled:bg-slate-100 disabled:text-slate-500"
+                                          />
+                                        </div>
+                                        <div>
+                                          <label className="text-[10px] font-extrabold text-slate-600 block mb-0.5 uppercase">Test (L)</label>
+                                          <input
+                                            type="number"
+                                            step="any"
+                                            value={r.testingQty ?? 0}
+                                            disabled={r.status === 'Completed'}
+                                            onFocus={(e) => e.target.select()}
+                                            onChange={(e) => handleUpdateReading(r.pumpId, 'testingQty', parseFloat(e.target.value) || 0)}
+                                            className="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-center font-mono tabular-nums focus:outline-none focus:border-blue-500 disabled:bg-slate-100 disabled:text-slate-500"
+                                          />
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                                        <div>
+                                          <label className="text-[10px] font-extrabold text-amber-700 block mb-0.5 uppercase">Oil & Lube Total Sales (Rs.)</label>
+                                          <input
+                                            type="number"
+                                            step="any"
+                                            value={r.oilSalesAmount ?? 0}
+                                            disabled={r.status === 'Completed'}
+                                            onFocus={(e) => e.target.select()}
+                                            onChange={(e) => handleUpdateReading(r.pumpId, 'oilSalesAmount', parseFloat(e.target.value) || 0)}
+                                            className="w-full px-2 py-1 bg-white border border-amber-200 rounded-lg text-xs font-bold text-right font-mono tabular-nums focus:bg-white focus:outline-none focus:border-amber-500 disabled:bg-slate-100 disabled:text-slate-500"
+                                          />
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Non-Cash Collections */}
+                                    <div className="grid grid-cols-2 gap-2 text-xs pt-1 border-t border-slate-200/80">
+                                      <div>
+                                        <label className="text-[10px] font-extrabold text-purple-700 block mb-0.5 uppercase">Credit Sales (Rs.)</label>
+                                        <input
+                                          type="number"
+                                          step="any"
+                                          value={r.creditSalesAmount ?? 0}
+                                          disabled={r.status === 'Completed'}
+                                          onFocus={(e) => e.target.select()}
+                                          onChange={(e) => handleUpdateReading(r.pumpId, 'creditSalesAmount', parseFloat(e.target.value) || 0)}
+                                          className="w-full px-2 py-1 bg-white border border-purple-200 rounded-lg text-xs font-bold text-right font-mono tabular-nums focus:bg-white focus:outline-none focus:border-purple-500 disabled:bg-slate-100 disabled:text-slate-500"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="text-[10px] font-extrabold text-indigo-700 block mb-0.5 uppercase">Card Sale (Rs.)</label>
+                                        <input
+                                          type="number"
+                                          step="any"
+                                          value={r.cardSalesAmount ?? 0}
+                                          disabled={r.status === 'Completed'}
+                                          onFocus={(e) => e.target.select()}
+                                          onChange={(e) => handleUpdateReading(r.pumpId, 'cardSalesAmount', parseFloat(e.target.value) || 0)}
+                                          className="w-full px-2 py-1 bg-white border border-indigo-200 rounded-lg text-xs font-bold text-right font-mono tabular-nums focus:outline-none focus:border-indigo-500 disabled:bg-slate-100 disabled:text-slate-500"
+                                        />
+                                      </div>
+                                    </div>
+
+                                    {/* Pump Level Totals */}
+                                    <div className="flex items-center justify-between pt-0.5 text-xs gap-2">
+                                      <div className="flex items-center gap-3 text-[11px] flex-wrap">
+                                        <span className="text-slate-500">
+                                          Net Liters: <strong className="text-slate-900 font-mono tabular-nums">{netSold.toFixed(2)} L</strong>
+                                        </span>
+                                        <span className="text-slate-500">
+                                          Expected Cash: <strong className="text-blue-700 font-mono tabular-nums">{formatCurrency(pumpExpCash)}</strong>
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </React.Fragment>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Pumper Cash Reconciliation Footer */}
+                      {assignedReadings.length > 0 && (
+                        <div className="p-3 bg-gray-50/90 border border-gray-200/90 rounded-xl space-y-2.5 mt-3">
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-xs">
+                            <div className="p-1.5 bg-white rounded-lg border border-gray-200">
+                              <span className="text-[9px] font-extrabold text-gray-400 uppercase block">Total Net Fuel</span>
+                              <span className="font-extrabold text-gray-900 tabular-nums text-xs">{p.totalNetLiters.toFixed(2)} L</span>
                             </div>
-
-                            <div className="p-2.5 bg-purple-50/70 rounded-xl border border-purple-100 col-span-2 sm:col-span-1">
-                              <span className="text-[10px] font-extrabold text-purple-900 uppercase tracking-wider block mb-0.5">
-                                Non-Cash Deductions
-                              </span>
-                              <span className="font-extrabold text-purple-700 text-sm tabular-nums block">
-                                {formatCurrency(p.totalCreditSales + p.totalCardSales)}
-                              </span>
-                              <span className="text-[9px] text-purple-600 font-semibold block mt-0.5">
-                                Credit: {formatCurrency(p.totalCreditSales)} | Card: {formatCurrency(p.totalCardSales)}
-                              </span>
+                            <div className="p-1.5 bg-white rounded-lg border border-gray-200">
+                              <span className="text-[9px] font-extrabold text-gray-400 uppercase block">Gross Revenue</span>
+                              <span className="font-extrabold text-gray-900 tabular-nums text-xs">{formatCurrency(p.totalGrossRevenue)}</span>
+                            </div>
+                            <div className="p-1.5 bg-purple-50 rounded-lg border border-purple-100">
+                              <span className="text-[9px] font-extrabold text-purple-700 uppercase block">Non-Cash Deductions</span>
+                              <span className="font-extrabold text-purple-900 tabular-nums text-xs">{formatCurrency(p.totalNonCash)}</span>
+                            </div>
+                            <div className="p-1.5 bg-blue-50 rounded-lg border border-blue-100">
+                              <span className="text-[9px] font-extrabold text-blue-700 uppercase block">Expected Cash</span>
+                              <span className="font-extrabold text-blue-900 tabular-nums text-xs">{formatCurrency(p.totalExpectedCash)}</span>
                             </div>
                           </div>
 
-                          {/* Net Physical Cash Due */}
-                          <div className="p-3 bg-blue-50/60 border border-blue-100 rounded-xl flex items-center justify-between">
-                            <span className="text-xs font-bold text-blue-900">
-                              Total Net Physical Cash Due:
-                            </span>
-                            <span className="text-base font-extrabold text-blue-700 tabular-nums">
-                              {formatCurrency(p.totalNetExpCash)}
-                            </span>
-                          </div>
-
-                          {/* Consolidated Cash Handover Input */}
-                          <div className="p-3 bg-gray-50 border border-gray-200/80 rounded-xl space-y-2">
-                            <div className="flex items-center justify-between gap-2">
-                              <label className="text-[11px] font-extrabold text-gray-700 uppercase tracking-wider flex-1 min-w-0">
-                                Consolidated Cash Handed Over (Rs.)
+                          {/* Actual Cash Entry & Shortage/Excess */}
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1 border-t border-gray-200/60">
+                            <div className="flex items-center gap-2 flex-1">
+                              <label className="text-[11px] font-extrabold text-gray-700 uppercase tracking-wider shrink-0">
+                                Handed Over Cash (Rs.):
                               </label>
-                              <div className="w-32 sm:w-36">
-                                <input
-                                  type="number"
-                                  step="any"
-                                  value={p.totalActualCash ?? 0}
-                                  placeholder="0.00"
-                                  onFocus={(e) => e.target.select()}
-                                  onChange={(e) => handleUpdateConsolidatedCashForPumper(p.pumperId, parseFloat(e.target.value) || 0)}
-                                  className="w-full px-2.5 py-1.5 bg-white border border-gray-300 text-[#1C1C1C] rounded-lg text-sm tabular-nums font-extrabold text-right focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none min-w-0"
-                                />
-                              </div>
+                              <input
+                                type="number"
+                                step="any"
+                                value={p.totalActualCash ?? 0}
+                                onFocus={(e) => e.target.select()}
+                                onChange={(e) => handleUpdateConsolidatedCashForPumper(pumperId, parseFloat(e.target.value) || 0)}
+                                className="px-2.5 py-1 bg-white border border-gray-300 rounded-lg text-xs font-extrabold text-right tabular-nums text-gray-900 focus:outline-none focus:border-blue-600 w-32"
+                                placeholder="0.00"
+                              />
                             </div>
 
-                            {/* Net Shift Variance */}
-                            <div className="flex items-center justify-between pt-1 border-t border-gray-200/60">
-                              <span className="text-[10px] font-extrabold text-gray-500 uppercase tracking-wider">
-                                Shift Net Cash Variance
-                              </span>
-                              {p.totalCashVariance < -0.01 ? (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-extrabold bg-red-500/10 text-red-600 border border-red-500/20 tabular-nums">
-                                  - {absVarFormatted} (Shortage)
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className="text-[10px] font-extrabold text-gray-500 uppercase">Variance:</span>
+                              {p.cashVariance < -0.01 ? (
+                                <span className="px-2 py-0.5 bg-red-100 text-red-700 border border-red-200 rounded-md text-[11px] font-black tabular-nums">
+                                  - {formatCurrency(Math.abs(p.cashVariance))} (Shortage)
                                 </span>
-                              ) : p.totalCashVariance > 0.01 ? (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-extrabold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 tabular-nums">
-                                  + {absVarFormatted} (Excess)
+                              ) : p.cashVariance > 0.01 ? (
+                                <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-md text-[11px] font-black tabular-nums">
+                                  + {formatCurrency(p.cashVariance)} (Excess)
                                 </span>
                               ) : (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200 tabular-nums">
+                                <span className="px-2 py-0.5 bg-gray-200 text-gray-700 border border-gray-300 rounded-md text-[11px] font-black tabular-nums">
                                   Rs. 0.00 (Balanced)
                                 </span>
                               )}
                             </div>
                           </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
 
+                          {/* Save Action */}
+                          <div className="pt-2 border-t border-gray-200/60 flex items-center justify-between gap-2">
+                            {(() => {
+                              const isSaved = !!savedPumperIds[pumperId] || !!savedPumperCards[pumperId];
+                              const hasValidEndMeter = assignedReadings.some(r => (r.endMeter !== undefined && r.endMeter > 0) || r.status === 'Completed');
+                              const isSaveLocked = isSaved && hasValidEndMeter;
+
+                              return (
+                                <>
+                                  {isSaved ? (
+                                    <span className="text-[11px] font-extrabold text-emerald-700 flex items-center gap-1">
+                                      <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                      <span>Readings & Cash Saved to Database</span>
+                                    </span>
+                                  ) : (
+                                    <span className="text-[11px] font-medium text-gray-500">
+                                      Save readings & cash handover
+                                    </span>
+                                  )}
+
+                                  <button
+                                    type="button"
+                                    disabled={isSaveLocked}
+                                    onClick={() => handleSavePumperReadings(pumperId)}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all flex items-center gap-1 shrink-0 ${
+                                      isSaveLocked
+                                        ? 'bg-slate-200 text-slate-500 border border-slate-300 shadow-none cursor-not-allowed select-none'
+                                        : 'bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white shadow-2xs cursor-pointer'
+                                    }`}
+                                  >
+                                    {isSaveLocked ? (
+                                      <>
+                                        <Check className="w-3.5 h-3.5" />
+                                        <span>Saved</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Save className="w-3.5 h-3.5" />
+                                        <span>Save</span>
+                                      </>
+                                    )}
+                                  </button>
+                                </>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="col-span-full py-10 text-center text-gray-500 text-xs italic bg-gray-50 rounded-xl border border-dashed border-gray-200">
+                  No active pumper cards match your search query. Click "+ Add Pumper" above to add pumpers to this shift.
+                </div>
+              )}
+            </div>
           </div>
         </>
       ) : (
@@ -2509,74 +2528,30 @@ export default function ShiftManagementTab({
               </button>
             </div>
 
-            <div className="p-6 space-y-4">
+            <div className="p-6 space-y-4 font-sans">
               
-              {/* Shift Template selection */}
-              <div>
-                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1.5">
-                  Select Shift Template
-                </label>
-                <select
-                  value={newShiftTemplate}
-                  onChange={(e) => handleTemplateChange(e.target.value as any)}
-                  className="w-full px-3.5 py-2.5 bg-white border border-gray-200 text-[#1C1C1C] rounded-xl text-sm focus:outline-none focus:border-blue-500"
-                >
-                  <option value="Morning">Morning Shift (06:00 - 14:00)</option>
-                  <option value="Evening">Evening Shift (14:00 - 22:00)</option>
-                  <option value="Night">Night Shift (22:00 - 06:00)</option>
-                  <option value="Custom">Custom / Special Shift</option>
-                </select>
-              </div>
-
-              {/* Editable Shift Name / Label */}
-              <div>
-                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1.5">
-                  Shift Name / Label
-                </label>
-                <input
-                  type="text"
-                  value={shiftNameInput}
-                  onChange={(e) => setShiftNameInput(e.target.value)}
-                  placeholder="e.g. Morning Shift"
-                  className="w-full px-3.5 py-2.5 bg-white border border-gray-200 text-[#1C1C1C] rounded-xl text-sm focus:outline-none focus:border-blue-500"
-                />
-              </div>
-
-              {/* Time pickers */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1.5">
-                    Start Time
-                  </label>
-                  <input
-                    type="time"
-                    value={startTimeInput}
-                    onChange={(e) => setStartTimeInput(e.target.value)}
-                    className="w-full px-3.5 py-2.5 bg-white border border-gray-200 text-[#1C1C1C] rounded-xl text-sm focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1.5">
-                    End Time
-                  </label>
-                  <input
-                    type="time"
-                    value={endTimeInput}
-                    onChange={(e) => setEndTimeInput(e.target.value)}
-                    className="w-full px-3.5 py-2.5 bg-white border border-gray-200 text-[#1C1C1C] rounded-xl text-sm focus:outline-none focus:border-blue-500"
-                  />
-                </div>
+              {/* Fixed 24-Hour Shift Cycle Banner */}
+              <div className="p-3.5 bg-gray-100/90 border border-gray-200 rounded-xl text-xs space-y-1">
+                <span className="text-[10px] font-extrabold text-gray-500 uppercase tracking-wider block">
+                  Fixed Shift Cycle
+                </span>
+                <p className="font-extrabold text-gray-900 text-sm">
+                  Full Day Shift (08:00 AM - 08:00 AM Next Day)
+                </p>
+                <p className="text-[11px] text-gray-500 font-medium">
+                  Configured for a standard 24-hour continuous station cycle.
+                </p>
               </div>
 
               {/* Supervisor selection */}
               <div>
-                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1.5">
+                <label className="text-xs font-bold text-gray-600 uppercase tracking-wider block mb-1.5">
                   Assign Supervisor
                 </label>
                 <select
                   value={newSupervisorId}
                   onChange={(e) => setNewSupervisorId(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-white border border-gray-200 text-[#1C1C1C] rounded-xl text-sm focus:outline-none focus:border-blue-500"
+                  className="w-full px-3.5 py-2.5 bg-white border border-gray-300 text-[#1C1C1C] rounded-xl text-sm font-semibold focus:outline-none focus:border-blue-500"
                 >
                   <option value="" disabled>-- Select Station Supervisor --</option>
                   {supervisors.map((s) => (
@@ -2588,12 +2563,12 @@ export default function ShiftManagementTab({
               </div>
 
               {/* Carry-Forward disclaimer */}
-              <div className="p-3.5 bg-blue-500/10 border border-blue-500/20 text-blue-300 rounded-xl text-xs space-y-1">
-                <div className="flex items-center gap-1.5 font-bold">
-                  <Sparkles className="w-3.5 h-3.5 text-blue-450" />
+              <div className="p-3.5 bg-blue-500/10 border border-blue-500/20 text-blue-800 rounded-xl text-xs space-y-1">
+                <div className="flex items-center gap-1.5 font-extrabold">
+                  <Sparkles className="w-3.5 h-3.5 text-blue-600" />
                   <span>Fully Automated Carry-Forward</span>
                 </div>
-                <p className="leading-relaxed text-gray-450">
+                <p className="leading-relaxed text-gray-600 font-medium">
                   Start meter values are carried forward automatically from the previous shift's closing values. You can modify these readings at any time during the shift.
                 </p>
               </div>

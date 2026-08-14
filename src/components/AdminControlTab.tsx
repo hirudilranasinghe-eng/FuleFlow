@@ -3,21 +3,23 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   ShieldCheck, Fuel, Users, Sliders, Plus, Trash2, 
   CheckCircle2, AlertTriangle, Database, Copy, Check,
   Landmark, Edit2, Search, Phone, X, RefreshCcw,
-  Layers, Info, Tag, Calendar, Clock, Save, Gauge
+  Layers, Info, Tag, Calendar, Clock, Save, Gauge, Droplets
 } from 'lucide-react';
-import { Employee, FuelTank, FuelType, Pump, PumpMachine, PriceSchedule } from '../types';
+import { Employee, FuelTank, FuelType, Pump, PumpMachine, PriceSchedule, OilTank } from '../types';
 import { supabase, getTanksTableName } from '../lib/supabase';
-import { savePumpMachine, deletePumpMachine, saveNozzle, deleteNozzle, saveFuelTank, deleteFuelTank } from '../lib/supabaseClient';
+import { savePumpMachine, deletePumpMachine, saveNozzle, deleteNozzle, saveFuelTank, deleteFuelTank, saveOilTank, deleteOilTank } from '../lib/supabaseClient';
 import { SUPABASE_SQL } from '../lib/sqlSchema';
 
 interface AdminControlTabProps {
   tanks: FuelTank[];
   setTanks: React.Dispatch<React.SetStateAction<FuelTank[]>>;
+  oilTanks?: OilTank[];
+  setOilTanks?: React.Dispatch<React.SetStateAction<OilTank[]>>;
   pumps: Pump[];
   setPumps: React.Dispatch<React.SetStateAction<Pump[]>>;
   pumpMachines?: PumpMachine[];
@@ -32,6 +34,8 @@ interface AdminControlTabProps {
 export default function AdminControlTab({
   tanks,
   setTanks,
+  oilTanks,
+  setOilTanks,
   pumps,
   setPumps,
   pumpMachines = [],
@@ -42,8 +46,8 @@ export default function AdminControlTab({
   setPriceSchedules,
   onResetAllData
 }: AdminControlTabProps) {
-  // Active sub-tab inside Admin Control: 'tanks' | 'mapping' | 'employees' | 'price' | 'system'
-  const [adminSection, setAdminSection] = useState<'tanks' | 'mapping' | 'employees' | 'price' | 'system'>('tanks');
+  // Active sub-tab inside Admin Control: 'tanks' | 'oils' | 'mapping' | 'employees' | 'price' | 'system'
+  const [adminSection, setAdminSection] = useState<'tanks' | 'oils' | 'mapping' | 'employees' | 'price' | 'system'>('tanks');
 
   // Global Toast Notification
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -55,6 +59,48 @@ export default function AdminControlTab({
 
   const formatCurrency = (val: number) => {
     return `Rs. ${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val)}`;
+  };
+
+  // Natural numerical sorting of tanks (Tank 01, Tank 02, etc.)
+  const sortedTanks = useMemo(() => {
+    return [...tanks].sort((a, b) => (a.name || a.id || '').localeCompare(b.name || b.id || '', undefined, { numeric: true, sensitivity: 'base' }));
+  }, [tanks]);
+
+  // Local oil tanks state fallback if not passed from parent
+  const [localOilTanks, setLocalOilTanks] = useState<OilTank[]>(() => {
+    try {
+      const stored = localStorage.getItem('fms_oil_tanks');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (_) {}
+    return [
+      { id: 'oil-tank-01', name: 'Oil Tank 01', grade: 'Caltex 20W-50', capacity: 1000, currentLevel: 680, pricePerLiter: 2450 },
+      { id: 'oil-tank-02', name: 'Oil Tank 02', grade: 'Lanka 2T Super', capacity: 500, currentLevel: 340, pricePerLiter: 1850 },
+      { id: 'oil-tank-03', name: 'Barrel Storage 01', grade: 'Hydraulic 68', capacity: 210, currentLevel: 145, pricePerLiter: 1950 },
+      { id: 'oil-tank-04', name: 'Coolant Bay 01', grade: 'Radiator Coolant 50/50', capacity: 500, currentLevel: 290, pricePerLiter: 1200 },
+    ];
+  });
+
+  const effectiveOilTanks = oilTanks ?? localOilTanks;
+  const setEffectiveOilTanks = setOilTanks ?? setLocalOilTanks;
+
+  // Natural numerical sorting of oil tanks
+  const sortedOilTanks = useMemo(() => {
+    return [...effectiveOilTanks].sort((a, b) => (a.name || a.id || '').localeCompare(b.name || b.id || '', undefined, { numeric: true, sensitivity: 'base' }));
+  }, [effectiveOilTanks]);
+
+  // Oil Tank Grade styling helper
+  const getOilGradeBadgeStyle = (grade: string) => {
+    const g = (grade || '').toLowerCase();
+    if (g.includes('20w') || g.includes('15w') || g.includes('engine')) return 'bg-amber-500/10 text-amber-800 border-amber-500/20';
+    if (g.includes('2t') || g.includes('two stroke')) return 'bg-emerald-500/10 text-emerald-800 border-emerald-500/20';
+    if (g.includes('hydraulic') || g.includes('68')) return 'bg-blue-500/10 text-blue-800 border-blue-500/20';
+    if (g.includes('coolant') || g.includes('radiator')) return 'bg-cyan-500/10 text-cyan-800 border-cyan-500/20';
+    if (g.includes('gear') || g.includes('90') || g.includes('140')) return 'bg-purple-500/10 text-purple-800 border-purple-500/20';
+    if (g.includes('brake') || g.includes('dot')) return 'bg-rose-500/10 text-rose-800 border-rose-500/20';
+    return 'bg-slate-500/10 text-slate-800 border-slate-500/20';
   };
 
   // -------------------------------------------------------------
@@ -171,7 +217,125 @@ export default function AdminControlTab({
   };
 
   // -------------------------------------------------------------
-  // B) FUEL NOZZLES MANAGEMENT (Add, Edit, Save, Delete)
+  // B) OIL (LUBRICANT) STORAGE TANKS MANAGEMENT (Add, Edit, Delete)
+  // -------------------------------------------------------------
+  const [isAddOilTankModalOpen, setIsAddOilTankModalOpen] = useState(false);
+  const [editingOilTank, setEditingOilTank] = useState<OilTank | null>(null);
+
+  // Form fields for Oil Tank Add/Edit
+  const [oilTankFormName, setOilTankFormName] = useState('');
+  const [oilTankFormGrade, setOilTankFormGrade] = useState('Caltex 20W-50');
+  const [oilTankFormCapacity, setOilTankFormCapacity] = useState<number>(1000);
+  const [oilTankFormCurrentLevel, setOilTankFormCurrentLevel] = useState<number>(0);
+  const [oilTankFormPrice, setOilTankFormPrice] = useState<number>(0);
+  const [oilTankModalError, setOilTankModalError] = useState<string | null>(null);
+
+  const handleOpenAddOilTankModal = () => {
+    setEditingOilTank(null);
+    setOilTankFormName(`Oil Tank ${(effectiveOilTanks.length + 1).toString().padStart(2, '0')}`);
+    setOilTankFormGrade('Caltex 20W-50');
+    setOilTankFormCapacity(1000);
+    setOilTankFormCurrentLevel(0);
+    setOilTankFormPrice(0);
+    setOilTankModalError(null);
+    setIsAddOilTankModalOpen(true);
+  };
+
+  const handleOpenEditOilTankModal = (oilTank: OilTank) => {
+    setEditingOilTank(oilTank);
+    setOilTankFormName(oilTank.name);
+    setOilTankFormGrade(oilTank.grade);
+    setOilTankFormCapacity(oilTank.capacity);
+    setOilTankFormCurrentLevel(oilTank.currentLevel);
+    setOilTankFormPrice(oilTank.pricePerLiter);
+    setOilTankModalError(null);
+    setIsAddOilTankModalOpen(true);
+  };
+
+  const handleSaveOilTankSubmit = async () => {
+    if (!oilTankFormName.trim()) {
+      setOilTankModalError('Tank name / identifier is required (e.g. Oil Tank 01).');
+      return;
+    }
+    if (!oilTankFormGrade.trim()) {
+      setOilTankModalError('Oil grade / product name is required (e.g. Caltex 20W-50).');
+      return;
+    }
+    if (oilTankFormCapacity <= 0) {
+      setOilTankModalError('Tank capacity must be greater than 0 liters.');
+      return;
+    }
+    if (oilTankFormCurrentLevel < 0) {
+      setOilTankModalError('Current volume cannot be negative.');
+      return;
+    }
+    if (oilTankFormPrice < 0) {
+      setOilTankModalError('Price per liter cannot be negative.');
+      return;
+    }
+
+    const capVal = Number(oilTankFormCapacity) || 0;
+    const curVal = Math.min(Number(oilTankFormCurrentLevel) || 0, capVal);
+    const priceVal = Number(oilTankFormPrice) || 0;
+
+    if (editingOilTank) {
+      const updatedOilTank: OilTank = {
+        ...editingOilTank,
+        name: oilTankFormName.trim(),
+        grade: oilTankFormGrade.trim(),
+        capacity: capVal,
+        currentLevel: curVal,
+        pricePerLiter: priceVal
+      };
+
+      const nextOilTanks = effectiveOilTanks.map(t => t.id === editingOilTank.id ? updatedOilTank : t);
+      setEffectiveOilTanks(nextOilTanks);
+      try { localStorage.setItem('fms_oil_tanks', JSON.stringify(nextOilTanks)); } catch (_) {}
+
+      await saveOilTank(supabase, updatedOilTank);
+
+      setIsAddOilTankModalOpen(false);
+      showToast(`Oil Storage Tank "${updatedOilTank.name}" updated successfully.`);
+    } else {
+      const newOilTank: OilTank = {
+        id: `oil-tank-${Date.now().toString().slice(-6)}`,
+        name: oilTankFormName.trim(),
+        grade: oilTankFormGrade.trim(),
+        capacity: capVal,
+        currentLevel: curVal,
+        pricePerLiter: priceVal
+      };
+
+      const nextOilTanks = [...effectiveOilTanks, newOilTank];
+      setEffectiveOilTanks(nextOilTanks);
+      try { localStorage.setItem('fms_oil_tanks', JSON.stringify(nextOilTanks)); } catch (_) {}
+
+      await saveOilTank(supabase, newOilTank);
+
+      setIsAddOilTankModalOpen(false);
+      showToast(`Oil Storage Tank "${newOilTank.name}" created successfully.`);
+    }
+  };
+
+  const handleDeleteOilTank = async (oilTankId: string) => {
+    const targetTank = effectiveOilTanks.find(t => t.id === oilTankId);
+    if (!targetTank) return;
+
+    if (!confirm(`Are you sure you want to delete "${targetTank.name} - ${targetTank.grade}"? This action cannot be undone.`)) {
+      return;
+    }
+
+    const nextOilTanks = effectiveOilTanks.filter(t => t.id !== oilTankId);
+    setEffectiveOilTanks(nextOilTanks);
+    try { localStorage.setItem('fms_oil_tanks', JSON.stringify(nextOilTanks)); } catch (_) {}
+
+    await deleteOilTank(supabase, oilTankId);
+
+    showToast(`Oil Storage Tank "${targetTank.name}" deleted.`);
+  };
+
+  // -------------------------------------------------------------
+  // C) FUEL NOZZLES MANAGEMENT (Add, Edit, Save, Delete)
   // -------------------------------------------------------------
   // Nozzle Modal State
   const [isAddNozzleModalOpen, setIsAddNozzleModalOpen] = useState(false);
@@ -394,7 +558,7 @@ export default function AdminControlTab({
         name: empFormName.trim(),
         role: empFormRole,
         phone: empFormPhone.trim(),
-        status: empFormStatus,
+        status: 'Active',
         avatarColor: randomColor
       };
 
@@ -597,15 +761,15 @@ export default function AdminControlTab({
       <div id="admin-header" className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <div className="flex items-center gap-2.5">
-            <div className="p-2 bg-blue-600/10 text-blue-600 rounded-xl">
+            <div className="p-1.5 bg-blue-600/10 text-blue-600 rounded-xl">
               <ShieldCheck className="w-5 h-5" />
             </div>
             <div>
-              <h1 className="text-xl sm:text-2xl font-bold text-[#1C1C1C] tracking-tight font-sans">
+              <h1 className="text-lg font-bold text-slate-900 tracking-tight font-sans">
                 Admin Control Panel
               </h1>
-              <p className="text-gray-500 text-xs sm:text-sm mt-0.5">
-                Centralized management for underground storage tanks, dispenser nozzles, staff registry, tariff rates, and system database
+              <p className="text-gray-500 text-xs mt-0.5">
+                Centralized management for underground storage tanks, dispenser nozzles, staff directory, and tariff rates
               </p>
             </div>
           </div>
@@ -637,6 +801,18 @@ export default function AdminControlTab({
         >
           <Fuel className="w-4 h-4" />
           <span>Underground Storage Tanks ({tanks.length})</span>
+        </button>
+
+        <button
+          onClick={() => setAdminSection('oils')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+            adminSection === 'oils'
+              ? 'bg-[#1C1C1C] text-white shadow-sm'
+              : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200/60'
+          }`}
+        >
+          <Droplets className="w-4 h-4 text-amber-500" />
+          <span>Oil (Lubricant) Storage ({effectiveOilTanks.length})</span>
         </button>
 
         <button
@@ -672,19 +848,7 @@ export default function AdminControlTab({
           }`}
         >
           <Tag className="w-4 h-4" />
-          <span>Price & Tariff Management</span>
-        </button>
-
-        <button
-          onClick={() => setAdminSection('system')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-            adminSection === 'system'
-              ? 'bg-[#1C1C1C] text-white shadow-sm'
-              : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200/60'
-          }`}
-        >
-          <Sliders className="w-4 h-4" />
-          <span>System & Database</span>
+          <span>Price Management</span>
         </button>
       </div>
 
@@ -725,7 +889,7 @@ export default function AdminControlTab({
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {tanks.map((tank) => {
+              {sortedTanks.map((tank) => {
                 const pct = tank.capacity > 0 ? Math.round((tank.currentLevel / tank.capacity) * 100) : 0;
                 const mappedPumpsList = pumps.filter(p => p.tankId === tank.id || (!p.tankId && p.fuelType === tank.fuelType));
 
@@ -821,6 +985,134 @@ export default function AdminControlTab({
       )}
 
       {/* ========================================================================= */}
+      {/* SECTION: OIL (LUBRICANT) STORAGE TANKS MANAGEMENT */}
+      {/* ========================================================================= */}
+      {adminSection === 'oils' && (
+        <div className="space-y-6 animate-fade-in">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
+            <div>
+              <h2 className="text-sm font-extrabold text-[#1C1C1C]">Oil & Lubricant Storage Tanks</h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Centralized lubricant storage management: engine oil barrels, hydraulic oil tanks, volume meters, and tariff rates
+              </p>
+            </div>
+            <button
+              onClick={handleOpenAddOilTankModal}
+              className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm self-start sm:self-auto"
+            >
+              <Plus className="w-4 h-4" />
+              <span>+ Add Oil Tank</span>
+            </button>
+          </div>
+
+          {/* Oil Tanks Grid */}
+          {sortedOilTanks.length === 0 ? (
+            <div className="bg-white p-12 text-center rounded-2xl border border-gray-100 space-y-4 shadow-sm">
+              <div className="w-12 h-12 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center mx-auto">
+                <Droplets className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-[#1C1C1C]">No Oil & Lubricant Tanks Configured</h3>
+                <p className="text-xs text-gray-500 max-w-sm mx-auto">
+                  Click '+ Add Oil Tank' to register bulk oil storage, lubricant drums, or hydraulic fluid tanks.
+                </p>
+              </div>
+              <button
+                onClick={handleOpenAddOilTankModal}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm"
+              >
+                <Plus className="w-4 h-4" />
+                <span>+ Add Oil Tank</span>
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {sortedOilTanks.map((oilTank) => {
+                const pct = oilTank.capacity > 0 ? Math.round((oilTank.currentLevel / oilTank.capacity) * 100) : 0;
+                const totalStockVal = oilTank.currentLevel * (oilTank.pricePerLiter || 0);
+
+                return (
+                  <div key={oilTank.id} className="bg-white rounded-xl border border-gray-100 p-4 space-y-3 shadow-sm hover:border-gray-200 transition-all">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center flex-shrink-0 font-bold">
+                          <Droplets className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${getOilGradeBadgeStyle(oilTank.grade)}`}>
+                            {oilTank.grade}
+                          </span>
+                          <h3 className="text-sm font-extrabold text-[#1C1C1C] leading-snug mt-0.5">{oilTank.name}</h3>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => handleOpenEditOilTankModal(oilTank)}
+                          className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          title="Edit Oil Tank"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteOilTank(oilTank.id)}
+                          className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                          title="Delete Oil Tank"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Level Progress Bar */}
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-xs font-bold">
+                        <span className="text-gray-500">Current Volume Level</span>
+                        <div className="flex items-center gap-1.5 font-mono tabular-nums">
+                          <span className={`text-xs font-extrabold ${pct < 20 ? 'text-rose-600' : pct < 40 ? 'text-amber-600' : 'text-[#1C1C1C]'}`}>
+                            {pct}%
+                          </span>
+                          <span className="text-gray-400">({oilTank.currentLevel.toLocaleString()} L)</span>
+                        </div>
+                      </div>
+                      <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden">
+                        <div 
+                          className={`h-full rounded-full transition-all duration-500 ${
+                            pct < 20 ? 'bg-rose-500' : pct < 40 ? 'bg-amber-500' : 'bg-emerald-500'
+                          }`}
+                          style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
+                        />
+                      </div>
+                      <div className="flex justify-between text-[11px] text-gray-500 font-medium">
+                        <span>Current: <strong className="text-gray-900 font-mono tabular-nums">{oilTank.currentLevel.toLocaleString()} L</strong></span>
+                        <span>Capacity: <strong className="text-gray-900 font-mono tabular-nums">{oilTank.capacity.toLocaleString()} L</strong></span>
+                      </div>
+                    </div>
+
+                    {/* Rates & Stock Valuation Footer */}
+                    <div className="grid grid-cols-2 gap-2 pt-2 border-t border-gray-100 text-xs">
+                      <div className="bg-gray-50/70 p-2 rounded-lg border border-gray-100/80">
+                        <span className="text-[10px] text-gray-400 uppercase tracking-wider block font-bold">Rate / Liter</span>
+                        <span className="font-mono font-bold text-slate-900 tabular-nums text-xs">
+                          {formatCurrency(oilTank.pricePerLiter || 0)}
+                        </span>
+                      </div>
+                      <div className="bg-gray-50/70 p-2 rounded-lg border border-gray-100/80 text-right">
+                        <span className="text-[10px] text-gray-400 uppercase tracking-wider block font-bold">Total Stock Value</span>
+                        <span className="font-mono font-bold text-emerald-700 tabular-nums text-xs">
+                          {formatCurrency(totalStockVal)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ========================================================================= */}
       {/* SECTION B: STORAGE TANKS & FUEL NOZZLES DIRECT MAPPING */}
       {/* ========================================================================= */}
       {adminSection === 'mapping' && (
@@ -847,7 +1139,7 @@ export default function AdminControlTab({
             </div>
           ) : (
             <div className="space-y-5">
-              {tanks.map((tank) => {
+              {sortedTanks.map((tank) => {
                 const attachedNozzles = pumps.filter(p => p.tankId === tank.id || (!p.tankId && p.fuelType === tank.fuelType));
 
                 const getFuelTypeBadgeStyle = (fuelType: string) => {
@@ -961,93 +1253,148 @@ export default function AdminControlTab({
       {/* ========================================================================= */}
       {adminSection === 'employees' && (
         <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+          {/* Top Bar: Clean Standalone Search & Action Button (No Container Card) */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="relative flex-1 max-w-md">
-              <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-3" />
+              <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-2.5" />
               <input
                 type="text"
                 placeholder="Search staff by name, role, or phone..."
                 value={empSearchQuery}
                 onChange={(e) => setEmpSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 text-[#1C1C1C] rounded-xl text-xs focus:outline-none focus:border-blue-500"
+                className="w-full pl-10 pr-4 py-2 bg-white border border-gray-200 text-[#1C1C1C] rounded-xl text-xs focus:outline-none focus:border-blue-500 shadow-2xs font-medium"
               />
             </div>
 
             <button
               onClick={handleOpenAddEmpModal}
-              className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm whitespace-nowrap"
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors shadow-xs whitespace-nowrap cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span>Register Staff Member</span>
             </button>
           </div>
 
-          {/* Employees List Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredEmployees.map((emp) => (
-              <div key={emp.id} className="bg-white p-5 rounded-2xl border border-gray-100 space-y-4 shadow-sm hover:border-gray-200 transition-all">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-11 h-11 rounded-2xl ${emp.avatarColor || 'bg-blue-500'} text-white flex items-center justify-center font-bold text-base shadow-sm`}>
-                      {emp.name.charAt(0)}
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-[#1C1C1C] text-sm">{emp.name}</h4>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          emp.role === 'Supervisor' ? 'bg-purple-500/10 text-purple-700' : 'bg-blue-500/10 text-blue-700'
-                        }`}>
-                          {emp.role}
-                        </span>
-                        <span className="text-[10px] text-gray-400">{emp.id}</span>
-                      </div>
-                    </div>
-                  </div>
+          {/* Categorized Lists: Supervisors & Pumpers (Compact Table View) */}
+          {(() => {
+            const supervisors = filteredEmployees.filter(e => e.role === 'Supervisor');
+            const pumpers = filteredEmployees.filter(e => e.role !== 'Supervisor');
 
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => handleOpenEditEmpModal(emp)}
-                      className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                      title="Edit Employee"
-                    >
-                      <Edit2 className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => handleDeleteEmployee(emp.id)}
-                      className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                      title="Remove Staff"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+            const renderEmpTable = (empList: Employee[], emptyText: string) => {
+              if (empList.length === 0) {
+                return (
+                  <div className="p-4 bg-gray-50/80 rounded-xl text-center border border-dashed border-gray-200">
+                    <p className="text-xs text-gray-400 font-medium">{emptyText}</p>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="bg-white rounded-2xl border border-gray-200/80 shadow-2xs overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr className="bg-gray-50/80 border-b border-gray-200/80 text-gray-500 font-bold uppercase tracking-wider text-[10px]">
+                          <th className="py-3 px-4">Name</th>
+                          <th className="py-3 px-4">Role</th>
+                          <th className="py-3 px-4">Contact Number</th>
+                          <th className="py-3 px-4">Status</th>
+                          <th className="py-3 px-4 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 font-medium">
+                        {empList.map((emp) => (
+                          <tr key={emp.id} className="hover:bg-blue-50/40 transition-colors">
+                            <td className="py-3 px-4">
+                              <div className="flex items-center gap-3">
+                                <div className={`w-8 h-8 rounded-xl ${emp.avatarColor || 'bg-blue-500'} text-white flex items-center justify-center font-extrabold text-xs shadow-2xs flex-shrink-0`}>
+                                  {emp.name.charAt(0)}
+                                </div>
+                                <span className="font-bold text-[#1C1C1C] text-xs">{emp.name}</span>
+                              </div>
+                            </td>
+                            <td className="py-3 px-4">
+                              <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                                emp.role === 'Supervisor' ? 'bg-purple-500/10 text-purple-700' : 'bg-blue-500/10 text-blue-700'
+                              }`}>
+                                {emp.role}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 font-mono text-gray-600 text-xs">
+                              <div className="flex items-center gap-1.5">
+                                <Phone className="w-3.5 h-3.5 text-gray-400" />
+                                <span>{emp.phone}</span>
+                              </div>
+                            </td>
+                            <td className="py-3 px-4">
+                              <button
+                                onClick={() => handleToggleEmpStatus(emp.id)}
+                                className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold transition-colors cursor-pointer ${
+                                  emp.status === 'Active' 
+                                    ? 'bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 hover:bg-emerald-500/20' 
+                                    : 'bg-gray-100 text-gray-500 border border-gray-200 hover:bg-gray-200'
+                                }`}
+                              >
+                                {emp.status}
+                              </button>
+                            </td>
+                            <td className="py-3 px-4 text-right">
+                              <div className="flex items-center justify-end gap-1">
+                                <button
+                                  onClick={() => handleOpenEditEmpModal(emp)}
+                                  className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                                  title="Edit Staff Member"
+                                >
+                                  <Edit2 className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteEmployee(emp.id)}
+                                  className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                  title="Remove Staff Member"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
+              );
+            };
 
-                <div className="space-y-2 pt-2 border-t border-gray-100 text-xs">
-                  <div className="flex items-center justify-between text-gray-600">
-                    <span className="flex items-center gap-1.5 text-gray-400">
-                      <Phone className="w-3.5 h-3.5" />
-                      Contact:
+            return (
+              <div className="space-y-6">
+                {/* 1. Shift Supervisors Section */}
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 pb-2 border-b border-gray-200/80">
+                    <ShieldCheck className="w-4 h-4 text-purple-600" />
+                    <h3 className="font-extrabold text-xs sm:text-sm text-[#1C1C1C] uppercase tracking-wider">Shift Supervisors</h3>
+                    <span className="px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 text-[11px] font-extrabold">
+                      {supervisors.length}
                     </span>
-                    <span className="font-mono font-semibold text-[#1C1C1C]">{emp.phone}</span>
                   </div>
 
-                  <div className="flex items-center justify-between pt-1">
-                    <span className="text-gray-400">Status:</span>
-                    <button
-                      onClick={() => handleToggleEmpStatus(emp.id)}
-                      className={`px-2.5 py-1 rounded-full text-[10px] font-bold transition-colors ${
-                        emp.status === 'Active' 
-                          ? 'bg-emerald-500/10 text-emerald-700 border border-emerald-500/20' 
-                          : 'bg-gray-100 text-gray-500 border border-gray-200'
-                      }`}
-                    >
-                      {emp.status}
-                    </button>
+                  {renderEmpTable(supervisors, "No registered supervisor staff found matching criteria.")}
+                </div>
+
+                {/* 2. Pump Operators (Pumpers) Section */}
+                <div className="space-y-3 pt-2">
+                  <div className="flex items-center gap-2 pb-2 border-b border-gray-200/80">
+                    <Users className="w-4 h-4 text-blue-600" />
+                    <h3 className="font-extrabold text-xs sm:text-sm text-[#1C1C1C] uppercase tracking-wider">Pump Operators (Pumpers)</h3>
+                    <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 text-[11px] font-extrabold">
+                      {pumpers.length}
+                    </span>
                   </div>
+
+                  {renderEmpTable(pumpers, "No registered pump operator staff found matching criteria.")}
                 </div>
               </div>
-            ))}
-          </div>
+            );
+          })()}
         </div>
       )}
 
@@ -1072,7 +1419,7 @@ export default function AdminControlTab({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50 text-xs">
-                  {tanks.map((tank) => (
+                  {sortedTanks.map((tank) => (
                     <tr key={tank.id} className="hover:bg-gray-50/50 transition-colors">
                       <td className="py-4 px-6">
                         <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold ${
@@ -1528,7 +1875,7 @@ export default function AdminControlTab({
                   ) : (
                     <>
                       <option value="">-- Select Source Tank --</option>
-                      {tanks.map((t) => (
+                      {sortedTanks.map((t) => (
                         <option key={t.id} value={t.id}>
                           {t.name} ({t.fuelType}) - {t.capacity.toLocaleString()} L Capacity
                         </option>
@@ -1628,18 +1975,6 @@ export default function AdminControlTab({
                   className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] focus:outline-none focus:border-blue-500 font-mono"
                 />
               </div>
-
-              <div>
-                <label className="font-bold text-gray-600 block mb-1">Employment Status</label>
-                <select
-                  value={empFormStatus}
-                  onChange={(e) => setEmpFormStatus(e.target.value as 'Active' | 'Inactive')}
-                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] focus:outline-none focus:border-blue-500 font-semibold"
-                >
-                  <option value="Active">Active</option>
-                  <option value="Inactive">Inactive</option>
-                </select>
-              </div>
             </div>
 
             <div className="flex gap-3 pt-2">
@@ -1654,6 +1989,137 @@ export default function AdminControlTab({
                 className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm"
               >
                 {editingEmp ? 'Update Staff' : 'Register Staff'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: ADD / EDIT OIL STORAGE TANK */}
+      {/* ========================================================================= */}
+      {isAddOilTankModalOpen && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full space-y-5 shadow-2xl animate-scale-up">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <h3 className="text-base font-extrabold text-[#1C1C1C] flex items-center gap-2">
+                <Droplets className="w-5 h-5 text-amber-600" />
+                <span>{editingOilTank ? 'Edit Oil (Lubricant) Storage Tank' : 'Add Oil (Lubricant) Storage Tank'}</span>
+              </h3>
+              <button 
+                onClick={() => setIsAddOilTankModalOpen(false)}
+                className="p-1 text-gray-400 hover:text-gray-600 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {oilTankModalError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl font-medium flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                <span>{oilTankModalError}</span>
+              </div>
+            )}
+
+            <div className="space-y-4 text-xs">
+              <div>
+                <label className="font-bold text-gray-600 block mb-1">Tank Name / Identifier</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Oil Tank 01, Barrel Storage 02"
+                  value={oilTankFormName}
+                  onChange={(e) => setOilTankFormName(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] focus:outline-none focus:border-blue-500 font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-gray-600 block mb-1">Oil Grade / Lubricant Product</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Caltex 20W-50, Lanka 2T, Hydraulic 68"
+                  value={oilTankFormGrade}
+                  onChange={(e) => setOilTankFormGrade(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] focus:outline-none focus:border-blue-500 font-semibold"
+                />
+                {/* Quick Grade Presets */}
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {[
+                    'Caltex 20W-50',
+                    'Lanka 2T Super',
+                    'Hydraulic 68',
+                    'Coolant 50/50',
+                    'Engine Oil 15W-40',
+                    'Gear Oil EP 90'
+                  ].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setOilTankFormGrade(preset)}
+                      className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition-colors ${
+                        oilTankFormGrade === preset
+                          ? 'bg-amber-100 text-amber-800 border-amber-300'
+                          : 'bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-200'
+                      }`}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="font-bold text-gray-600 block mb-1">Total Capacity (L)</label>
+                  <input
+                    type="number"
+                    value={oilTankFormCapacity}
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => setOilTankFormCapacity(Number(e.target.value))}
+                    className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] focus:outline-none focus:border-blue-500 tabular-nums font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-gray-600 block mb-1">Current Volume (L)</label>
+                  <input
+                    type="number"
+                    value={oilTankFormCurrentLevel}
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => setOilTankFormCurrentLevel(Number(e.target.value))}
+                    className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] focus:outline-none focus:border-blue-500 tabular-nums font-bold"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="font-bold text-gray-600 block mb-1">Price / Rate (Rs. per Liter)</label>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 font-bold text-xs">Rs.</span>
+                  <input
+                    type="number"
+                    step="any"
+                    value={oilTankFormPrice}
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => setOilTankFormPrice(Number(e.target.value))}
+                    className="w-full pl-10 pr-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] focus:outline-none focus:border-blue-500 tabular-nums font-bold"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => setIsAddOilTankModalOpen(false)}
+                className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveOilTankSubmit}
+                className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm"
+              >
+                {editingOilTank ? 'Update Oil Tank' : 'Save Oil Tank'}
               </button>
             </div>
           </div>

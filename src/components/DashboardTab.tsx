@@ -42,7 +42,9 @@ export default function DashboardTab({
   const stockPercentage = totalStockCapacity > 0 ? Math.round((totalStockLitres / totalStockCapacity) * 100) : 0;
 
   const lowStockTanks = useMemo(() => {
-    return tanks.filter(t => (t.currentLevel / t.capacity) < 0.40);
+    return [...tanks]
+      .filter(t => (t.currentLevel / t.capacity) < 0.40)
+      .sort((a, b) => (a.name || a.id || '').localeCompare(b.name || b.id || '', undefined, { numeric: true, sensitivity: 'base' }));
   }, [tanks]);
 
   const activePumpersCount = useMemo(() => {
@@ -172,18 +174,12 @@ export default function DashboardTab({
       {/* Welcome Banner */}
       <div id="db-welcome-banner" className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-[#1C1C1C] tracking-tight font-sans">
+          <h1 className="text-lg font-bold text-slate-900 tracking-tight font-sans">
             FuelFlow Station Dashboard
           </h1>
-          <p className="text-gray-500 text-xs sm:text-sm mt-0.5">
+          <p className="text-gray-500 text-xs mt-0.5">
             Real-time visual summary of current sales, stocks, and team operations
           </p>
-        </div>
-        
-        {/* Date visual */}
-        <div className="flex items-center gap-2.5 px-4 py-2.5 bg-white border border-gray-100 rounded-xl shadow-sm text-sm text-[#1C1C1C] font-medium">
-          <Calendar className="w-4 h-4 text-blue-600" />
-          <span>{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
         </div>
       </div>
 
@@ -191,11 +187,11 @@ export default function DashboardTab({
       <div id="db-stats-row" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         
         {/* Today's Net Revenue - Gradient Accent Card matching image_0.png */}
-        <div className="bg-[#E8F1F5] p-5 rounded-2xl border border-[#D0E2EB] shadow-sm hover:shadow-md transition-all duration-300">
+        <div className="bg-[#E8F1F5] p-5 rounded-2xl border border-[#D0E2EB] shadow-sm hover:shadow-md transition-all duration-300 font-sans">
           <div className="flex justify-between items-start">
             <div>
               <span className="text-xs font-bold text-gray-500 uppercase tracking-wider block">Today's Sales Revenue</span>
-              <span className="text-3xl tabular-nums font-extrabold text-[#1C1C1C] mt-2 block tracking-tight">
+              <span className="text-3xl font-mono tabular-nums font-extrabold text-[#1C1C1C] mt-2 block tracking-tight">
                 {formatCurrency(todayRevenue)}
               </span>
             </div>
@@ -203,8 +199,8 @@ export default function DashboardTab({
               <TrendingUp className="w-5 h-5" />
             </div>
           </div>
-          <div className="mt-3.5 flex items-center gap-1.5 text-xs text-gray-500">
-            <span className="text-emerald-600 font-bold flex items-center gap-0.5 bg-emerald-100 px-1.5 py-0.5 rounded-full">
+          <div className="mt-3.5 flex items-center gap-1.5 text-xs text-gray-500 font-sans">
+            <span className="text-emerald-600 font-mono font-bold flex items-center gap-0.5 bg-emerald-100 px-1.5 py-0.5 rounded-full">
               <ArrowUpRight className="w-3 h-3" />
               +12.4%
             </span>
@@ -213,11 +209,11 @@ export default function DashboardTab({
         </div>
 
         {/* Total Litres Sold */}
-        <div className="bg-[#E8F1F5] p-5 rounded-2xl border border-[#D0E2EB] shadow-sm hover:shadow-md transition-all duration-300">
+        <div className="bg-[#E8F1F5] p-5 rounded-2xl border border-[#D0E2EB] shadow-sm hover:shadow-md transition-all duration-300 font-sans">
           <div className="flex justify-between items-start">
             <div>
               <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider block">Today's Fuel Dispensed</span>
-              <span className="text-2xl tabular-nums font-extrabold text-[#1C1C1C] mt-2 block tracking-tight">
+              <span className="text-2xl font-mono tabular-nums font-extrabold text-[#1C1C1C] mt-2 block tracking-tight">
                 {formatLiters(todayFuelSold)}
               </span>
             </div>
@@ -225,18 +221,18 @@ export default function DashboardTab({
               <Droplet className="w-5 h-5" />
             </div>
           </div>
-          <div className="mt-3.5 flex items-center gap-1.5 text-xs text-gray-500">
+          <div className="mt-3.5 flex items-center gap-1.5 text-xs text-gray-500 font-sans">
             <span className="font-semibold text-blue-600">Liters</span>
             <span>computed automatically</span>
           </div>
         </div>
 
         {/* Total Underground Stock */}
-        <div className="bg-[#E8F1F5] p-5 rounded-2xl border border-[#D0E2EB] shadow-sm hover:shadow-md transition-all duration-300">
+        <div className="bg-[#E8F1F5] p-5 rounded-2xl border border-[#D0E2EB] shadow-sm hover:shadow-md transition-all duration-300 font-sans">
           <div className="flex justify-between items-start">
             <div>
               <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider block">Underground Stock</span>
-              <span className="text-2xl tabular-nums font-extrabold text-[#1C1C1C] mt-2 block tracking-tight">
+              <span className="text-2xl font-mono tabular-nums font-extrabold text-[#1C1C1C] mt-2 block tracking-tight">
                 {formatLiters(totalStockLitres)}
               </span>
             </div>
@@ -244,23 +240,23 @@ export default function DashboardTab({
               <Database className="w-5 h-5" />
             </div>
           </div>
-          <div className="mt-4 flex items-center gap-2.5 text-xs text-gray-500">
+          <div className="mt-4 flex items-center gap-2.5 text-xs text-gray-500 font-sans">
             <div className="w-full bg-gray-200 h-1.5 rounded-full overflow-hidden">
               <div 
                 className={`h-full rounded-full transition-all duration-500 ${stockPercentage < 35 ? 'bg-amber-500' : 'bg-emerald-500'}`} 
                 style={{ width: `${stockPercentage}%` }}
               />
             </div>
-            <span className="font-bold text-[#1C1C1C]">{stockPercentage}%</span>
+            <span className="font-mono font-bold text-[#1C1C1C]">{stockPercentage}%</span>
           </div>
         </div>
 
         {/* Active Pumpers */}
-        <div className="bg-[#E8F1F5] p-5 rounded-2xl border border-[#D0E2EB] shadow-sm hover:shadow-md transition-all duration-300">
+        <div className="bg-[#E8F1F5] p-5 rounded-2xl border border-[#D0E2EB] shadow-sm hover:shadow-md transition-all duration-300 font-sans">
           <div className="flex justify-between items-start">
             <div>
               <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider block">Pumpers On Duty</span>
-              <span className="text-2xl tabular-nums font-extrabold text-[#1C1C1C] mt-2 block tracking-tight">
+              <span className="text-2xl font-mono tabular-nums font-extrabold text-[#1C1C1C] mt-2 block tracking-tight">
                 {activePumpersCount} Active
               </span>
             </div>
@@ -268,7 +264,7 @@ export default function DashboardTab({
               <Users className="w-5 h-5" />
             </div>
           </div>
-          <div className="mt-3.5 flex items-center gap-1.5 text-xs text-gray-500">
+          <div className="mt-3.5 flex items-center gap-1.5 text-xs text-gray-500 font-sans">
             <span className="font-semibold text-purple-600 bg-purple-100 px-1.5 py-0.5 rounded-full">Active Shift:</span>
             <span>{activeShift ? 'Yes' : 'No Active Shift'}</span>
           </div>

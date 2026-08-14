@@ -43,6 +43,71 @@ export interface FuelTank {
   pricePerLiter: number; // e.g. Rs. or USD
 }
 
+export interface OilTank {
+  id: string;
+  name: string; // e.g. "Oil Tank 01", "Barrel Storage 02"
+  grade: string; // e.g. "Caltex 20W-50", "Lanka 2T", "Hydraulic 68", "Coolant 50/50"
+  capacity: number; // in liters
+  currentLevel: number; // in liters
+  pricePerLiter: number; // in Rs. per liter
+}
+
+export interface PackagedOilItem {
+  id: string;
+  name: string; // e.g. "Caltex Havoline Super 4T 20W-40"
+  category: 'Engine Oil' | '2T/4T Oil' | 'Brake Fluid' | 'Coolant' | 'Gear Oil' | 'Hydraulic' | 'Other';
+  grade: string; // e.g. "20W-40", "2T", "DOT 4", "15W-40"
+  packageSize: string; // e.g. "1L Bottle", "500ml Bottle", "4L Can", "200ml Pouch"
+  currentStock: number; // in bottle/unit count
+  minReorderLevel: number; // alert threshold
+  unitCost: number; // purchase cost in Rs.
+  retailPrice: number; // retail selling price in Rs.
+  barcode?: string;
+  location?: string; // Shelf or Bay location
+}
+
+export interface OilGRNRecord {
+  id: string;
+  grnNumber: string; // e.g. "GRN-OIL-2026-001"
+  date: string;
+  supplier: string;
+  invoiceNumber: string;
+  type: 'bulk' | 'packaged';
+  tankId?: string; // If bulk oil
+  tankName?: string;
+  litersReceived?: number;
+  items?: {
+    itemId: string;
+    itemName: string;
+    packageSize: string;
+    quantity: number;
+    unitCost: number;
+    totalCost: number;
+  }[];
+  totalAmount: number; // in Rs.
+  receivedBy: string;
+  notes?: string;
+}
+
+export interface PumperOilAllocation {
+  id: string;
+  date: string;
+  shiftId?: string;
+  shiftName?: string;
+  pumperId: string;
+  pumperName: string;
+  itemId: string;
+  itemName: string;
+  packageSize: string;
+  unitPrice: number; // selling price
+  issuedQty: number; // quantity issued
+  returnedQty: number; // quantity returned unsold
+  soldQty: number; // (issuedQty - returnedQty)
+  totalAmount: number; // (soldQty * unitPrice) in Rs.
+  status: 'Issued' | 'Returned' | 'Reconciled';
+  notes?: string;
+}
+
 export interface PumpMachine {
   id: string;
   name: string;
@@ -168,6 +233,23 @@ export interface CreditPayment {
   amount: number; // in Rs.
   paymentMethod: 'Cash' | 'Cheque' | 'Bank Transfer';
   referenceNumber: string;
+  notes?: string;
+}
+
+export interface TankDipLog {
+  id: string;
+  date: string;
+  tankId: string;
+  tankName: string;
+  fuelType: string;
+  openingDip: number;
+  closingDip: number;
+  bowserReceipts: number;
+  pumpSales: number;
+  expectedStock: number;
+  varianceLiters: number;
+  variancePercentage: number;
+  recordedBy?: string;
   notes?: string;
 }
 

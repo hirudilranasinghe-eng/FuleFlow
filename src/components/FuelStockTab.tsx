@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   Plus, Calendar, ShieldCheck, AlertTriangle, Truck, 
   DollarSign, RefreshCcw, Info, Fuel, X, CheckCircle2, Trash2,
@@ -108,6 +108,11 @@ export default function FuelStockTab({
   // Compute total volume summary
   const totalVolume = tanks.reduce((acc, t) => acc + t.currentLevel, 0);
   const totalCapacity = tanks.reduce((acc, t) => acc + t.capacity, 0);
+
+  // Natural numerical sorting of tanks (Tank 01, Tank 02, etc.)
+  const sortedTanks = useMemo(() => {
+    return [...tanks].sort((a, b) => (a.name || a.id || '').localeCompare(b.name || b.id || '', undefined, { numeric: true, sensitivity: 'base' }));
+  }, [tanks]);
 
   const formatLiters = (val: number) => {
     return new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 }).format(val) + ' L';
@@ -279,7 +284,7 @@ export default function FuelStockTab({
       {/* Tab Title Block */}
       <div id="stock-header-block" className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-[#1C1C1C] tracking-tight font-sans">
+          <h1 className="text-lg font-bold text-slate-900 tracking-tight font-sans">
             Underground Stock Control
           </h1>
           <p className="text-gray-500 text-xs sm:text-sm mt-0.5">
@@ -305,7 +310,7 @@ export default function FuelStockTab({
 
       {/* Tank Gauges Grid (Beautiful visual representations of tanks!) */}
       <div id="tanks-visual-grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {tanks.map((tank) => {
+        {sortedTanks.map((tank) => {
           const fillPercent = Math.round((tank.currentLevel / tank.capacity) * 100);
           const isLowStock = fillPercent < 40;
           const isCritical = fillPercent < 15;
@@ -391,8 +396,8 @@ export default function FuelStockTab({
 
                   {/* Centered Volume Overlay */}
                   <div className="z-10 text-center select-none px-3 py-1.5 bg-gray-50/95 backdrop-blur-md rounded-lg shadow-sm border border-gray-200 mb-2 transition-transform duration-300 group-hover:scale-105">
-                    <span className="text-base tabular-nums font-extrabold text-[#1C1C1C] block leading-tight">{fillPercent}%</span>
-                    <span className="text-[10px] text-gray-500 font-sans font-medium">{formatLiters(tank.currentLevel)}</span>
+                    <span className="text-base font-mono tabular-nums font-extrabold text-[#1C1C1C] block leading-tight">{fillPercent}%</span>
+                    <span className="text-[10px] text-gray-500 font-mono font-medium">{formatLiters(tank.currentLevel)}</span>
                   </div>
                 </div>
 
@@ -412,7 +417,7 @@ export default function FuelStockTab({
                 {/* Capacity stats */}
                 <div className="flex justify-between items-center text-xs text-gray-500 border-b border-gray-100 py-1.5">
                   <span>Tank Capacity:</span>
-                  <span className="tabular-nums font-semibold text-[#1C1C1C]">{formatLiters(tank.capacity)}</span>
+                  <span className="font-mono tabular-nums font-semibold text-[#1C1C1C]">{formatLiters(tank.capacity)}</span>
                 </div>
               </div>
 
@@ -420,7 +425,7 @@ export default function FuelStockTab({
               <div className="mt-2 pt-2 flex items-center justify-between border-t border-gray-100">
                 <div>
                   <span className="text-[9px] text-gray-400 block font-bold uppercase tracking-wider">Unit Price</span>
-                  <span className="tabular-nums font-extrabold text-base text-[#1C1C1C] block leading-tight">
+                  <span className="font-mono tabular-nums font-extrabold text-base text-[#1C1C1C] block leading-tight">
                     {formatCurrency(tank.pricePerLiter)} <span className="text-[10px] text-gray-500 font-sans font-medium">/ L</span>
                   </span>
                 </div>
@@ -462,16 +467,16 @@ export default function FuelStockTab({
                 </label>
                 <select
                   id="purchase-target-tank"
-                  value={selectedTankId || (tanks[0]?.id || '')}
+                  value={selectedTankId || (sortedTanks[0]?.id || '')}
                   onChange={(e) => {
                     const tId = e.target.value;
                     setSelectedTankId(tId);
-                    const tank = tanks.find(t => t.id === tId);
+                    const tank = sortedTanks.find(t => t.id === tId);
                     if (tank) setDeliveryFuelType(tank.fuelType);
                   }}
                   className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-[#1C1C1C] text-sm font-semibold focus:outline-none focus:border-blue-500 cursor-pointer"
                 >
-                  {tanks.map((t) => {
+                  {sortedTanks.map((t) => {
                     const freeSpace = Math.max(0, t.capacity - t.currentLevel);
                     return (
                       <option key={t.id} value={t.id}>

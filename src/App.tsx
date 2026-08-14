@@ -4,19 +4,29 @@
  */
 import { useState, useEffect, useRef } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Info, AlertCircle, Database, ShieldCheck } from 'lucide-react';
+import { Info, AlertCircle, Database, ShieldCheck, LogOut, Building2, Calendar } from 'lucide-react';
+
+function getInitials(name?: string): string {
+  if (!name) return 'RA';
+  const parts = name.trim().split(' ').filter(Boolean);
+  if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
 import Sidebar from './components/Sidebar';
 import DashboardTab from './components/DashboardTab';
 import ShiftManagementTab from './components/ShiftManagementTab';
 import FuelStockTab from './components/FuelStockTab';
+import OilStorageTab from './components/OilStorageTab';
 import DailySalesTab from './components/DailySalesTab';
 import ReportsTab from './components/ReportsTab';
+import ManualDipTab from './components/ManualDipTab';
 import CustomersTab from './components/CustomersTab';
 import EmployeesTab from './components/EmployeesTab';
 import AdminControlTab from './components/AdminControlTab';
 import PriceManagementTab from './components/PriceManagementTab';
+import SettingsTab from './components/SettingsTab';
 import LoginPage from './components/LoginPage';
-import { AuthUser, Employee, FuelTank, Pump, PumpMachine, Shift, StockDelivery, PriceSchedule, Customer, CreditTransaction, CreditPayment, resolveUserRole } from './types';
+import { AuthUser, Employee, FuelTank, OilTank, Pump, PumpMachine, Shift, StockDelivery, PriceSchedule, Customer, CreditTransaction, CreditPayment, resolveUserRole } from './types';
 import { supabase, getTanksTableName, setTanksTableName } from './lib/supabase';
 import { upsertPumpReadings, syncCreditAndCardSales, updateNozzleMeterCarryover } from './lib/supabaseClient';
 
@@ -35,6 +45,15 @@ export default function App() {
 
   // Navigation active tab
   const [activeTab, setActiveTab] = useState<string>('dashboard');
+  const [reportSubTab, setReportSubTab] = useState<string>('shift-meter');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
+
+  const handleSetActiveTab = (tab: string, subTab?: string) => {
+    setActiveTab(tab);
+    if (subTab) {
+      setReportSubTab(subTab);
+    }
+  };
   const [dbError, setDbError] = useState<string | null>(null);
   const [isRlsActive, setIsRlsActive] = useState<boolean>(false);
   const isInitialLoad = useRef(true);
@@ -178,15 +197,39 @@ export default function App() {
     } catch (_) {}
     return [];
   });
+  const sortTanksNaturally = (tankList: FuelTank[]): FuelTank[] => {
+    return [...tankList].sort((a, b) => (a.name || a.id || '').localeCompare(b.name || b.id || '', undefined, { numeric: true, sensitivity: 'base' }));
+  };
+
   const [tanks, setTanks] = useState<FuelTank[]>(() => {
     try {
       const stored = localStorage.getItem('fms_tanks');
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && !parsed.some((t: any) => t.id === 'tank-petrol92')) return parsed;
+        if (Array.isArray(parsed) && !parsed.some((t: any) => t.id === 'tank-petrol92')) {
+          return [...parsed].sort((a: any, b: any) => (a.name || a.id || '').localeCompare(b.name || b.id || '', undefined, { numeric: true, sensitivity: 'base' }));
+        }
       }
     } catch (_) {}
     return [];
+  });
+
+  const [oilTanks, setOilTanks] = useState<OilTank[]>(() => {
+    try {
+      const stored = localStorage.getItem('fms_oil_tanks');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return [...parsed].sort((a: any, b: any) => (a.name || a.id || '').localeCompare(b.name || b.id || '', undefined, { numeric: true, sensitivity: 'base' }));
+        }
+      }
+    } catch (_) {}
+    return [
+      { id: 'oil-tank-01', name: 'Oil Tank 01', grade: 'Caltex 20W-50', capacity: 1000, currentLevel: 680, pricePerLiter: 2450 },
+      { id: 'oil-tank-02', name: 'Oil Tank 02', grade: 'Lanka 2T Super', capacity: 500, currentLevel: 340, pricePerLiter: 1850 },
+      { id: 'oil-tank-03', name: 'Barrel Storage 01', grade: 'Hydraulic 68', capacity: 210, currentLevel: 145, pricePerLiter: 1950 },
+      { id: 'oil-tank-04', name: 'Coolant Bay 01', grade: 'Radiator Coolant 50/50', capacity: 500, currentLevel: 290, pricePerLiter: 1200 },
+    ];
   });
   const [pumpMachines, setPumpMachines] = useState<PumpMachine[]>(() => {
     try {
@@ -419,10 +462,26 @@ export default function App() {
           const mappedTanks = tanksData.map(t => ({
             id: t.id, fuelType: t.fueltype, name: t.name, capacity: t.capacity, currentLevel: t.currentlevel, pricePerLiter: t.priceperliter
           }));
-          setTanks(mappedTanks as FuelTank[]);
+          setTanks(sortTanksNaturally(mappedTanks as FuelTank[]));
         } else {
           setTanks([]);
         }
+
+        // Fetch oil tanks if table exists
+        try {
+          const { data: oilTanksData } = await supabase.from('oil_tanks').select('*');
+          if (oilTanksData && oilTanksData.length > 0) {
+            const mappedOilTanks: OilTank[] = oilTanksData.map((ot: any) => ({
+              id: ot.id,
+              name: ot.name,
+              grade: ot.grade || ot.oil_grade || 'Caltex 20W-50',
+              capacity: Number(ot.capacity) || 1000,
+              currentLevel: Number(ot.current_level ?? ot.currentlevel) || 0,
+              pricePerLiter: Number(ot.price_per_liter ?? ot.priceperliter) || 0
+            }));
+            setOilTanks([...mappedOilTanks].sort((a, b) => (a.name || a.id || '').localeCompare(b.name || b.id || '', undefined, { numeric: true, sensitivity: 'base' })));
+          }
+        } catch (_) {}
 
         // Fetch pump_machines / machines table if available
         try {
@@ -1093,10 +1152,55 @@ export default function App() {
   return (
     <div id="app-root-layout" className="flex min-h-screen bg-[#F4F7F6] text-[#1C1C1C] font-sans antialiased tabular-nums">
       {/* Sidebar - fixed left panel */}
-      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} user={user} onLogout={handleLogout} />
+      <Sidebar 
+        activeTab={activeTab} 
+        setActiveTab={handleSetActiveTab} 
+        activeReportSubTab={reportSubTab}
+        user={user} 
+        onLogout={handleLogout} 
+        isCollapsed={sidebarCollapsed}
+        onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+      />
 
       {/* Main Panel Content Area */}
-      <div id="main-content-panel" className="flex-1 ml-64 p-8 min-h-screen overflow-x-hidden">
+      <div id="main-content-panel" className={`flex-1 ${sidebarCollapsed ? 'ml-20' : 'ml-64'} px-6 pt-3 pb-8 min-h-screen overflow-x-hidden transition-all duration-300 ease-in-out`}>
+        {/* Global Ultra-Compact Sticky Top Header */}
+        <header id="app-top-header" className="sticky top-0 z-40 bg-[#F4F7F6]/95 backdrop-blur-sm border-b border-slate-200/80 pb-3 pt-2 px-6 -mx-6 mb-4 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-white border border-slate-200/90 rounded-lg shadow-2xs text-[11px] font-extrabold text-slate-800 font-sans">
+              <Building2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+              <span>Samse Auto Mart (Pvt) Ltd</span>
+            </div>
+
+            {/* Date inline text */}
+            <div className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
+              <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              <span>{new Date().toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}</span>
+            </div>
+          </div>
+
+          {/* Ultra-Compact User Profile Badge Pill & Logout */}
+          <div id="header-user-profile" className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 pl-1 pr-1.5 py-0.5 bg-white border border-slate-200/90 rounded-full shadow-2xs hover:border-slate-300 transition-all font-sans">
+              <div className={`w-6 h-6 rounded-full ${user?.avatarColor || 'bg-emerald-600'} text-white flex items-center justify-center font-extrabold text-[10px] shrink-0 shadow-2xs`}>
+                {getInitials(user?.name)}
+              </div>
+              <div className="flex flex-col text-left leading-none pr-0.5">
+                <span className="font-extrabold text-slate-900 text-[11px]">{user?.name || 'Rumesh Anjana'}</span>
+                <span className="text-[9px] font-semibold text-slate-500 mt-0.5">{user?.role || 'System Admin'}</span>
+              </div>
+              <div className="h-3.5 w-px bg-slate-200 mx-0.5" />
+              <button
+                onClick={handleLogout}
+                className="p-0.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-all cursor-pointer"
+                title="Sign Out"
+              >
+                <LogOut className="w-3 h-3" />
+              </button>
+            </div>
+          </div>
+        </header>
+
         {isRlsActive && (
           <div id="supabase-rls-alert" className="mb-6 p-4 bg-amber-50 border border-amber-200 text-amber-900 rounded-2xl text-xs flex items-start gap-3 animate-fade-in relative shadow-sm">
             <ShieldCheck className="w-4.5 h-4.5 text-amber-600 flex-shrink-0 mt-0.5" />
@@ -1197,6 +1301,14 @@ export default function App() {
               />
             )}
 
+            {activeTab === 'oil-storage' && (
+              <OilStorageTab
+                oilTanks={oilTanks}
+                setOilTanks={setOilTanks}
+                employees={employees}
+              />
+            )}
+
             {activeTab === 'sales' && (
               <DailySalesTab
                 shiftHistory={shiftHistory}
@@ -1207,8 +1319,16 @@ export default function App() {
               />
             )}
 
+            {activeTab === 'manual-dip-record' && (
+              <ManualDipTab
+                tanks={tanks}
+              />
+            )}
+
             {activeTab === 'reports' && (
               <ReportsTab
+                activeSubTab={reportSubTab as any}
+                onSubTabChange={setReportSubTab as any}
                 shiftHistory={shiftHistory}
                 deliveries={deliveries}
                 tanks={tanks}
@@ -1236,6 +1356,8 @@ export default function App() {
               <AdminControlTab
                 tanks={tanks}
                 setTanks={setTanks}
+                oilTanks={oilTanks}
+                setOilTanks={setOilTanks}
                 pumps={pumps}
                 setPumps={setPumps}
                 pumpMachines={pumpMachines}
@@ -1252,6 +1374,8 @@ export default function App() {
               <AdminControlTab
                 tanks={tanks}
                 setTanks={setTanks}
+                oilTanks={oilTanks}
+                setOilTanks={setOilTanks}
                 pumps={pumps}
                 setPumps={setPumps}
                 pumpMachines={pumpMachines}
@@ -1264,10 +1388,27 @@ export default function App() {
               />
             )}
 
+            {activeTab === 'settings' && (
+              <SettingsTab
+                tanks={tanks}
+                setTanks={setTanks}
+                oilTanks={oilTanks}
+                employees={employees}
+                shiftHistory={shiftHistory}
+                deliveries={deliveries}
+                customers={customers}
+                creditTransactions={creditTransactions}
+                payments={payments}
+                onResetAllData={handleResetAllData}
+              />
+            )}
+
             {activeTab === 'employees' && (
               <AdminControlTab
                 tanks={tanks}
                 setTanks={setTanks}
+                oilTanks={oilTanks}
+                setOilTanks={setOilTanks}
                 pumps={pumps}
                 setPumps={setPumps}
                 employees={employees}

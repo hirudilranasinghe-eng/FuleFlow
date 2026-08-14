@@ -21,6 +21,16 @@ CREATE TABLE fuel_tanks (
     priceperliter NUMERIC NOT NULL
 );
 
+-- Oil (Lubricants) Storage Tanks Table
+CREATE TABLE oil_tanks (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    grade TEXT NOT NULL,
+    capacity NUMERIC NOT NULL,
+    currentlevel NUMERIC NOT NULL,
+    priceperliter NUMERIC NOT NULL
+);
+
 -- Pumps Table
 CREATE TABLE pumps (
     id TEXT PRIMARY KEY,
@@ -83,6 +93,7 @@ CREATE TABLE price_schedules (
 -- Disable Row Level Security (RLS) for all tables to allow simple public access
 ALTER TABLE employees DISABLE ROW LEVEL SECURITY;
 ALTER TABLE fuel_tanks DISABLE ROW LEVEL SECURITY;
+ALTER TABLE oil_tanks DISABLE ROW LEVEL SECURITY;
 ALTER TABLE pumps DISABLE ROW LEVEL SECURITY;
 ALTER TABLE shifts DISABLE ROW LEVEL SECURITY;
 ALTER TABLE pump_readings DISABLE ROW LEVEL SECURITY;
@@ -106,6 +117,9 @@ CREATE POLICY "Enable all access for employees" ON employees FOR ALL TO public U
 
 DROP POLICY IF EXISTS "Enable all access for fuel_tanks" ON fuel_tanks;
 CREATE POLICY "Enable all access for fuel_tanks" ON fuel_tanks FOR ALL TO public USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Enable all access for oil_tanks" ON oil_tanks;
+CREATE POLICY "Enable all access for oil_tanks" ON oil_tanks FOR ALL TO public USING (true) WITH CHECK (true);
 
 -- Permissive policy for fuel_tank if it exists
 DO $$

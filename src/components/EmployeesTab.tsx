@@ -156,7 +156,7 @@ export default function EmployeesTab({ employees, setEmployees }: EmployeesTabPr
       {/* Page Header */}
       <div id="emp-header-section" className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-[#1C1C1C] tracking-tight font-sans">
+          <h1 className="text-lg font-bold text-slate-900 tracking-tight font-sans">
             Staff & Employee Roster
           </h1>
           <p className="text-gray-500 text-xs sm:text-sm mt-0.5">

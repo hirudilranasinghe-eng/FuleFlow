@@ -1,5 +1,5 @@
 import { supabase, getTanksTableName } from './supabase';
-import { PumpReading, FuelTank } from '../types';
+import { PumpReading, FuelTank, OilTank } from '../types';
 
 export { supabase };
 
@@ -597,6 +597,58 @@ export async function deleteFuelTank(client: any, tankId: string) {
     return { data, error };
   } catch (err: any) {
     console.warn("deleteFuelTank sync notice:", err?.message || err);
+    return { data: null, error: err };
+  }
+}
+
+/**
+ * Syncs an Oil (Lubricant) Storage Tank to Supabase 'oil_tanks' table.
+ */
+export async function saveOilTank(client: any, tank: OilTank) {
+  if (!tank || !tank.id) return { data: null, error: null };
+  const snakePayload = {
+    id: tank.id,
+    name: tank.name,
+    grade: tank.grade,
+    capacity: tank.capacity,
+    current_level: tank.currentLevel,
+    price_per_liter: tank.pricePerLiter
+  };
+  const lowerPayload = {
+    id: tank.id,
+    name: tank.name,
+    grade: tank.grade,
+    capacity: tank.capacity,
+    currentlevel: tank.currentLevel,
+    priceperliter: tank.pricePerLiter
+  };
+
+  try {
+    let { data, error } = await client.from('oil_tanks').upsert([lowerPayload]);
+    if (error) {
+      const retry = await client.from('oil_tanks').upsert([snakePayload]);
+      if (!retry.error) {
+        data = retry.data;
+        error = null;
+      }
+    }
+    return { data, error };
+  } catch (err: any) {
+    console.warn("saveOilTank sync notice:", err?.message || err);
+    return { data: null, error: err };
+  }
+}
+
+/**
+ * Deletes an Oil Storage Tank from Supabase 'oil_tanks' table.
+ */
+export async function deleteOilTank(client: any, tankId: string) {
+  if (!tankId) return { data: null, error: null };
+  try {
+    const { data, error } = await client.from('oil_tanks').delete().eq('id', tankId);
+    return { data, error };
+  } catch (err: any) {
+    console.warn("deleteOilTank sync notice:", err?.message || err);
     return { data: null, error: err };
   }
 }
