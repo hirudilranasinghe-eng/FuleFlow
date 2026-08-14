@@ -25,3 +25,59 @@
   border: 1px solid rgba(0, 123, 255, 0.2);
   box-shadow: 0 4px 20px rgba(0, 123, 255, 0.08);
 }
+
+/* ========================================================================= */
+/* STRICT PRINT STYLESHEET FOR RECEIPTS & INVOICES */
+/* ========================================================================= */
+@media print {
+  @page {
+    size: auto;
+    margin: 8mm 12mm;
+  }
+
+  body {
+    background-color: #FFFFFF !important;
+    background: #FFFFFF !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* 1. Strict Print Isolation: Hide all page elements */
+  body * {
+    visibility: hidden;
+  }
+
+  /* 2. Show only the printable receipt containers and their children */
+  #printable-purchase-receipt,
+  #printable-purchase-receipt *,
+  #printable-sample-receipt,
+  #printable-sample-receipt * {
+    visibility: visible !important;
+  }
+
+  /* 3. Clean Full-Page Receipt Layout on Print */
+  #printable-purchase-receipt,
+  #printable-sample-receipt {
+    position: fixed !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 100% !important;
+    margin: 0 !important;
+    padding: 20px !important;
+    box-shadow: none !important;
+    border: none !important;
+    background: #FFFFFF !important;
+    z-index: 999999 !important;
+  }
+
+  /* 4. Hide print-hidden classes and interface controls */
+  .print\:hidden {
+    display: none !important;
+  }
+}
+

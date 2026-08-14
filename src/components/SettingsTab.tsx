@@ -1228,8 +1228,8 @@ export default function SettingsTab({
             {/* ------------------------------------------------------------- */}
             {/* RIGHT PANEL: LIVE TEMPLATE PREVIEW (1:1 Output Scale) */}
             {/* ------------------------------------------------------------- */}
-            <div className="xl:col-span-7 space-y-3 sticky top-4">
-              <div className="bg-slate-900 text-white rounded-2xl p-4 flex items-center justify-between shadow-sm">
+            <div className="xl:col-span-7 space-y-3 sticky top-4 print:static print:p-0">
+              <div className="bg-slate-900 text-white rounded-2xl p-4 flex items-center justify-between shadow-sm print:hidden">
                 <div className="flex items-center gap-2.5">
                   <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></div>
                   <span className="font-bold text-xs uppercase tracking-wider text-slate-200">
@@ -1253,10 +1253,11 @@ export default function SettingsTab({
               </div>
 
               {/* Printable Scale Preview Container */}
-              <div className="bg-slate-200/70 p-3 sm:p-4 rounded-2xl border border-slate-300/80 overflow-x-auto shadow-inner">
+              <div className="bg-slate-200/70 p-3 sm:p-4 rounded-2xl border border-slate-300/80 overflow-x-auto shadow-inner print:p-0 print:bg-transparent print:border-none print:shadow-none">
                 <div 
+                  id="printable-sample-receipt"
                   ref={previewPrintRef}
-                  className="bg-white rounded-xl shadow-lg border border-slate-300 p-6 sm:p-8 space-y-5 font-sans mx-auto transition-all"
+                  className="bg-white rounded-xl shadow-lg border border-slate-300 p-6 sm:p-8 space-y-5 font-sans mx-auto transition-all print:shadow-none print:border-none print:p-0 print:m-0"
                   style={{ minWidth: '600px', maxWidth: '900px' }}
                 >
                   {/* 1. Exact Header & Branding Styling */}

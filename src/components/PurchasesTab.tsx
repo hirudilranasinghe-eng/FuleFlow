@@ -1496,11 +1496,11 @@ export default function PurchasesTab({
       {isReceiptModalOpen && selectedReceiptPurchase && (
         <div 
           id="purchase-invoice-modal-overlay" 
-          className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4 overflow-y-auto animate-fade-in print:p-0 print:bg-white print:static print:inset-auto"
+          className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4 overflow-y-auto animate-fade-in print:p-0 print:bg-transparent print:backdrop-blur-none print:static print:inset-auto"
         >
           <div 
             id="purchase-invoice-modal-card" 
-            className="bg-white rounded-2xl max-w-[900px] w-full shadow-2xl border border-gray-200 overflow-hidden my-auto print:border-none print:shadow-none print:max-w-none print:w-full print:rounded-none"
+            className="bg-white rounded-2xl max-w-[900px] w-full shadow-2xl border border-gray-200 overflow-hidden my-auto print:border-none print:shadow-none print:max-w-none print:w-full print:rounded-none print:bg-transparent print:m-0"
           >
             {/* Modal Top Control Bar (Hidden when printing) */}
             <div className="px-6 py-3.5 bg-slate-900 text-white flex items-center justify-between print:hidden">
@@ -1535,6 +1535,7 @@ export default function PurchasesTab({
 
             {/* Printable Document Sheet (900px format) */}
             <div 
+              id="printable-purchase-receipt"
               ref={receiptPrintRef}
               className="p-6 sm:p-10 bg-white text-slate-900 space-y-6 font-sans print:p-0 print:m-0"
               style={{ minHeight: '600px' }}
