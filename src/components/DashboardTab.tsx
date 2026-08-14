@@ -191,7 +191,7 @@ export default function DashboardTab({
           <div className="flex justify-between items-start">
             <div>
               <span className="text-xs font-bold text-gray-500 uppercase tracking-wider block">Today's Sales Revenue</span>
-              <span className="text-3xl font-mono tabular-nums font-extrabold text-[#1C1C1C] mt-2 block tracking-tight">
+              <span className="text-3xl tabular-nums font-extrabold text-[#1C1C1C] mt-2 block tracking-tight">
                 {formatCurrency(todayRevenue)}
               </span>
             </div>
@@ -200,7 +200,7 @@ export default function DashboardTab({
             </div>
           </div>
           <div className="mt-3.5 flex items-center gap-1.5 text-xs text-gray-500 font-sans">
-            <span className="text-emerald-600 font-mono font-bold flex items-center gap-0.5 bg-emerald-100 px-1.5 py-0.5 rounded-full">
+            <span className="text-emerald-600 font-bold flex items-center gap-0.5 bg-emerald-100 px-1.5 py-0.5 rounded-full">
               <ArrowUpRight className="w-3 h-3" />
               +12.4%
             </span>
@@ -213,7 +213,7 @@ export default function DashboardTab({
           <div className="flex justify-between items-start">
             <div>
               <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider block">Today's Fuel Dispensed</span>
-              <span className="text-2xl font-mono tabular-nums font-extrabold text-[#1C1C1C] mt-2 block tracking-tight">
+              <span className="text-2xl tabular-nums font-extrabold text-[#1C1C1C] mt-2 block tracking-tight">
                 {formatLiters(todayFuelSold)}
               </span>
             </div>
@@ -232,7 +232,7 @@ export default function DashboardTab({
           <div className="flex justify-between items-start">
             <div>
               <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider block">Underground Stock</span>
-              <span className="text-2xl font-mono tabular-nums font-extrabold text-[#1C1C1C] mt-2 block tracking-tight">
+              <span className="text-2xl tabular-nums font-extrabold text-[#1C1C1C] mt-2 block tracking-tight">
                 {formatLiters(totalStockLitres)}
               </span>
             </div>
@@ -247,7 +247,7 @@ export default function DashboardTab({
                 style={{ width: `${stockPercentage}%` }}
               />
             </div>
-            <span className="font-mono font-bold text-[#1C1C1C]">{stockPercentage}%</span>
+            <span className="font-bold text-[#1C1C1C]">{stockPercentage}%</span>
           </div>
         </div>
 
@@ -256,7 +256,7 @@ export default function DashboardTab({
           <div className="flex justify-between items-start">
             <div>
               <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider block">Pumpers On Duty</span>
-              <span className="text-2xl font-mono tabular-nums font-extrabold text-[#1C1C1C] mt-2 block tracking-tight">
+              <span className="text-2xl tabular-nums font-extrabold text-[#1C1C1C] mt-2 block tracking-tight">
                 {activePumpersCount} Active
               </span>
             </div>

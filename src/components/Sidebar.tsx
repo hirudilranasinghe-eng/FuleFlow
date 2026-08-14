@@ -267,11 +267,11 @@ export default function Sidebar({
       {/* Minimal Footer */}
       <div id="sidebar-footer" className="p-3 border-t border-gray-100/80 text-center">
         {!isCollapsed ? (
-          <p className="text-[10px] font-mono font-medium text-gray-400">
+          <p className="text-[10px] font-medium text-gray-400">
             FuelFlow ERP v1.0.0
           </p>
         ) : (
-          <p className="text-[9px] font-mono font-bold text-gray-400">v1.0</p>
+          <p className="text-[9px] font-bold text-gray-400">v1.0</p>
         )}
       </div>
     </div>

@@ -1001,7 +1001,7 @@ export default function AdminControlTab({
               className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm self-start sm:self-auto"
             >
               <Plus className="w-4 h-4" />
-              <span>+ Add Oil Tank</span>
+              <span>Add Oil Tank</span>
             </button>
           </div>
 
@@ -1014,7 +1014,7 @@ export default function AdminControlTab({
               <div className="space-y-1">
                 <h3 className="text-sm font-bold text-[#1C1C1C]">No Oil & Lubricant Tanks Configured</h3>
                 <p className="text-xs text-gray-500 max-w-sm mx-auto">
-                  Click '+ Add Oil Tank' to register bulk oil storage, lubricant drums, or hydraulic fluid tanks.
+                  Click 'Add Oil Tank' to register bulk oil storage, lubricant drums, or hydraulic fluid tanks.
                 </p>
               </div>
               <button
@@ -1022,7 +1022,7 @@ export default function AdminControlTab({
                 className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm"
               >
                 <Plus className="w-4 h-4" />
-                <span>+ Add Oil Tank</span>
+                <span>Add Oil Tank</span>
               </button>
             </div>
           ) : (
@@ -1068,7 +1068,7 @@ export default function AdminControlTab({
                     <div className="space-y-1">
                       <div className="flex justify-between text-xs font-bold">
                         <span className="text-gray-500">Current Volume Level</span>
-                        <div className="flex items-center gap-1.5 font-mono tabular-nums">
+                        <div className="flex items-center gap-1.5 tabular-nums">
                           <span className={`text-xs font-extrabold ${pct < 20 ? 'text-rose-600' : pct < 40 ? 'text-amber-600' : 'text-[#1C1C1C]'}`}>
                             {pct}%
                           </span>
@@ -1084,8 +1084,8 @@ export default function AdminControlTab({
                         />
                       </div>
                       <div className="flex justify-between text-[11px] text-gray-500 font-medium">
-                        <span>Current: <strong className="text-gray-900 font-mono tabular-nums">{oilTank.currentLevel.toLocaleString()} L</strong></span>
-                        <span>Capacity: <strong className="text-gray-900 font-mono tabular-nums">{oilTank.capacity.toLocaleString()} L</strong></span>
+                        <span>Current: <strong className="text-gray-900 tabular-nums">{oilTank.currentLevel.toLocaleString()} L</strong></span>
+                        <span>Capacity: <strong className="text-gray-900 tabular-nums">{oilTank.capacity.toLocaleString()} L</strong></span>
                       </div>
                     </div>
 
@@ -1093,13 +1093,13 @@ export default function AdminControlTab({
                     <div className="grid grid-cols-2 gap-2 pt-2 border-t border-gray-100 text-xs">
                       <div className="bg-gray-50/70 p-2 rounded-lg border border-gray-100/80">
                         <span className="text-[10px] text-gray-400 uppercase tracking-wider block font-bold">Rate / Liter</span>
-                        <span className="font-mono font-bold text-slate-900 tabular-nums text-xs">
+                        <span className="font-bold text-slate-900 tabular-nums text-xs">
                           {formatCurrency(oilTank.pricePerLiter || 0)}
                         </span>
                       </div>
                       <div className="bg-gray-50/70 p-2 rounded-lg border border-gray-100/80 text-right">
                         <span className="text-[10px] text-gray-400 uppercase tracking-wider block font-bold">Total Stock Value</span>
-                        <span className="font-mono font-bold text-emerald-700 tabular-nums text-xs">
+                        <span className="font-bold text-emerald-700 tabular-nums text-xs">
                           {formatCurrency(totalStockVal)}
                         </span>
                       </div>
@@ -1195,7 +1195,7 @@ export default function AdminControlTab({
                                 <div className="flex items-start justify-between border-b border-gray-100 pb-2">
                                   <div>
                                     <h4 className="font-bold text-[#1C1C1C] text-xs">{nozzle.name}</h4>
-                                    <span className="text-[10px] text-gray-400 font-mono">{nozzle.id}</span>
+                                    <span className="text-[10px] text-gray-400 ">{nozzle.id}</span>
                                   </div>
 
                                   <div className="flex items-center gap-1">
@@ -1320,7 +1320,7 @@ export default function AdminControlTab({
                                 {emp.role}
                               </span>
                             </td>
-                            <td className="py-3 px-4 font-mono text-gray-600 text-xs">
+                            <td className="py-3 px-4 text-gray-600 text-xs">
                               <div className="flex items-center gap-1.5">
                                 <Phone className="w-3.5 h-3.5 text-gray-400" />
                                 <span>{emp.phone}</span>
@@ -1718,7 +1718,7 @@ export default function AdminControlTab({
                   <span>Copy SQL</span>
                 </button>
               </div>
-              <code className="block bg-white p-2 rounded border border-blue-200 text-blue-950 font-mono text-[11px] overflow-x-auto select-all">
+              <code className="block bg-white p-2 rounded border border-blue-200 text-blue-950 text-[11px] overflow-x-auto select-all">
                 ALTER TABLE pumps ADD COLUMN IF NOT EXISTS tankid TEXT;
               </code>
             </div>
@@ -1972,7 +1972,7 @@ export default function AdminControlTab({
                   placeholder="e.g. 0771234567"
                   value={empFormPhone}
                   onChange={(e) => setEmpFormPhone(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] focus:outline-none focus:border-blue-500 font-mono"
+                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] focus:outline-none focus:border-blue-500 "
                 />
               </div>
             </div>

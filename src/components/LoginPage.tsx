@@ -240,7 +240,7 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
         {/* Left Side Footer */}
         <div className="relative z-10 w-full pt-4 border-t border-slate-200/80 flex items-center justify-between text-xs text-slate-500 font-medium">
           <span>© {new Date().getFullYear()} FuelFlow Systems</span>
-          <span className="font-mono text-slate-600">FuelFlow ERP v1.0.0</span>
+          <span className="text-slate-600">FuelFlow ERP v1.0.0</span>
         </div>
       </div>
 
@@ -368,7 +368,7 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
 
           {/* Bottom Footer Info */}
           <div className="mt-8 pt-4 border-t border-slate-100 text-center">
-            <p className="text-xs text-slate-400 font-medium font-mono">
+            <p className="text-xs text-slate-400 font-medium ">
               FuelFlow ERP v1.0.0
             </p>
           </div>
@@ -392,7 +392,7 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
                 For security reasons, station access credentials are managed by the System Administrator at Samse Auto Mart.
               </p>
               <div className="mt-3 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800">
-                Contact: <span className="text-emerald-700 font-mono">admin@fuelflow.lk</span>
+                Contact: <span className="text-emerald-700 ">admin@fuelflow.lk</span>
               </div>
             </div>
             <button

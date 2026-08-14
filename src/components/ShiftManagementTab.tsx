@@ -1654,12 +1654,12 @@ export default function ShiftManagementTab({
                 <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 block">
                   Total Expected Cash Revenue
                 </span>
-                <span className="text-4xl font-mono tabular-nums font-extrabold mt-3 block tracking-tight">
+                <span className="text-4xl tabular-nums font-extrabold mt-3 block tracking-tight">
                   {formatCurrency(stats.totalNetSales)}
                 </span>
               </div>
               <div className="mt-6 pt-4 border-t border-gray-200 flex items-center justify-between text-xs text-gray-500">
-                <span>Active Shift ID: <strong className="text-[#1C1C1C] font-mono tabular-nums font-semibold">{activeShift.id}</strong></span>
+                <span>Active Shift ID: <strong className="text-[#1C1C1C] tabular-nums font-semibold">{activeShift.id}</strong></span>
                 <span className="bg-white px-2 py-0.5 rounded-lg text-[10px] font-semibold text-blue-600 animate-pulse uppercase border border-blue-100 shadow-sm">
                   Live Syncing
                 </span>
@@ -1677,10 +1677,10 @@ export default function ShiftManagementTab({
                   {/* Petrol 92 */}
                   <div className="p-3 bg-blue-500/10 rounded-xl border border-blue-500/20">
                     <span className="text-[10px] font-bold text-blue-600 uppercase block">Petrol 92</span>
-                    <span className="text-lg font-mono tabular-nums font-bold text-[#1C1C1C] mt-1 block">
+                    <span className="text-lg tabular-nums font-bold text-[#1C1C1C] mt-1 block">
                       {formatLiters(fuelTypeTotals['Petrol 92'].net)}
                     </span>
-                    <span className="text-[10px] text-gray-500 font-mono tabular-nums mt-0.5 block">
+                    <span className="text-[10px] text-gray-500 tabular-nums mt-0.5 block">
                       {formatCurrency(fuelTypeTotals['Petrol 92'].sales)}
                     </span>
                   </div>
@@ -1688,10 +1688,10 @@ export default function ShiftManagementTab({
                   {/* Petrol 95 */}
                   <div className="p-3 bg-purple-500/10 rounded-xl border border-purple-500/20">
                     <span className="text-[10px] font-bold text-purple-400 uppercase block">Petrol 95</span>
-                    <span className="text-lg font-mono tabular-nums font-bold text-[#1C1C1C] mt-1 block">
+                    <span className="text-lg tabular-nums font-bold text-[#1C1C1C] mt-1 block">
                       {formatLiters(fuelTypeTotals['Petrol 95'].net)}
                     </span>
-                    <span className="text-[10px] text-gray-500 font-mono tabular-nums mt-0.5 block">
+                    <span className="text-[10px] text-gray-500 tabular-nums mt-0.5 block">
                       {formatCurrency(fuelTypeTotals['Petrol 95'].sales)}
                     </span>
                   </div>
@@ -1699,10 +1699,10 @@ export default function ShiftManagementTab({
                   {/* Auto Diesel */}
                   <div className="p-3 bg-amber-500/10 rounded-xl border border-amber-500/20">
                     <span className="text-[10px] font-bold text-amber-400 uppercase block">Auto Diesel</span>
-                    <span className="text-lg font-mono tabular-nums font-bold text-[#1C1C1C] mt-1 block">
+                    <span className="text-lg tabular-nums font-bold text-[#1C1C1C] mt-1 block">
                       {formatLiters(fuelTypeTotals['Auto Diesel'].net)}
                     </span>
-                    <span className="text-[10px] text-gray-500 font-mono tabular-nums mt-0.5 block">
+                    <span className="text-[10px] text-gray-500 tabular-nums mt-0.5 block">
                       {formatCurrency(fuelTypeTotals['Auto Diesel'].sales)}
                     </span>
                   </div>
@@ -1710,10 +1710,10 @@ export default function ShiftManagementTab({
                   {/* Super Diesel */}
                   <div className="p-3 bg-emerald-500/10 rounded-xl border border-emerald-500/20">
                     <span className="text-[10px] font-bold text-emerald-400 uppercase block">Super Diesel</span>
-                    <span className="text-lg font-mono tabular-nums font-bold text-[#1C1C1C] mt-1 block">
+                    <span className="text-lg tabular-nums font-bold text-[#1C1C1C] mt-1 block">
                       {formatLiters(fuelTypeTotals['Super Diesel'].net)}
                     </span>
-                    <span className="text-[10px] text-gray-500 font-mono tabular-nums mt-0.5 block">
+                    <span className="text-[10px] text-gray-500 tabular-nums mt-0.5 block">
                       {formatCurrency(fuelTypeTotals['Super Diesel'].sales)}
                     </span>
                   </div>
@@ -1723,9 +1723,9 @@ export default function ShiftManagementTab({
               <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between text-xs text-gray-500 font-sans">
                 <span className="flex items-center gap-1">
                   <Fuel className="w-3.5 h-3.5 text-blue-500" />
-                  <span>Total Net Liters Sold: <strong className="text-[#1C1C1C] font-mono tabular-nums">{formatLiters(stats.totalNetSold)}</strong></span>
+                  <span>Total Net Liters Sold: <strong className="text-[#1C1C1C] tabular-nums">{formatLiters(stats.totalNetSold)}</strong></span>
                 </span>
-                <span>Active Pumps: <strong className="text-[#1C1C1C] font-mono tabular-nums">{stats.runningPumps} of {activeShift.pumpReadings.length}</strong></span>
+                <span>Active Pumps: <strong className="text-[#1C1C1C] tabular-nums">{stats.runningPumps} of {activeShift.pumpReadings.length}</strong></span>
               </div>
             </div>
           </div>
@@ -2004,7 +2004,7 @@ export default function ShiftManagementTab({
                                           <span className="truncate">{r.pumpName.toUpperCase()} • {r.fuelType}</span>
                                         </div>
                                         {!isOilBay && (
-                                          <span className="text-[11px] text-slate-500 tabular-nums font-bold font-mono">
+                                          <span className="text-[11px] text-slate-500 tabular-nums font-bold ">
                                             (Rs. {fuelPrice.toFixed(2)}/L)
                                           </span>
                                         )}
@@ -2039,7 +2039,7 @@ export default function ShiftManagementTab({
                                                   disabled={isStartMeterLocked}
                                                   onFocus={(e) => e.target.select()}
                                                   onChange={(e) => handleUpdateReading(r.pumpId, 'startMeter', parseFloat(e.target.value) || 0)}
-                                                  className={`w-full px-2 py-1 border rounded-lg text-xs font-bold text-center font-mono tabular-nums transition-colors ${
+                                                  className={`w-full px-2 py-1 border rounded-lg text-xs font-bold text-center tabular-nums transition-colors ${
                                                     isStartMeterLocked
                                                       ? 'bg-slate-100 border-slate-200 text-slate-500 cursor-not-allowed select-none'
                                                       : 'bg-white border-slate-200 text-slate-800 focus:bg-white focus:outline-none focus:border-blue-500'
@@ -2058,7 +2058,7 @@ export default function ShiftManagementTab({
                                             disabled={r.status === 'Completed'}
                                             onFocus={(e) => e.target.select()}
                                             onChange={(e) => handleUpdateReading(r.pumpId, 'endMeter', parseFloat(e.target.value) || 0)}
-                                            className="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-center font-mono tabular-nums focus:outline-none focus:border-blue-500 disabled:bg-slate-100 disabled:text-slate-500"
+                                            className="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-center tabular-nums focus:outline-none focus:border-blue-500 disabled:bg-slate-100 disabled:text-slate-500"
                                           />
                                         </div>
                                         <div>
@@ -2070,7 +2070,7 @@ export default function ShiftManagementTab({
                                             disabled={r.status === 'Completed'}
                                             onFocus={(e) => e.target.select()}
                                             onChange={(e) => handleUpdateReading(r.pumpId, 'testingQty', parseFloat(e.target.value) || 0)}
-                                            className="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-center font-mono tabular-nums focus:outline-none focus:border-blue-500 disabled:bg-slate-100 disabled:text-slate-500"
+                                            className="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-center tabular-nums focus:outline-none focus:border-blue-500 disabled:bg-slate-100 disabled:text-slate-500"
                                           />
                                         </div>
                                       </div>
@@ -2085,7 +2085,7 @@ export default function ShiftManagementTab({
                                             disabled={r.status === 'Completed'}
                                             onFocus={(e) => e.target.select()}
                                             onChange={(e) => handleUpdateReading(r.pumpId, 'oilSalesAmount', parseFloat(e.target.value) || 0)}
-                                            className="w-full px-2 py-1 bg-white border border-amber-200 rounded-lg text-xs font-bold text-right font-mono tabular-nums focus:bg-white focus:outline-none focus:border-amber-500 disabled:bg-slate-100 disabled:text-slate-500"
+                                            className="w-full px-2 py-1 bg-white border border-amber-200 rounded-lg text-xs font-bold text-right tabular-nums focus:bg-white focus:outline-none focus:border-amber-500 disabled:bg-slate-100 disabled:text-slate-500"
                                           />
                                         </div>
                                       </div>
@@ -2102,7 +2102,7 @@ export default function ShiftManagementTab({
                                           disabled={r.status === 'Completed'}
                                           onFocus={(e) => e.target.select()}
                                           onChange={(e) => handleUpdateReading(r.pumpId, 'creditSalesAmount', parseFloat(e.target.value) || 0)}
-                                          className="w-full px-2 py-1 bg-white border border-purple-200 rounded-lg text-xs font-bold text-right font-mono tabular-nums focus:bg-white focus:outline-none focus:border-purple-500 disabled:bg-slate-100 disabled:text-slate-500"
+                                          className="w-full px-2 py-1 bg-white border border-purple-200 rounded-lg text-xs font-bold text-right tabular-nums focus:bg-white focus:outline-none focus:border-purple-500 disabled:bg-slate-100 disabled:text-slate-500"
                                         />
                                       </div>
                                       <div>
@@ -2114,7 +2114,7 @@ export default function ShiftManagementTab({
                                           disabled={r.status === 'Completed'}
                                           onFocus={(e) => e.target.select()}
                                           onChange={(e) => handleUpdateReading(r.pumpId, 'cardSalesAmount', parseFloat(e.target.value) || 0)}
-                                          className="w-full px-2 py-1 bg-white border border-indigo-200 rounded-lg text-xs font-bold text-right font-mono tabular-nums focus:outline-none focus:border-indigo-500 disabled:bg-slate-100 disabled:text-slate-500"
+                                          className="w-full px-2 py-1 bg-white border border-indigo-200 rounded-lg text-xs font-bold text-right tabular-nums focus:outline-none focus:border-indigo-500 disabled:bg-slate-100 disabled:text-slate-500"
                                         />
                                       </div>
                                     </div>
@@ -2123,10 +2123,10 @@ export default function ShiftManagementTab({
                                     <div className="flex items-center justify-between pt-0.5 text-xs gap-2">
                                       <div className="flex items-center gap-3 text-[11px] flex-wrap">
                                         <span className="text-slate-500">
-                                          Net Liters: <strong className="text-slate-900 font-mono tabular-nums">{netSold.toFixed(2)} L</strong>
+                                          Net Liters: <strong className="text-slate-900 tabular-nums">{netSold.toFixed(2)} L</strong>
                                         </span>
                                         <span className="text-slate-500">
-                                          Expected Cash: <strong className="text-blue-700 font-mono tabular-nums">{formatCurrency(pumpExpCash)}</strong>
+                                          Expected Cash: <strong className="text-blue-700 tabular-nums">{formatCurrency(pumpExpCash)}</strong>
                                         </span>
                                       </div>
                                     </div>

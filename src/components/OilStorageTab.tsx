@@ -630,7 +630,7 @@ export default function OilStorageTab({
             className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
           >
             <ShoppingCart className="w-3.5 h-3.5" />
-            <span>+ Quick Retail Sale</span>
+            <span>Quick Retail Sale</span>
           </button>
 
           <button
@@ -638,7 +638,7 @@ export default function OilStorageTab({
             className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
           >
             <Truck className="w-3.5 h-3.5" />
-            <span>+ Receive Stock (GRN)</span>
+            <span>Receive Stock (GRN)</span>
           </button>
         </div>
       </div>
@@ -656,14 +656,14 @@ export default function OilStorageTab({
             </div>
           </div>
           <div className="flex items-baseline gap-1.5">
-            <span className="text-lg font-extrabold text-[#1C1C1C] font-mono tabular-nums">
+            <span className="text-lg font-extrabold text-[#1C1C1C] tabular-nums">
               {metrics.totalBulkLiters.toLocaleString()}
             </span>
             <span className="text-xs text-gray-400 font-bold">/ {metrics.totalBulkCapacity.toLocaleString()} L</span>
           </div>
           <div className="text-[11px] text-gray-500 font-medium flex items-center justify-between pt-1 border-t border-gray-50">
             <span>Valuation:</span>
-            <strong className="text-slate-800 font-mono tabular-nums">{formatCurrency(metrics.totalBulkValue)}</strong>
+            <strong className="text-slate-800 tabular-nums">{formatCurrency(metrics.totalBulkValue)}</strong>
           </div>
         </div>
 
@@ -676,14 +676,14 @@ export default function OilStorageTab({
             </div>
           </div>
           <div className="flex items-baseline gap-1.5">
-            <span className="text-lg font-extrabold text-[#1C1C1C] font-mono tabular-nums">
+            <span className="text-lg font-extrabold text-[#1C1C1C] tabular-nums">
               {metrics.totalBottles.toLocaleString()}
             </span>
             <span className="text-xs text-gray-400 font-bold">Units in stock</span>
           </div>
           <div className="text-[11px] text-gray-500 font-medium flex items-center justify-between pt-1 border-t border-gray-50">
             <span>Valuation:</span>
-            <strong className="text-emerald-700 font-mono tabular-nums">{formatCurrency(metrics.totalPackagedValue)}</strong>
+            <strong className="text-emerald-700 tabular-nums">{formatCurrency(metrics.totalPackagedValue)}</strong>
           </div>
         </div>
 
@@ -698,7 +698,7 @@ export default function OilStorageTab({
             </div>
           </div>
           <div className="flex items-baseline gap-1.5">
-            <span className={`text-lg font-extrabold font-mono tabular-nums ${
+            <span className={`text-lg font-extrabold tabular-nums ${
               metrics.lowStockCount > 0 ? 'text-rose-600' : 'text-emerald-600'
             }`}>
               {metrics.lowStockCount}
@@ -726,14 +726,14 @@ export default function OilStorageTab({
             </div>
           </div>
           <div className="flex items-baseline gap-1.5">
-            <span className="text-lg font-extrabold text-[#1C1C1C] font-mono tabular-nums">
+            <span className="text-lg font-extrabold text-[#1C1C1C] tabular-nums">
               {metrics.activeAllocationsCount}
             </span>
             <span className="text-xs text-gray-400 font-bold">Active issues</span>
           </div>
           <div className="text-[11px] text-gray-500 font-medium flex items-center justify-between pt-1 border-t border-gray-50">
             <span>Today Sales:</span>
-            <strong className="text-purple-700 font-mono tabular-nums">{formatCurrency(metrics.todaySalesAmount)}</strong>
+            <strong className="text-purple-700 tabular-nums">{formatCurrency(metrics.todaySalesAmount)}</strong>
           </div>
         </div>
       </div>
@@ -830,7 +830,7 @@ export default function OilStorageTab({
                         </div>
                       </div>
 
-                      <div className="text-right font-mono tabular-nums">
+                      <div className="text-right tabular-nums">
                         <span className={`text-sm font-extrabold ${pct < 25 ? 'text-rose-600' : pct < 45 ? 'text-amber-600' : 'text-emerald-600'}`}>
                           {pct}% Full
                         </span>
@@ -848,8 +848,8 @@ export default function OilStorageTab({
                         />
                       </div>
                       <div className="flex justify-between text-xs text-gray-500 font-medium">
-                        <span>Current: <strong className="text-slate-900 font-mono tabular-nums">{tank.currentLevel.toLocaleString()} L</strong></span>
-                        <span>Capacity: <strong className="text-slate-900 font-mono tabular-nums">{tank.capacity.toLocaleString()} L</strong></span>
+                        <span>Current: <strong className="text-slate-900 tabular-nums">{tank.currentLevel.toLocaleString()} L</strong></span>
+                        <span>Capacity: <strong className="text-slate-900 tabular-nums">{tank.capacity.toLocaleString()} L</strong></span>
                       </div>
                     </div>
 
@@ -857,13 +857,13 @@ export default function OilStorageTab({
                     <div className="grid grid-cols-2 gap-2 pt-3 border-t border-gray-100 text-xs">
                       <div className="bg-gray-50/70 p-2.5 rounded-xl border border-gray-100">
                         <span className="text-[10px] text-gray-400 uppercase tracking-wider block font-bold">Rate / Liter</span>
-                        <span className="font-mono font-bold text-slate-900 tabular-nums">
+                        <span className="font-bold text-slate-900 tabular-nums">
                           {formatCurrency(tank.pricePerLiter || 0)}
                         </span>
                       </div>
                       <div className="bg-gray-50/70 p-2.5 rounded-xl border border-gray-100 text-right">
                         <span className="text-[10px] text-gray-400 uppercase tracking-wider block font-bold">Total Stock Value</span>
-                        <span className="font-mono font-bold text-emerald-700 tabular-nums">
+                        <span className="font-bold text-emerald-700 tabular-nums">
                           {formatCurrency(totalStockVal)}
                         </span>
                       </div>
@@ -915,7 +915,7 @@ export default function OilStorageTab({
               className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer self-start sm:self-auto"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>+ Add Bottle Product</span>
+              <span>Add Bottle Product</span>
             </button>
           </div>
 
@@ -952,7 +952,7 @@ export default function OilStorageTab({
                         <tr key={item.id} className="hover:bg-gray-50/50 transition-colors">
                           <td className="py-3 px-4 font-bold text-slate-900">
                             <div>{item.name}</div>
-                            <div className="text-[10px] text-gray-400 font-mono mt-0.5">
+                            <div className="text-[10px] text-gray-400 mt-0.5">
                               Grade: <span className="font-semibold text-gray-600">{item.grade}</span> &bull; Loc: {item.location || 'N/A'}
                             </div>
                           </td>
@@ -963,18 +963,18 @@ export default function OilStorageTab({
                           </td>
                           <td className="py-3 px-4 text-gray-600 font-medium">{item.packageSize}</td>
                           <td className="py-3 px-4 text-center">
-                            <span className={`font-mono font-extrabold text-sm tabular-nums ${isLow ? 'text-rose-600' : 'text-slate-900'}`}>
+                            <span className={`font-extrabold text-sm tabular-nums ${isLow ? 'text-rose-600' : 'text-slate-900'}`}>
                               {item.currentStock}
                             </span>
                             <span className="text-[10px] text-gray-400 block">Min: {item.minReorderLevel}</span>
                           </td>
-                          <td className="py-3 px-4 text-right font-mono tabular-nums text-gray-500">
+                          <td className="py-3 px-4 text-right tabular-nums text-gray-500">
                             {formatCurrency(item.unitCost)}
                           </td>
-                          <td className="py-3 px-4 text-right font-mono font-bold tabular-nums text-slate-900">
+                          <td className="py-3 px-4 text-right font-bold tabular-nums text-slate-900">
                             {formatCurrency(item.retailPrice)}
                           </td>
-                          <td className="py-3 px-4 text-right font-mono font-bold tabular-nums text-emerald-700">
+                          <td className="py-3 px-4 text-right font-bold tabular-nums text-emerald-700">
                             {formatCurrency(stockVal)}
                           </td>
                           <td className="py-3 px-4 text-center">
@@ -1035,7 +1035,7 @@ export default function OilStorageTab({
               className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer self-start sm:self-auto"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>+ Record New GRN</span>
+              <span>Record New GRN</span>
             </button>
           </div>
 
@@ -1064,11 +1064,11 @@ export default function OilStorageTab({
                       <tr key={grn.id} className="hover:bg-gray-50/50 transition-colors">
                         <td className="py-3 px-4 font-bold text-slate-900">
                           <div>{grn.grnNumber}</div>
-                          <div className="text-[10px] text-gray-400 font-mono mt-0.5">{grn.date}</div>
+                          <div className="text-[10px] text-gray-400 mt-0.5">{grn.date}</div>
                         </td>
                         <td className="py-3 px-4">
                           <div className="font-semibold text-slate-800">{grn.supplier}</div>
-                          <div className="text-[10px] text-gray-400 font-mono">Inv: {grn.invoiceNumber}</div>
+                          <div className="text-[10px] text-gray-400 ">Inv: {grn.invoiceNumber}</div>
                         </td>
                         <td className="py-3 px-4">
                           <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
@@ -1082,19 +1082,19 @@ export default function OilStorageTab({
                         <td className="py-3 px-4 text-gray-600">
                           {grn.type === 'bulk' ? (
                             <div>
-                              <strong className="text-slate-900 font-mono tabular-nums">{grn.litersReceived} L</strong> into {grn.tankName}
+                              <strong className="text-slate-900 tabular-nums">{grn.litersReceived} L</strong> into {grn.tankName}
                             </div>
                           ) : (
                             <div className="space-y-0.5">
                               {grn.items?.map((it, idx) => (
                                 <div key={idx} className="text-[11px]">
-                                  <strong className="text-slate-900 font-mono tabular-nums">+{it.quantity}</strong> {it.itemName} ({it.packageSize})
+                                  <strong className="text-slate-900 tabular-nums">+{it.quantity}</strong> {it.itemName} ({it.packageSize})
                                 </div>
                               ))}
                             </div>
                           )}
                         </td>
-                        <td className="py-3 px-4 text-right font-mono font-bold tabular-nums text-slate-900">
+                        <td className="py-3 px-4 text-right font-bold tabular-nums text-slate-900">
                           {formatCurrency(grn.totalAmount)}
                         </td>
                         <td className="py-3 px-4 text-gray-600 font-medium">
@@ -1129,7 +1129,7 @@ export default function OilStorageTab({
               className="flex items-center gap-1.5 px-3.5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer self-start sm:self-auto"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>+ Issue Oil to Pumper</span>
+              <span>Issue Oil to Pumper</span>
             </button>
           </div>
 
@@ -1161,7 +1161,7 @@ export default function OilStorageTab({
                       <tr key={alloc.id} className="hover:bg-gray-50/50 transition-colors">
                         <td className="py-3 px-4 font-bold text-slate-900">
                           <div>{alloc.shiftName || 'Standard Shift'}</div>
-                          <div className="text-[10px] text-gray-400 font-mono mt-0.5">{alloc.date}</div>
+                          <div className="text-[10px] text-gray-400 mt-0.5">{alloc.date}</div>
                         </td>
                         <td className="py-3 px-4 font-semibold text-slate-800">
                           {alloc.pumperName}
@@ -1170,16 +1170,16 @@ export default function OilStorageTab({
                           <div>{alloc.itemName}</div>
                           <div className="text-[10px] text-gray-400">Rate: {formatCurrency(alloc.unitPrice)}</div>
                         </td>
-                        <td className="py-3 px-4 text-center font-mono font-bold tabular-nums text-slate-900">
+                        <td className="py-3 px-4 text-center font-bold tabular-nums text-slate-900">
                           {alloc.issuedQty}
                         </td>
-                        <td className="py-3 px-4 text-center font-mono tabular-nums text-gray-500">
+                        <td className="py-3 px-4 text-center tabular-nums text-gray-500">
                           {alloc.returnedQty}
                         </td>
-                        <td className="py-3 px-4 text-center font-mono font-bold tabular-nums text-emerald-600">
+                        <td className="py-3 px-4 text-center font-bold tabular-nums text-emerald-600">
                           {alloc.status === 'Reconciled' ? alloc.soldQty : '-'}
                         </td>
-                        <td className="py-3 px-4 text-right font-mono font-bold tabular-nums text-slate-900">
+                        <td className="py-3 px-4 text-right font-bold tabular-nums text-slate-900">
                           {alloc.status === 'Reconciled' ? formatCurrency(alloc.totalAmount) : '-'}
                         </td>
                         <td className="py-3 px-4 text-center">
@@ -1329,7 +1329,7 @@ export default function OilStorageTab({
 
                   <div className="p-2.5 bg-blue-50 rounded-xl flex justify-between items-center text-xs">
                     <span className="font-bold text-blue-900">Total Purchase Value:</span>
-                    <strong className="text-blue-900 font-mono tabular-nums text-sm">
+                    <strong className="text-blue-900 tabular-nums text-sm">
                       {formatCurrency(grnItemQty * grnItemCost)}
                     </strong>
                   </div>
@@ -1376,7 +1376,7 @@ export default function OilStorageTab({
 
                   <div className="p-2.5 bg-amber-50 rounded-xl flex justify-between items-center text-xs">
                     <span className="font-bold text-amber-900">Total Bulk Cost:</span>
-                    <strong className="text-amber-900 font-mono tabular-nums text-sm">
+                    <strong className="text-amber-900 tabular-nums text-sm">
                       {formatCurrency(grnBulkLiters * grnBulkCostPerLiter)}
                     </strong>
                   </div>
@@ -1501,7 +1501,7 @@ export default function OilStorageTab({
                 return (
                   <div className="p-3 bg-emerald-50 rounded-xl flex justify-between items-center text-xs">
                     <span className="font-bold text-emerald-900">Total Sale Amount:</span>
-                    <strong className="text-emerald-900 font-mono tabular-nums text-base">
+                    <strong className="text-emerald-900 tabular-nums text-base">
                       {formatCurrency(total)}
                     </strong>
                   </div>
@@ -1812,7 +1812,7 @@ export default function OilStorageTab({
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-500">Issued Quantity:</span>
-                  <strong className="font-mono tabular-nums text-slate-900">{reconcilingAlloc.issuedQty} Units</strong>
+                  <strong className="tabular-nums text-slate-900">{reconcilingAlloc.issuedQty} Units</strong>
                 </div>
               </div>
 
@@ -1836,11 +1836,11 @@ export default function OilStorageTab({
                   <div className="p-3 bg-emerald-50 rounded-xl space-y-1.5 text-xs">
                     <div className="flex justify-between">
                       <span className="text-emerald-800 font-medium">Sold Quantity:</span>
-                      <strong className="font-mono tabular-nums text-emerald-900">{sold} Units</strong>
+                      <strong className="tabular-nums text-emerald-900">{sold} Units</strong>
                     </div>
                     <div className="flex justify-between border-t border-emerald-200/60 pt-1">
                       <span className="text-emerald-900 font-extrabold">Cash to Collect:</span>
-                      <strong className="font-mono tabular-nums text-sm text-emerald-900">
+                      <strong className="tabular-nums text-sm text-emerald-900">
                         {formatCurrency(cashDue)}
                       </strong>
                     </div>

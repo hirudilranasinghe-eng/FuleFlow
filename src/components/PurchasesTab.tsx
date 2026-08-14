@@ -658,7 +658,7 @@ export default function PurchasesTab({
         </div>
 
         {/* Quick Stats Summary */}
-        <div className="hidden sm:flex items-center gap-4 text-xs font-mono text-gray-500">
+        <div className="hidden sm:flex items-center gap-4 text-xs text-gray-500">
           <span>Total Fuel Volume: <strong className="text-slate-900 tabular-nums">{formatLiters(totalFuelLiters)}</strong></span>
           <span>&bull;</span>
           <span>Total Value: <strong className="text-emerald-700 tabular-nums">{formatCurrency(totalFuelCost + totalLubeValue)}</strong></span>
@@ -678,7 +678,7 @@ export default function PurchasesTab({
           >
             <Fuel className="w-3.5 h-3.5" />
             <span>Fuel Tanker Purchases</span>
-            <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+            <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
               activeSubTab === 'fuel-bowser' ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-600'
             }`}>
               {deliveries.length}
@@ -695,7 +695,7 @@ export default function PurchasesTab({
           >
             <Droplets className="w-3.5 h-3.5" />
             <span>Lubricants &amp; Oil Purchases</span>
-            <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+            <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
               activeSubTab === 'lubricants' ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-600'
             }`}>
               {grnRecords.length}
@@ -712,7 +712,7 @@ export default function PurchasesTab({
           >
             <FileText className="w-3.5 h-3.5" />
             <span>Purchase Audit History</span>
-            <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+            <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
               activeSubTab === 'history' ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-600'
             }`}>
               {unifiedPurchases.length}
@@ -767,7 +767,7 @@ export default function PurchasesTab({
                 <Fuel className="w-4 h-4 text-blue-600" />
                 <h3 className="text-sm font-bold text-slate-900">Fuel Tanker Purchase Logs</h3>
               </div>
-              <span className="text-xs text-gray-500 font-mono">{deliveries.length} Records</span>
+              <span className="text-xs text-gray-500 ">{deliveries.length} Records</span>
             </div>
 
             {deliveries.length === 0 ? (
@@ -833,10 +833,10 @@ export default function PurchasesTab({
                           onClick={() => openReceiptModal(unifiedObj)}
                           className="hover:bg-blue-50/50 transition-colors cursor-pointer group"
                         >
-                          <td className="py-3 px-4 font-mono text-gray-600 whitespace-nowrap">
+                          <td className="py-3 px-4 text-gray-600 whitespace-nowrap">
                             {del.date ? del.date.split('T')[0] : 'Today'}
                           </td>
-                          <td className="py-3 px-4 font-mono font-bold text-slate-900 whitespace-nowrap">
+                          <td className="py-3 px-4 font-bold text-slate-900 whitespace-nowrap">
                             {invoiceId}
                           </td>
                           <td className="py-3 px-4">
@@ -850,13 +850,13 @@ export default function PurchasesTab({
                             </div>
                           </td>
                           <td className="py-3 px-4 text-gray-600">{del.supplier || 'Ceylon Petroleum Corporation'}</td>
-                          <td className="py-3 px-4 text-right font-mono font-extrabold tabular-nums text-slate-900 whitespace-nowrap">
+                          <td className="py-3 px-4 text-right font-extrabold tabular-nums text-slate-900 whitespace-nowrap">
                             {formatLiters(del.quantity)}
                           </td>
-                          <td className="py-3 px-4 text-right font-mono text-gray-600 tabular-nums whitespace-nowrap">
+                          <td className="py-3 px-4 text-right text-gray-600 tabular-nums whitespace-nowrap">
                             {formatCurrency(unitRate)}
                           </td>
-                          <td className="py-3 px-4 text-right font-mono font-bold tabular-nums text-emerald-700 whitespace-nowrap">
+                          <td className="py-3 px-4 text-right font-bold tabular-nums text-emerald-700 whitespace-nowrap">
                             {formatCurrency(cost)}
                           </td>
                           <td className="py-3 px-4 text-center whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
@@ -900,7 +900,7 @@ export default function PurchasesTab({
                 <Droplets className="w-4 h-4 text-emerald-600" />
                 <h3 className="text-sm font-bold text-slate-900">Lubricant Purchase Logs</h3>
               </div>
-              <span className="text-xs text-gray-500 font-mono">{grnRecords.length} Records</span>
+              <span className="text-xs text-gray-500 ">{grnRecords.length} Records</span>
             </div>
 
             {grnRecords.length === 0 ? (
@@ -972,9 +972,9 @@ export default function PurchasesTab({
                           onClick={() => openReceiptModal(unifiedObj)}
                           className="hover:bg-blue-50/50 transition-colors cursor-pointer group"
                         >
-                          <td className="py-3 px-4 font-mono text-gray-600 whitespace-nowrap">{grn.date}</td>
+                          <td className="py-3 px-4 text-gray-600 whitespace-nowrap">{grn.date}</td>
                           <td className="py-3 px-4 whitespace-nowrap">
-                            <span className="font-bold text-slate-900 block font-mono">{grn.invoiceNumber || grn.grnNumber}</span>
+                            <span className="font-bold text-slate-900 block ">{grn.invoiceNumber || grn.grnNumber}</span>
                           </td>
                           <td className="py-3 px-4 whitespace-nowrap">
                             <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${
@@ -987,10 +987,10 @@ export default function PurchasesTab({
                           <td className="py-3 px-4 max-w-[240px] truncate text-slate-700 font-medium" title={details}>
                             {details}
                           </td>
-                          <td className="py-3 px-4 text-right font-mono font-bold tabular-nums text-slate-900 whitespace-nowrap">
+                          <td className="py-3 px-4 text-right font-bold tabular-nums text-slate-900 whitespace-nowrap">
                             {totalQty} {isBulk ? 'L' : 'units'}
                           </td>
-                          <td className="py-3 px-4 text-right font-mono font-bold tabular-nums text-emerald-700 whitespace-nowrap">
+                          <td className="py-3 px-4 text-right font-bold tabular-nums text-emerald-700 whitespace-nowrap">
                             {formatCurrency(grn.totalAmount)}
                           </td>
                           <td className="py-3 px-4 text-center whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
@@ -1069,7 +1069,7 @@ export default function PurchasesTab({
                 <FileText className="w-4 h-4 text-blue-600" />
                 <h3 className="text-sm font-bold text-slate-900">Complete Purchase &amp; Delivery Audit Log</h3>
               </div>
-              <span className="text-xs font-mono text-gray-500">{filteredPurchases.length} Logged Transactions</span>
+              <span className="text-xs text-gray-500">{filteredPurchases.length} Logged Transactions</span>
             </div>
 
             {filteredPurchases.length === 0 ? (
@@ -1104,7 +1104,7 @@ export default function PurchasesTab({
                           onClick={() => openReceiptModal(p)}
                           className="hover:bg-blue-50/50 transition-colors cursor-pointer group"
                         >
-                          <td className="py-3 px-4 font-mono text-gray-600 whitespace-nowrap">{p.date}</td>
+                          <td className="py-3 px-4 text-gray-600 whitespace-nowrap">{p.date}</td>
                           <td className="py-3 px-4 whitespace-nowrap">
                             <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${
                               isFuel ? 'bg-blue-50 text-blue-700 border border-blue-200/50' :
@@ -1115,13 +1115,13 @@ export default function PurchasesTab({
                             </span>
                           </td>
                           <td className="py-3 px-4 font-semibold text-slate-800">{p.supplier}</td>
-                          <td className="py-3 px-4 font-mono font-bold text-slate-900 whitespace-nowrap">{p.invoiceNo}</td>
+                          <td className="py-3 px-4 font-bold text-slate-900 whitespace-nowrap">{p.invoiceNo}</td>
                           <td className="py-3 px-4 text-slate-700 font-medium">{p.description}</td>
-                          <td className="py-3 px-4 text-gray-600 font-mono text-[11px]">{p.destination}</td>
-                          <td className="py-3 px-4 text-right font-mono font-bold tabular-nums text-slate-900 whitespace-nowrap">
+                          <td className="py-3 px-4 text-gray-600 text-[11px]">{p.destination}</td>
+                          <td className="py-3 px-4 text-right font-bold tabular-nums text-slate-900 whitespace-nowrap">
                             {p.quantity.toLocaleString()} {p.unitLabel}
                           </td>
-                          <td className="py-3 px-4 text-right font-mono font-extrabold tabular-nums text-emerald-700 whitespace-nowrap">
+                          <td className="py-3 px-4 text-right font-extrabold tabular-nums text-emerald-700 whitespace-nowrap">
                             {formatCurrency(p.totalAmount)}
                           </td>
                           <td className="py-3 px-4 text-center whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
@@ -1239,7 +1239,7 @@ export default function PurchasesTab({
                   type="text"
                   value={deliveryInvoiceNo}
                   onChange={(e) => setDeliveryInvoiceNo(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-[#1C1C1C] text-sm font-mono focus:outline-none focus:border-blue-500"
+                  className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-[#1C1C1C] text-sm focus:outline-none focus:border-blue-500"
                   placeholder="e.g. INV-2026-8891"
                 />
               </div>
@@ -1254,7 +1254,7 @@ export default function PurchasesTab({
                   type="date"
                   value={deliveryDate}
                   onChange={(e) => setDeliveryDate(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-[#1C1C1C] text-sm font-mono focus:outline-none focus:border-blue-500"
+                  className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-[#1C1C1C] text-sm focus:outline-none focus:border-blue-500"
                 />
               </div>
             </div>
@@ -1384,7 +1384,7 @@ export default function PurchasesTab({
                     placeholder="e.g. 24"
                     value={lubeQuantity}
                     onChange={(e) => setLubeQuantity(e.target.value === '' ? '' : parseFloat(e.target.value) || 0)}
-                    className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-slate-900 text-sm font-mono font-bold focus:outline-none focus:border-blue-500"
+                    className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-slate-900 text-sm font-bold focus:outline-none focus:border-blue-500"
                   />
                 </div>
 
@@ -1399,7 +1399,7 @@ export default function PurchasesTab({
                     placeholder="e.g. 1950"
                     value={lubeUnitCost}
                     onChange={(e) => setLubeUnitCost(e.target.value === '' ? '' : parseFloat(e.target.value) || 0)}
-                    className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-slate-900 text-sm font-mono font-bold focus:outline-none focus:border-blue-500"
+                    className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-slate-900 text-sm font-bold focus:outline-none focus:border-blue-500"
                   />
                 </div>
               </div>
@@ -1428,7 +1428,7 @@ export default function PurchasesTab({
                     value={lubeInvoiceNo}
                     onChange={(e) => setLubeInvoiceNo(e.target.value)}
                     placeholder="e.g. INV-CHEV-9901"
-                    className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-slate-900 text-xs font-mono focus:outline-none focus:border-blue-500"
+                    className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-slate-900 text-xs focus:outline-none focus:border-blue-500"
                   />
                 </div>
               </div>
@@ -1443,7 +1443,7 @@ export default function PurchasesTab({
                     type="date"
                     value={lubeDeliveryDate}
                     onChange={(e) => setLubeDeliveryDate(e.target.value)}
-                    className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-slate-900 text-xs font-mono focus:outline-none focus:border-blue-500"
+                    className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-slate-900 text-xs focus:outline-none focus:border-blue-500"
                   />
                 </div>
 
@@ -1465,7 +1465,7 @@ export default function PurchasesTab({
               {lubeQuantity && lubeUnitCost ? (
                 <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200/60 flex items-center justify-between">
                   <span className="text-xs font-bold text-emerald-900">Total Purchase Amount:</span>
-                  <span className="text-sm font-extrabold font-mono text-emerald-800 tabular-nums">
+                  <span className="text-sm font-extrabold text-emerald-800 tabular-nums">
                     {formatCurrency(Number(lubeQuantity) * Number(lubeUnitCost))}
                   </span>
                 </div>
@@ -1509,7 +1509,7 @@ export default function PurchasesTab({
                 <span className="font-bold text-xs uppercase tracking-wider text-slate-200">
                   {receiptConfig.documentTitle} Preview
                 </span>
-                <span className="font-mono text-xs px-2 py-0.5 rounded-full bg-slate-800 text-blue-300 font-bold">
+                <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-blue-300 font-bold">
                   {selectedReceiptPurchase.invoiceNo}
                 </span>
               </div>
@@ -1575,10 +1575,10 @@ export default function PurchasesTab({
                     </div>
                     <div className="text-[11px] text-slate-600 pt-1 space-y-0.5">
                       <p>{receiptConfig.address}</p>
-                      <p className="font-mono text-slate-500">
+                      <p className="text-slate-500">
                         Tel: {receiptConfig.contactPhone} | Email: {receiptConfig.email}
                       </p>
-                      <p className="text-[10px] text-slate-400 font-mono">
+                      <p className="text-[10px] text-slate-400 ">
                         CPC Dealer Code: {receiptConfig.dealerCode} • Business Reg: {receiptConfig.regNo}
                       </p>
                     </div>
@@ -1592,7 +1592,7 @@ export default function PurchasesTab({
                     >
                       {receiptConfig.documentTitle}
                     </h2>
-                    <div className="text-xs font-mono font-bold">
+                    <div className="text-xs font-bold">
                       <span className="text-slate-500 font-normal">Receipt No: </span>
                       <span style={{ color: receiptConfig.accentColor }} className="font-extrabold text-sm">
                         {selectedReceiptPurchase.invoiceNo.startsWith(receiptConfig.receiptNoPrefix) 
@@ -1600,11 +1600,11 @@ export default function PurchasesTab({
                           : `${receiptConfig.receiptNoPrefix}${selectedReceiptPurchase.invoiceNo.replace(/[^a-zA-Z0-9-]/g, '')}`}
                       </span>
                     </div>
-                    <div className="text-xs font-mono text-slate-600">
+                    <div className="text-xs text-slate-600">
                       <span className="text-slate-500 font-normal">Date &amp; Time: </span>
                       <span className="font-bold text-slate-800">{selectedReceiptPurchase.date} • 10:30 AM</span>
                     </div>
-                    <div className="text-[11px] font-mono text-slate-500">
+                    <div className="text-[11px] text-slate-500">
                       <span className="text-slate-400">Payment Terms: </span>
                       <span className="font-semibold text-slate-700">Bank Transfer / Advance</span>
                     </div>
@@ -1638,7 +1638,7 @@ export default function PurchasesTab({
                     </div>
                     <div className="flex items-start justify-between">
                       <span className="text-slate-500 font-medium">Contact No:</span>
-                      <span className="font-mono text-slate-800 text-right">+94 11 257 2000 / +94 11 257 2001</span>
+                      <span className="text-slate-800 text-right">+94 11 257 2000 / +94 11 257 2001</span>
                     </div>
                   </div>
                 </div>
@@ -1659,17 +1659,17 @@ export default function PurchasesTab({
                     </div>
                     <div className="flex items-start justify-between">
                       <span className="text-slate-500 font-medium">Reference / Invoice:</span>
-                      <span className="font-mono font-bold text-slate-900 text-right">{selectedReceiptPurchase.invoiceNo}</span>
+                      <span className="font-bold text-slate-900 text-right">{selectedReceiptPurchase.invoiceNo}</span>
                     </div>
                     <div className="flex items-start justify-between">
                       <span className="text-slate-500 font-medium">Delivery Note No:</span>
-                      <span className="font-mono text-slate-800 text-right">
+                      <span className="text-slate-800 text-right">
                         DN-{selectedReceiptPurchase.id.replace(/[^0-9]/g, '') || '884920'}
                       </span>
                     </div>
                     <div className="flex items-start justify-between">
                       <span className="text-slate-500 font-medium">Vehicle / Truck No:</span>
-                      <span className="font-mono font-bold text-slate-900 text-right">
+                      <span className="font-bold text-slate-900 text-right">
                         {selectedReceiptPurchase.rawType === 'fuel' ? 'WP-LI-8492 (Bowser Tanker)' : 'WP-NB-3391 (Delivery Van)'}
                       </span>
                     </div>
@@ -1695,23 +1695,23 @@ export default function PurchasesTab({
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-slate-800 bg-white">
                     <tr>
-                      <td className="py-3 px-3.5 text-center font-mono text-slate-500 font-bold">1</td>
+                      <td className="py-3 px-3.5 text-center text-slate-500 font-bold">1</td>
                       <td className="py-3 px-3.5">
                         <div className="font-bold text-slate-900">{selectedReceiptPurchase.description}</div>
-                        <div className="text-[10px] text-slate-500 font-mono mt-0.5">
+                        <div className="text-[10px] text-slate-500 mt-0.5">
                           Destination: <span className="font-semibold text-slate-700">{selectedReceiptPurchase.destination}</span>
                         </div>
                       </td>
-                      <td className="py-3 px-3.5 text-center font-mono font-medium text-slate-600">
+                      <td className="py-3 px-3.5 text-center font-medium text-slate-600">
                         {selectedReceiptPurchase.unitLabel}
                       </td>
-                      <td className="py-3 px-3.5 text-right font-mono font-bold tabular-nums text-slate-900">
+                      <td className="py-3 px-3.5 text-right font-bold tabular-nums text-slate-900">
                         {selectedReceiptPurchase.quantity.toLocaleString()}
                       </td>
-                      <td className="py-3 px-3.5 text-right font-mono tabular-nums text-slate-700">
+                      <td className="py-3 px-3.5 text-right tabular-nums text-slate-700">
                         {formatCurrency(selectedReceiptPurchase.unitPrice)}
                       </td>
-                      <td className="py-3 px-3.5 text-right font-mono font-extrabold tabular-nums text-slate-900">
+                      <td className="py-3 px-3.5 text-right font-extrabold tabular-nums text-slate-900">
                         {formatCurrency(selectedReceiptPurchase.totalAmount)}
                       </td>
                     </tr>
@@ -1733,7 +1733,7 @@ export default function PurchasesTab({
                   <p className="text-slate-600 text-[11px] leading-relaxed">
                     {receiptConfig.defaultRemarks}
                   </p>
-                  <div className="text-[10px] font-mono text-slate-500 pt-1 border-t border-slate-200 flex items-center justify-between">
+                  <div className="text-[10px] text-slate-500 pt-1 border-t border-slate-200 flex items-center justify-between">
                     <span>Decanting Bay: Pump Island #1</span>
                     <span>Density: 0.832 @ 15°C</span>
                   </div>
@@ -1741,7 +1741,7 @@ export default function PurchasesTab({
 
                 {/* Right: Totals Card */}
                 <div className="rounded-xl border border-slate-200 overflow-hidden shadow-xs text-xs">
-                  <div className="p-3 bg-slate-50 space-y-1.5 font-mono">
+                  <div className="p-3 bg-slate-50 space-y-1.5 ">
                     <div className="flex items-center justify-between text-slate-600">
                       <span>Sub Total:</span>
                       <span className="font-bold tabular-nums text-slate-900">
@@ -1766,7 +1766,7 @@ export default function PurchasesTab({
                     <span className="font-extrabold uppercase tracking-wider text-xs">
                       GRAND TOTAL (LKR):
                     </span>
-                    <span className="font-black font-mono text-base sm:text-lg tabular-nums">
+                    <span className="font-black text-base sm:text-lg tabular-nums">
                       {formatCurrency(selectedReceiptPurchase.totalAmount)}
                     </span>
                   </div>
@@ -1779,7 +1779,7 @@ export default function PurchasesTab({
                   {/* Prepared By */}
                   <div className="space-y-6">
                     <div className="h-10 border-b border-slate-400 flex items-end justify-center pb-1">
-                      <span className="text-[10px] text-slate-400 italic font-mono">
+                      <span className="text-[10px] text-slate-400 italic ">
                         {selectedReceiptPurchase.receivedBy || 'Station Staff'}
                       </span>
                     </div>
@@ -1792,7 +1792,7 @@ export default function PurchasesTab({
                   {/* Received By */}
                   <div className="space-y-6">
                     <div className="h-10 border-b border-slate-400 flex items-end justify-center pb-1">
-                      <span className="text-[10px] text-slate-400 italic font-mono">CPC Bowser Driver</span>
+                      <span className="text-[10px] text-slate-400 italic ">CPC Bowser Driver</span>
                     </div>
                     <div>
                       <p className="font-bold text-slate-800 text-[11px]">{receiptConfig.signatureLine2Title}</p>
@@ -1803,7 +1803,7 @@ export default function PurchasesTab({
                   {/* Authorized By */}
                   <div className="space-y-6">
                     <div className="h-10 border-b border-slate-400 flex items-end justify-center pb-1">
-                      <span className="text-[10px] text-slate-400 italic font-mono">Station Manager</span>
+                      <span className="text-[10px] text-slate-400 italic ">Station Manager</span>
                     </div>
                     <div>
                       <p className="font-bold text-slate-800 text-[11px]">{receiptConfig.signatureLine3Title}</p>
@@ -1821,7 +1821,7 @@ export default function PurchasesTab({
                 <p className="font-medium text-slate-600">
                   {receiptConfig.footerNote}
                 </p>
-                <p className="text-[9px] text-slate-400 mt-0.5 font-mono">
+                <p className="text-[9px] text-slate-400 mt-0.5 ">
                   {receiptConfig.footerDisclaimer}
                 </p>
               </div>

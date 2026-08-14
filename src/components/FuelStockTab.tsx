@@ -381,8 +381,8 @@ export default function FuelStockTab({
 
                   {/* Centered Volume Overlay */}
                   <div className="z-10 text-center select-none px-3 py-1.5 bg-gray-50/95 backdrop-blur-md rounded-lg shadow-sm border border-gray-200 mb-2 transition-transform duration-300 group-hover:scale-105">
-                    <span className="text-base font-mono tabular-nums font-extrabold text-[#1C1C1C] block leading-tight">{fillPercent}%</span>
-                    <span className="text-[10px] text-gray-500 font-mono font-medium">{formatLiters(tank.currentLevel)}</span>
+                    <span className="text-base tabular-nums font-extrabold text-[#1C1C1C] block leading-tight">{fillPercent}%</span>
+                    <span className="text-[10px] text-gray-500 font-medium">{formatLiters(tank.currentLevel)}</span>
                   </div>
                 </div>
 
@@ -402,7 +402,7 @@ export default function FuelStockTab({
                 {/* Capacity stats */}
                 <div className="flex justify-between items-center text-xs text-gray-500 border-b border-gray-100 py-1.5">
                   <span>Tank Capacity:</span>
-                  <span className="font-mono tabular-nums font-semibold text-[#1C1C1C]">{formatLiters(tank.capacity)}</span>
+                  <span className="tabular-nums font-semibold text-[#1C1C1C]">{formatLiters(tank.capacity)}</span>
                 </div>
               </div>
 
@@ -410,7 +410,7 @@ export default function FuelStockTab({
               <div className="mt-2 pt-2 flex items-center justify-between border-t border-gray-100">
                 <div>
                   <span className="text-[9px] text-gray-400 block font-bold uppercase tracking-wider">Unit Price</span>
-                  <span className="font-mono tabular-nums font-extrabold text-base text-[#1C1C1C] block leading-tight">
+                  <span className="tabular-nums font-extrabold text-base text-[#1C1C1C] block leading-tight">
                     {formatCurrency(tank.pricePerLiter)} <span className="text-[10px] text-gray-500 font-sans font-medium">/ L</span>
                   </span>
                 </div>
@@ -514,7 +514,7 @@ export default function FuelStockTab({
                   type="text"
                   value={deliveryInvoiceNo}
                   onChange={(e) => setDeliveryInvoiceNo(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-[#1C1C1C] text-sm font-mono focus:outline-none focus:border-blue-500"
+                  className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-[#1C1C1C] text-sm focus:outline-none focus:border-blue-500"
                   placeholder="e.g. INV-2026-8891"
                 />
               </div>
@@ -529,7 +529,7 @@ export default function FuelStockTab({
                   type="date"
                   value={deliveryDate}
                   onChange={(e) => setDeliveryDate(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-[#1C1C1C] text-sm font-mono focus:outline-none focus:border-blue-500"
+                  className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-[#1C1C1C] text-sm focus:outline-none focus:border-blue-500"
                 />
               </div>
             </div>

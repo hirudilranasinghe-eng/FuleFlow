@@ -586,7 +586,7 @@ export default function SettingsTab({
                   type="text"
                   value={stationProfile.dealerCode}
                   onChange={(e) => setStationProfile({ ...stationProfile, dealerCode: e.target.value })}
-                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-mono font-bold focus:outline-none focus:border-blue-500"
+                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-bold focus:outline-none focus:border-blue-500"
                   required
                 />
               </div>
@@ -599,7 +599,7 @@ export default function SettingsTab({
                   type="text"
                   value={stationProfile.regNo}
                   onChange={(e) => setStationProfile({ ...stationProfile, regNo: e.target.value })}
-                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-mono focus:outline-none focus:border-blue-500"
+                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 focus:outline-none focus:border-blue-500"
                 />
               </div>
 
@@ -628,7 +628,7 @@ export default function SettingsTab({
                   type="text"
                   value={stationProfile.taxNumber}
                   onChange={(e) => setStationProfile({ ...stationProfile, taxNumber: e.target.value })}
-                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-mono focus:outline-none focus:border-blue-500"
+                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 focus:outline-none focus:border-blue-500"
                 />
               </div>
 
@@ -642,7 +642,7 @@ export default function SettingsTab({
                     type="text"
                     value={stationProfile.contactPhone}
                     onChange={(e) => setStationProfile({ ...stationProfile, contactPhone: e.target.value })}
-                    className="w-full pl-9 pr-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-mono focus:outline-none focus:border-blue-500"
+                    className="w-full pl-9 pr-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 focus:outline-none focus:border-blue-500"
                   />
                 </div>
               </div>
@@ -657,7 +657,7 @@ export default function SettingsTab({
                     type="text"
                     value={stationProfile.emergencyHotline}
                     onChange={(e) => setStationProfile({ ...stationProfile, emergencyHotline: e.target.value })}
-                    className="w-full pl-9 pr-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-mono font-bold focus:outline-none focus:border-blue-500"
+                    className="w-full pl-9 pr-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-bold focus:outline-none focus:border-blue-500"
                   />
                 </div>
               </div>
@@ -686,13 +686,13 @@ export default function SettingsTab({
                     type="text"
                     value={stationProfile.currency}
                     disabled
-                    className="w-1/2 px-3.5 py-2.5 bg-gray-100 border border-gray-200 rounded-xl text-gray-600 font-bold font-mono cursor-not-allowed"
+                    className="w-1/2 px-3.5 py-2.5 bg-gray-100 border border-gray-200 rounded-xl text-gray-600 font-bold cursor-not-allowed"
                   />
                   <input
                     type="text"
                     value={stationProfile.volumeUnit}
                     disabled
-                    className="w-1/2 px-3.5 py-2.5 bg-gray-100 border border-gray-200 rounded-xl text-gray-600 font-bold font-mono cursor-not-allowed"
+                    className="w-1/2 px-3.5 py-2.5 bg-gray-100 border border-gray-200 rounded-xl text-gray-600 font-bold cursor-not-allowed"
                   />
                 </div>
               </div>
@@ -783,7 +783,7 @@ export default function SettingsTab({
                     <SlidersHorizontal className="w-4 h-4 text-blue-600" />
                     <span>Theme &amp; Brand Colors</span>
                   </h4>
-                  <span className="text-[11px] font-mono text-gray-400">Color System</span>
+                  <span className="text-[11px] text-gray-400">Color System</span>
                 </div>
 
                 <div className="space-y-4 text-xs">
@@ -793,7 +793,7 @@ export default function SettingsTab({
                       <label className="font-bold text-gray-700">
                         Primary Brand Color <span className="text-gray-400 font-normal">(Headers, Table &amp; Grand Total)</span>
                       </label>
-                      <span className="font-mono font-bold text-slate-700 uppercase">{receiptConfig.primaryBrandColor}</span>
+                      <span className="font-bold text-slate-700 uppercase">{receiptConfig.primaryBrandColor}</span>
                     </div>
 
                     <div className="flex items-center gap-2.5">
@@ -812,7 +812,7 @@ export default function SettingsTab({
                         type="text"
                         value={receiptConfig.primaryBrandColor}
                         onChange={(e) => setReceiptConfig({ ...receiptConfig, primaryBrandColor: e.target.value })}
-                        className="flex-1 px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-mono font-semibold uppercase focus:outline-none focus:border-blue-500"
+                        className="flex-1 px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-semibold uppercase focus:outline-none focus:border-blue-500"
                         placeholder="#123d82"
                       />
                     </div>
@@ -844,7 +844,7 @@ export default function SettingsTab({
                       <label className="font-bold text-gray-700">
                         Accent Color <span className="text-gray-400 font-normal">(Receipt Number &amp; Badges)</span>
                       </label>
-                      <span className="font-mono font-bold text-slate-700 uppercase">{receiptConfig.accentColor}</span>
+                      <span className="font-bold text-slate-700 uppercase">{receiptConfig.accentColor}</span>
                     </div>
 
                     <div className="flex items-center gap-2.5">
@@ -863,7 +863,7 @@ export default function SettingsTab({
                         type="text"
                         value={receiptConfig.accentColor}
                         onChange={(e) => setReceiptConfig({ ...receiptConfig, accentColor: e.target.value })}
-                        className="flex-1 px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-mono font-semibold uppercase focus:outline-none focus:border-rose-500"
+                        className="flex-1 px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-semibold uppercase focus:outline-none focus:border-rose-500"
                         placeholder="#d62828"
                       />
                     </div>
@@ -898,7 +898,7 @@ export default function SettingsTab({
                     <Building2 className="w-4 h-4 text-emerald-600" />
                     <span>Header &amp; Station Identity</span>
                   </h4>
-                  <span className="text-[11px] font-mono text-gray-400">Header Block</span>
+                  <span className="text-[11px] text-gray-400">Header Block</span>
                 </div>
 
                 <div className="space-y-3.5 text-xs">
@@ -939,7 +939,7 @@ export default function SettingsTab({
                         type="text"
                         value={receiptConfig.contactPhone}
                         onChange={(e) => setReceiptConfig({ ...receiptConfig, contactPhone: e.target.value })}
-                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-mono focus:outline-none focus:border-blue-500"
+                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 focus:outline-none focus:border-blue-500"
                       />
                     </div>
                     <div>
@@ -948,7 +948,7 @@ export default function SettingsTab({
                         type="text"
                         value={receiptConfig.email}
                         onChange={(e) => setReceiptConfig({ ...receiptConfig, email: e.target.value })}
-                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-mono focus:outline-none focus:border-blue-500"
+                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 focus:outline-none focus:border-blue-500"
                       />
                     </div>
                   </div>
@@ -960,7 +960,7 @@ export default function SettingsTab({
                         type="text"
                         value={receiptConfig.dealerCode}
                         onChange={(e) => setReceiptConfig({ ...receiptConfig, dealerCode: e.target.value })}
-                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-mono font-bold focus:outline-none focus:border-blue-500"
+                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-bold focus:outline-none focus:border-blue-500"
                       />
                     </div>
                     <div>
@@ -969,7 +969,7 @@ export default function SettingsTab({
                         type="text"
                         value={receiptConfig.regNo}
                         onChange={(e) => setReceiptConfig({ ...receiptConfig, regNo: e.target.value })}
-                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-mono focus:outline-none focus:border-blue-500"
+                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 focus:outline-none focus:border-blue-500"
                       />
                     </div>
                   </div>
@@ -1039,7 +1039,7 @@ export default function SettingsTab({
                     <FileText className="w-4 h-4 text-purple-600" />
                     <span>Document Title &amp; Numbering</span>
                   </h4>
-                  <span className="text-[11px] font-mono text-gray-400">Identifiers</span>
+                  <span className="text-[11px] text-gray-400">Identifiers</span>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
@@ -1060,7 +1060,7 @@ export default function SettingsTab({
                       type="text"
                       value={receiptConfig.receiptNoPrefix}
                       onChange={(e) => setReceiptConfig({ ...receiptConfig, receiptNoPrefix: e.target.value })}
-                      className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-mono font-bold focus:outline-none focus:border-purple-500"
+                      className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-bold focus:outline-none focus:border-purple-500"
                       placeholder="PR-2026-"
                     />
                   </div>
@@ -1074,7 +1074,7 @@ export default function SettingsTab({
                     <Info className="w-4 h-4 text-amber-600" />
                     <span>Default Verification Remarks</span>
                   </h4>
-                  <span className="text-[11px] font-mono text-gray-400">Notes Box</span>
+                  <span className="text-[11px] text-gray-400">Notes Box</span>
                 </div>
 
                 <div className="text-xs">
@@ -1096,7 +1096,7 @@ export default function SettingsTab({
                     <CheckCircle2 className="w-4 h-4 text-blue-600" />
                     <span>3-Tier Authorization Signatures</span>
                   </h4>
-                  <span className="text-[11px] font-mono text-gray-400">Sign-Offs</span>
+                  <span className="text-[11px] text-gray-400">Sign-Offs</span>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
@@ -1178,7 +1178,7 @@ export default function SettingsTab({
                     <ShieldCheck className="w-4 h-4 text-emerald-600" />
                     <span>Footer Notes &amp; Disclaimers</span>
                   </h4>
-                  <span className="text-[11px] font-mono text-gray-400">Footer</span>
+                  <span className="text-[11px] text-gray-400">Footer</span>
                 </div>
 
                 <div className="space-y-3 text-xs">
@@ -1198,7 +1198,7 @@ export default function SettingsTab({
                       type="text"
                       value={receiptConfig.footerDisclaimer}
                       onChange={(e) => setReceiptConfig({ ...receiptConfig, footerDisclaimer: e.target.value })}
-                      className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-mono text-[11px] focus:outline-none focus:border-blue-500"
+                      className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 text-[11px] focus:outline-none focus:border-blue-500"
                     />
                   </div>
                 </div>
@@ -1238,7 +1238,7 @@ export default function SettingsTab({
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-mono bg-slate-800 text-blue-300 px-2.5 py-1 rounded-lg">
+                  <span className="text-[11px] bg-slate-800 text-blue-300 px-2.5 py-1 rounded-lg">
                     900px Print Canvas
                   </span>
                   <button
@@ -1295,10 +1295,10 @@ export default function SettingsTab({
                         </div>
                         <div className="text-[11px] text-slate-600 pt-1 space-y-0.5">
                           <p>{receiptConfig.address}</p>
-                          <p className="font-mono text-slate-500">
+                          <p className="text-slate-500">
                             Tel: {receiptConfig.contactPhone} | Email: {receiptConfig.email}
                           </p>
-                          <p className="text-[10px] text-slate-400 font-mono">
+                          <p className="text-[10px] text-slate-400 ">
                             CPC Dealer Code: {receiptConfig.dealerCode} • Business Reg: {receiptConfig.regNo}
                           </p>
                         </div>
@@ -1312,17 +1312,17 @@ export default function SettingsTab({
                         >
                           {receiptConfig.documentTitle}
                         </h2>
-                        <div className="text-xs font-mono font-bold">
+                        <div className="text-xs font-bold">
                           <span className="text-slate-500 font-normal">Receipt No: </span>
                           <span style={{ color: receiptConfig.accentColor }} className="font-extrabold text-sm">
                             {receiptConfig.receiptNoPrefix}00482
                           </span>
                         </div>
-                        <div className="text-xs font-mono text-slate-600">
+                        <div className="text-xs text-slate-600">
                           <span className="text-slate-500 font-normal">Date &amp; Time: </span>
                           <span className="font-bold text-slate-800">2026-08-14 • 10:30 AM</span>
                         </div>
-                        <div className="text-[11px] font-mono text-slate-500">
+                        <div className="text-[11px] text-slate-500">
                           <span className="text-slate-400">Payment Terms: </span>
                           <span className="font-semibold text-slate-700">Bank Transfer / Advance</span>
                         </div>
@@ -1352,7 +1352,7 @@ export default function SettingsTab({
                         </div>
                         <div className="flex items-start justify-between">
                           <span className="text-slate-500 font-medium">Contact No:</span>
-                          <span className="font-mono text-slate-800 text-right">+94 11 257 2000 / 2001</span>
+                          <span className="text-slate-800 text-right">+94 11 257 2000 / 2001</span>
                         </div>
                       </div>
                     </div>
@@ -1373,15 +1373,15 @@ export default function SettingsTab({
                         </div>
                         <div className="flex items-start justify-between">
                           <span className="text-slate-500 font-medium">Reference / Invoice:</span>
-                          <span className="font-mono font-bold text-slate-900 text-right">CPSTL-INV-9921</span>
+                          <span className="font-bold text-slate-900 text-right">CPSTL-INV-9921</span>
                         </div>
                         <div className="flex items-start justify-between">
                           <span className="text-slate-500 font-medium">Delivery Note No:</span>
-                          <span className="font-mono text-slate-800 text-right">DN-884920</span>
+                          <span className="text-slate-800 text-right">DN-884920</span>
                         </div>
                         <div className="flex items-start justify-between">
                           <span className="text-slate-500 font-medium">Vehicle / Truck No:</span>
-                          <span className="font-mono font-bold text-slate-900 text-right">WP-LI-8492 (Bowser Tanker)</span>
+                          <span className="font-bold text-slate-900 text-right">WP-LI-8492 (Bowser Tanker)</span>
                         </div>
                       </div>
                     </div>
@@ -1405,21 +1405,21 @@ export default function SettingsTab({
                       </thead>
                       <tbody className="divide-y divide-slate-100 text-slate-800 bg-white">
                         <tr>
-                          <td className="py-2.5 px-3 text-center font-mono text-slate-500 font-bold">1</td>
+                          <td className="py-2.5 px-3 text-center text-slate-500 font-bold">1</td>
                           <td className="py-2.5 px-3">
                             <div className="font-bold text-slate-900">Auto Diesel (Super Clean)</div>
-                            <div className="text-[10px] text-slate-500 font-mono mt-0.5">
+                            <div className="text-[10px] text-slate-500 mt-0.5">
                               Destination: <span className="font-semibold text-slate-700">Tank 01 (Diesel Underground 10,000L)</span>
                             </div>
                           </td>
-                          <td className="py-2.5 px-3 text-center font-mono font-medium text-slate-600">L</td>
-                          <td className="py-2.5 px-3 text-right font-mono font-bold tabular-nums text-slate-900">
+                          <td className="py-2.5 px-3 text-center font-medium text-slate-600">L</td>
+                          <td className="py-2.5 px-3 text-right font-bold tabular-nums text-slate-900">
                             6,600
                           </td>
-                          <td className="py-2.5 px-3 text-right font-mono tabular-nums text-slate-700">
+                          <td className="py-2.5 px-3 text-right tabular-nums text-slate-700">
                             Rs. 317.00
                           </td>
-                          <td className="py-2.5 px-3 text-right font-mono font-extrabold tabular-nums text-slate-900">
+                          <td className="py-2.5 px-3 text-right font-extrabold tabular-nums text-slate-900">
                             Rs. 2,092,200.00
                           </td>
                         </tr>
@@ -1441,7 +1441,7 @@ export default function SettingsTab({
                       <p className="text-slate-600 text-[10px] leading-relaxed">
                         {receiptConfig.defaultRemarks}
                       </p>
-                      <div className="text-[9px] font-mono text-slate-500 pt-1 border-t border-slate-200 flex items-center justify-between">
+                      <div className="text-[9px] text-slate-500 pt-1 border-t border-slate-200 flex items-center justify-between">
                         <span>Decanting Bay: Pump Island #1</span>
                         <span>Density: 0.832 @ 15°C</span>
                       </div>
@@ -1449,7 +1449,7 @@ export default function SettingsTab({
 
                     {/* Right: Totals Card */}
                     <div className="rounded-xl border border-slate-200 overflow-hidden shadow-2xs text-xs">
-                      <div className="p-2.5 bg-slate-50 space-y-1 font-mono">
+                      <div className="p-2.5 bg-slate-50 space-y-1 ">
                         <div className="flex items-center justify-between text-slate-600">
                           <span>Sub Total:</span>
                           <span className="font-bold tabular-nums text-slate-900">Rs. 2,092,200.00</span>
@@ -1472,7 +1472,7 @@ export default function SettingsTab({
                         <span className="font-extrabold uppercase tracking-wider text-xs">
                           GRAND TOTAL (LKR):
                         </span>
-                        <span className="font-black font-mono text-base tabular-nums">
+                        <span className="font-black text-base tabular-nums">
                           Rs. 2,092,200.00
                         </span>
                       </div>
@@ -1485,7 +1485,7 @@ export default function SettingsTab({
                       {/* Prepared By */}
                       <div className="space-y-4">
                         <div className="h-8 border-b border-slate-400 flex items-end justify-center pb-1">
-                          <span className="text-[10px] text-slate-400 italic font-mono">Station Staff</span>
+                          <span className="text-[10px] text-slate-400 italic ">Station Staff</span>
                         </div>
                         <div>
                           <p className="font-bold text-slate-800 text-[11px]">{receiptConfig.signatureLine1Title}</p>
@@ -1496,7 +1496,7 @@ export default function SettingsTab({
                       {/* Received By */}
                       <div className="space-y-4">
                         <div className="h-8 border-b border-slate-400 flex items-end justify-center pb-1">
-                          <span className="text-[10px] text-slate-400 italic font-mono">CPC Bowser Driver</span>
+                          <span className="text-[10px] text-slate-400 italic ">CPC Bowser Driver</span>
                         </div>
                         <div>
                           <p className="font-bold text-slate-800 text-[11px]">{receiptConfig.signatureLine2Title}</p>
@@ -1507,7 +1507,7 @@ export default function SettingsTab({
                       {/* Authorized By */}
                       <div className="space-y-4">
                         <div className="h-8 border-b border-slate-400 flex items-end justify-center pb-1">
-                          <span className="text-[10px] text-slate-400 italic font-mono">Station Manager</span>
+                          <span className="text-[10px] text-slate-400 italic ">Station Manager</span>
                         </div>
                         <div>
                           <p className="font-bold text-slate-800 text-[11px]">{receiptConfig.signatureLine3Title}</p>
@@ -1525,7 +1525,7 @@ export default function SettingsTab({
                     <p className="font-medium text-slate-600">
                       {receiptConfig.footerNote}
                     </p>
-                    <p className="text-[9px] text-slate-400 mt-0.5 font-mono">
+                    <p className="text-[9px] text-slate-400 mt-0.5 ">
                       {receiptConfig.footerDisclaimer}
                     </p>
                   </div>
@@ -1585,7 +1585,7 @@ export default function SettingsTab({
                     <button
                       type="button"
                       onClick={() => setSmsConfig({ ...smsConfig, senderMask: 'SAMSE_AUTO' })}
-                      className="text-[10px] bg-gray-100 hover:bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded font-mono cursor-pointer"
+                      className="text-[10px] bg-gray-100 hover:bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded cursor-pointer"
                       title="Set Custom Station Mask"
                     >
                       SAMSE_AUTO
@@ -1593,7 +1593,7 @@ export default function SettingsTab({
                     <button
                       type="button"
                       onClick={() => setSmsConfig({ ...smsConfig, senderMask: 'TextLK' })}
-                      className="text-[10px] bg-emerald-100 hover:bg-emerald-200 text-emerald-800 px-1.5 py-0.5 rounded font-mono font-bold cursor-pointer"
+                      className="text-[10px] bg-emerald-100 hover:bg-emerald-200 text-emerald-800 px-1.5 py-0.5 rounded font-bold cursor-pointer"
                       title="Set Text.lk Default Approved Sender"
                     >
                       TextLK (Default)
@@ -1604,7 +1604,7 @@ export default function SettingsTab({
                   type="text"
                   value={smsConfig.senderMask}
                   onChange={(e) => setSmsConfig({ ...smsConfig, senderMask: e.target.value.toUpperCase() })}
-                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-mono font-bold focus:outline-none focus:border-blue-500 uppercase"
+                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-bold focus:outline-none focus:border-blue-500 uppercase"
                   placeholder="e.g. TextLK or SAMSE_AUTO"
                 />
                 <p className="text-[10px] text-gray-500 mt-1">
@@ -1621,7 +1621,7 @@ export default function SettingsTab({
                     type={showApiKey ? 'text' : 'password'}
                     value={smsConfig.apiKey}
                     onChange={(e) => setSmsConfig({ ...smsConfig, apiKey: e.target.value })}
-                    className="w-full pl-3.5 pr-9 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-mono focus:outline-none focus:border-blue-500"
+                    className="w-full pl-3.5 pr-9 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 focus:outline-none focus:border-blue-500"
                     placeholder={smsConfig.provider.includes('Text.lk') ? 'tlk_live_xxxxxxxxxxxxxxxxxxxxxxxx' : 'API Key / Token'}
                   />
                   <button
@@ -1642,7 +1642,7 @@ export default function SettingsTab({
                   type="text"
                   value={smsConfig.endpoint}
                   onChange={(e) => setSmsConfig({ ...smsConfig, endpoint: e.target.value })}
-                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-mono text-[11px] focus:outline-none focus:border-blue-500"
+                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 text-[11px] focus:outline-none focus:border-blue-500"
                   placeholder="https://app.text.lk/api/v3/sms/send"
                 />
               </div>
@@ -1655,7 +1655,7 @@ export default function SettingsTab({
                   type="text"
                   value={smsConfig.ownerPhones}
                   onChange={(e) => setSmsConfig({ ...smsConfig, ownerPhones: e.target.value })}
-                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-mono focus:outline-none focus:border-blue-500"
+                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 focus:outline-none focus:border-blue-500"
                   placeholder="0771234567, 0719876543"
                 />
               </div>
@@ -1775,7 +1775,7 @@ export default function SettingsTab({
                 <Send className="w-4 h-4 text-blue-600" />
                 <span>Gateway Diagnostics: Send Test SMS</span>
               </h3>
-              <span className="text-[10px] text-gray-500 font-mono">Carrier Direct Testing (Text.lk)</span>
+              <span className="text-[10px] text-gray-500 ">Carrier Direct Testing (Text.lk)</span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end text-xs">
@@ -1784,7 +1784,7 @@ export default function SettingsTab({
                   <label className="font-bold text-gray-700">
                     Test Recipient Mobile Number
                   </label>
-                  <span className="text-[10px] font-mono text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded font-bold">
+                  <span className="text-[10px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded font-bold">
                     Target: {formattedTestRecipientPreview || 'Enter number'}
                   </span>
                 </div>
@@ -1794,7 +1794,7 @@ export default function SettingsTab({
                     type="text"
                     value={testRecipient}
                     onChange={(e) => setTestRecipient(e.target.value)}
-                    className="w-full pl-9 pr-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-mono font-bold focus:outline-none focus:border-blue-500"
+                    className="w-full pl-9 pr-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-bold focus:outline-none focus:border-blue-500"
                     placeholder="e.g. 0768657349 or 94768657349"
                   />
                 </div>
@@ -1829,9 +1829,9 @@ export default function SettingsTab({
             <div className="p-3.5 bg-gray-50 rounded-xl border border-gray-200/80 text-xs space-y-1">
               <div className="flex items-center justify-between">
                 <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider block">Dispatched Payload Preview</span>
-                <span className="text-[10px] font-mono text-gray-500">Sender: {smsConfig.senderMask || 'TextLK'} &bull; Recipient: {formattedTestRecipientPreview}</span>
+                <span className="text-[10px] text-gray-500">Sender: {smsConfig.senderMask || 'TextLK'} &bull; Recipient: {formattedTestRecipientPreview}</span>
               </div>
-              <p className="font-mono text-slate-700 leading-relaxed text-[11px] bg-white p-2.5 rounded-lg border border-gray-200/60">
+              <p className="text-slate-700 leading-relaxed text-[11px] bg-white p-2.5 rounded-lg border border-gray-200/60">
                 Samse Auto Mart: Test SMS alert from {stationProfile.stationName}. Gateway is ACTIVE & operational.
               </p>
             </div>
@@ -1855,7 +1855,7 @@ export default function SettingsTab({
                         {testResult.success ? 'SMS Dispatch Processed' : 'SMS Dispatch Failed'}
                       </span>
                       {testResult.httpStatus && (
-                        <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
                           testResult.httpStatus === 200 
                             ? 'bg-emerald-200/80 text-emerald-900' 
                             : 'bg-rose-200/80 text-rose-900'
@@ -1866,7 +1866,7 @@ export default function SettingsTab({
                     </div>
                     <p className="text-[11px] leading-relaxed opacity-95">{testResult.message}</p>
                     
-                    <div className="flex flex-wrap items-center gap-3 text-[10px] font-mono pt-1 opacity-90 border-t border-black/5">
+                    <div className="flex flex-wrap items-center gap-3 text-[10px] pt-1 opacity-90 border-t border-black/5">
                       <span>Recipient: <strong>{testResult.recipientFormatted}</strong></span>
                       <span>&bull;</span>
                       <span>Sender ID: <strong>{testResult.senderUsed}</strong></span>
@@ -1875,7 +1875,7 @@ export default function SettingsTab({
                     </div>
 
                     {testResult.rawResponse && (
-                      <details className="mt-2 text-[10px] font-mono bg-white/80 p-2.5 rounded-lg border border-gray-200/80">
+                      <details className="mt-2 text-[10px] bg-white/80 p-2.5 rounded-lg border border-gray-200/80">
                         <summary className="cursor-pointer font-bold text-gray-700 hover:text-gray-900 select-none">
                           View Carrier Raw JSON Response &amp; Headers
                         </summary>
@@ -1941,7 +1941,7 @@ export default function SettingsTab({
                     <AlertTriangle className="w-4 h-4 text-rose-500" />
                     <span className="font-bold text-slate-900 text-sm">Underground Tank Low Stock Alert Threshold</span>
                   </div>
-                  <span className="font-mono font-extrabold text-sm text-slate-900 px-2.5 py-1 bg-white border border-gray-200 rounded-lg tabular-nums">
+                  <span className="font-extrabold text-sm text-slate-900 px-2.5 py-1 bg-white border border-gray-200 rounded-lg tabular-nums">
                     {operationalRules.tankLowStockThreshold}%
                   </span>
                 </div>
@@ -1949,7 +1949,7 @@ export default function SettingsTab({
                   Triggers visual dashboard warnings and emergency SMS dispatches when an underground fuel tank's capacity drops to or below this percentage.
                 </p>
                 <div className="pt-2 flex items-center gap-4">
-                  <span className="text-gray-400 font-mono text-[11px]">10%</span>
+                  <span className="text-gray-400 text-[11px]">10%</span>
                   <input
                     type="range"
                     min="10"
@@ -1959,7 +1959,7 @@ export default function SettingsTab({
                     onChange={(e) => setOperationalRules({ ...operationalRules, tankLowStockThreshold: Number(e.target.value) })}
                     className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
                   />
-                  <span className="text-gray-400 font-mono text-[11px]">60%</span>
+                  <span className="text-gray-400 text-[11px]">60%</span>
                 </div>
               </div>
 
@@ -1977,7 +1977,7 @@ export default function SettingsTab({
                       type="number"
                       value={operationalRules.varianceToleranceLiters}
                       onChange={(e) => setOperationalRules({ ...operationalRules, varianceToleranceLiters: Number(e.target.value) || 0 })}
-                      className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-slate-900 font-mono font-bold text-sm focus:outline-none focus:border-blue-500"
+                      className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-slate-900 font-bold text-sm focus:outline-none focus:border-blue-500"
                     />
                     <span className="font-bold text-gray-500">Liters</span>
                   </div>
@@ -1996,7 +1996,7 @@ export default function SettingsTab({
                       type="number"
                       value={operationalRules.cashDiscrepancyToleranceRs}
                       onChange={(e) => setOperationalRules({ ...operationalRules, cashDiscrepancyToleranceRs: Number(e.target.value) || 0 })}
-                      className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-slate-900 font-mono font-bold text-sm focus:outline-none focus:border-blue-500"
+                      className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-slate-900 font-bold text-sm focus:outline-none focus:border-blue-500"
                     />
                   </div>
                 </div>
@@ -2051,7 +2051,7 @@ export default function SettingsTab({
                 </h3>
                 <p className="text-xs text-gray-500 mt-0.5">Download local offline copies of all system ledgers, shifts, and customer balances</p>
               </div>
-              <span className="text-[10px] text-gray-400 font-mono">JSON & CSV Standards</span>
+              <span className="text-[10px] text-gray-400 ">JSON & CSV Standards</span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 pt-1">
@@ -2194,7 +2194,7 @@ export default function SettingsTab({
                   )}
                 </button>
               </div>
-              <pre className="p-4 bg-gray-950 text-emerald-400 font-mono text-[11px] leading-normal rounded-xl h-44 overflow-y-auto border border-gray-900 shadow-inner">
+              <pre className="p-4 bg-gray-950 text-emerald-400 text-[11px] leading-normal rounded-xl h-44 overflow-y-auto border border-gray-900 shadow-inner">
                 {SUPABASE_SQL}
               </pre>
             </div>

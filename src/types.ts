@@ -236,6 +236,33 @@ export interface CreditPayment {
   notes?: string;
 }
 
+export interface TankDipEntry {
+  tankId: string;
+  tankName: string;
+  fuelType: string;
+  systemVolume: number; // Current calculated Liters in system
+  physicalDip: number; // Measured physical dip volume in Liters
+  varianceLiters: number; // physicalDip - systemVolume
+  variancePercentage: number; // (varianceLiters / systemVolume) * 100
+  status: 'Normal' | 'Gain' | 'Loss' | 'Warning';
+  notes?: string;
+}
+
+export interface DailyDipSession {
+  id: string;
+  date: string; // e.g. "2026-08-14"
+  time: string; // e.g. "08:30"
+  shift: string; // e.g. "Morning", "Evening", "Night", "Daily Audit"
+  supervisor: string;
+  remarks?: string;
+  entries: TankDipEntry[];
+  totalSystemVolume: number;
+  totalPhysicalDip: number;
+  totalVarianceLiters: number;
+  tanksCount: number;
+  createdAt?: string;
+}
+
 export interface TankDipLog {
   id: string;
   date: string;

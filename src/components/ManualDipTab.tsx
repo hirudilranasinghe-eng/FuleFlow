@@ -6,22 +6,31 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Droplet, Plus, RefreshCw, Download, Search, AlertTriangle, 
-  TrendingUp, X, CheckCircle2
+  TrendingUp, TrendingDown, X, CheckCircle2, Eye, Calendar,
+  Clock, User, FileText, Check, ArrowUpDown, ChevronRight
 } from 'lucide-react';
-import { FuelTank, TankDipLog } from '../types';
+import { FuelTank, DailyDipSession, TankDipEntry } from '../types';
 import { supabase } from '../lib/supabase';
 
 interface ManualDipTabProps {
   tanks?: FuelTank[];
+  setTanks?: React.Dispatch<React.SetStateAction<FuelTank[]>>;
 }
 
+const STORAGE_KEY_SESSIONS = 'fms_daily_dip_sessions';
+
 export default function ManualDipTab({ tanks = [] }: ManualDipTabProps) {
-  const [dipLogs, setDipLogs] = useState<TankDipLog[]>([]);
+  const [sessions, setSessions] = useState<DailyDipSession[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+  
+  // Modals state
+  const [isEntryModalOpen, setIsEntryModalOpen] = useState<boolean>(false);
+  const [selectedDetailSession, setSelectedDetailSession] = useState<DailyDipSession | null>(null);
+  
+  // Search & Filter
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [selectedTankFilter, setSelectedTankFilter] = useState<string>('all');
+  const [selectedShiftFilter, setSelectedShiftFilter] = useState<string>('all');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Available Tanks (Naturally sorted in ascending order: Tank 01, Tank 02, etc.)
@@ -32,222 +41,308 @@ export default function ManualDipTab({ tanks = [] }: ManualDipTabProps) {
       { id: 'tank-3', name: 'Tank 03', fuelType: 'Auto Diesel' as const, capacity: 25000, currentLevel: 18000, pricePerLiter: 333 },
       { id: 'tank-4', name: 'Tank 04', fuelType: 'Super Diesel' as const, capacity: 15000, currentLevel: 8500, pricePerLiter: 375 },
     ];
-    return [...rawList].sort((a, b) => (a.name || a.id || '').localeCompare(b.name || b.id || '', undefined, { numeric: true, sensitivity: 'base' }));
+    return [...rawList].sort((a, b) => 
+      (a.name || a.id || '').localeCompare(b.name || b.id || '', undefined, { numeric: true, sensitivity: 'base' })
+    );
   }, [tanks]);
 
-  // Form State
+  // Form State for Multi-Tank Entry Modal
   const [formData, setFormData] = useState({
     date: new Date().toISOString().slice(0, 10),
-    tankId: availableTanks[0]?.id || 'tank-1',
-    openingDip: '',
-    closingDip: '',
-    pumpSales: '0',
-    bowserReceipts: '0',
-    recordedBy: 'Supervisor',
-    notes: ''
+    time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+    shift: 'Morning (06:00 - 14:00)',
+    supervisor: 'Supervisor',
+    remarks: '',
   });
 
-  // Automatically update tankId when availableTanks changes or modal opens
-  useEffect(() => {
-    if (!formData.tankId && availableTanks.length > 0) {
-      setFormData(prev => ({ ...prev, tankId: availableTanks[0].id }));
-    }
-  }, [availableTanks]);
+  // Physical dip inputs mapped by tankId: string
+  const [dipInputs, setDipInputs] = useState<{ [tankId: string]: string }>({});
 
-  // Fetch dip logs directly from Supabase
-  const fetchDipLogs = async () => {
+  // Initialize dip inputs with current system volume when modal opens
+  const handleOpenNewDipModal = () => {
+    const initialInputs: { [tankId: string]: string } = {};
+    availableTanks.forEach(tank => {
+      // Default to empty or currentLevel for easy editing
+      initialInputs[tank.id] = '';
+    });
+    setDipInputs(initialInputs);
+    setFormData({
+      date: new Date().toISOString().slice(0, 10),
+      time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+      shift: 'Morning (06:00 - 14:00)',
+      supervisor: 'Supervisor',
+      remarks: '',
+    });
+    setIsEntryModalOpen(true);
+  };
+
+  // Toast Notification Trigger
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  // Fetch Dip Sessions directly from Supabase & LocalStorage fallback
+  const fetchDipSessions = async () => {
     setIsLoading(true);
     setErrorMsg(null);
+
+    // 1. Try local storage first for instant cached rendering
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY_SESSIONS);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setSessions(parsed);
+        }
+      }
+    } catch (_) {}
+
+    // 2. Fetch from Supabase
     try {
       const isConfigured = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
       if (!isConfigured) {
-        setDipLogs([]);
         setIsLoading(false);
         return;
       }
 
       const { data, error } = await supabase
-        .from('tank_dip_logs')
+        .from('daily_dip_sessions')
         .select('*')
         .order('date', { ascending: false });
 
       if (error) {
-        console.warn("Supabase tank_dip_logs fetch error:", error.message);
-        setErrorMsg("Failed to load records from Supabase. Showing offline fallback data.");
-        setDipLogs([]);
-      } else if (data) {
-        const mappedLogs: TankDipLog[] = data.map((d: any) => ({
+        console.warn("Supabase daily_dip_sessions notice:", error.message);
+      } else if (data && data.length > 0) {
+        const mappedSessions: DailyDipSession[] = data.map((d: any) => ({
           id: d.id,
           date: d.date,
-          tankId: d.tank_id || d.tankId || 'tank-1',
-          tankName: d.tank_name || d.tankName || 'Underground Tank',
-          fuelType: d.fuel_type || d.fuelType || 'Petrol 92',
-          openingDip: Number(d.opening_dip ?? d.openingDip) || 0,
-          closingDip: Number(d.closing_dip ?? d.closingDip) || 0,
-          bowserReceipts: Number(d.bowser_receipts ?? d.bowserReceipts) || 0,
-          pumpSales: Number(d.pump_sales ?? d.pumpSales) || 0,
-          expectedStock: Number(d.expected_stock ?? d.expectedStock) || 0,
-          varianceLiters: Number(d.variance_liters ?? d.varianceLiters) || 0,
-          variancePercentage: Number(d.variance_percentage ?? d.variancePercentage) || 0,
-          recordedBy: d.recorded_by || d.recordedBy || 'Supervisor',
-          notes: d.notes || ''
+          time: d.time || '08:00',
+          shift: d.shift || 'Morning',
+          supervisor: d.supervisor || d.recorded_by || 'Supervisor',
+          remarks: d.remarks || d.notes || '',
+          entries: Array.isArray(d.entries) ? d.entries : (typeof d.entries === 'string' ? JSON.parse(d.entries) : []),
+          totalSystemVolume: Number(d.total_system_volume ?? d.totalSystemVolume) || 0,
+          totalPhysicalDip: Number(d.total_physical_dip ?? d.totalPhysicalDip) || 0,
+          totalVarianceLiters: Number(d.total_variance_liters ?? d.totalVarianceLiters) || 0,
+          tanksCount: Number(d.tanks_count ?? d.tanksCount) || 0,
+          createdAt: d.created_at || d.createdAt
         }));
-        setDipLogs(mappedLogs);
+        setSessions(mappedSessions);
+        try {
+          localStorage.setItem(STORAGE_KEY_SESSIONS, JSON.stringify(mappedSessions));
+        } catch (_) {}
       }
-    } catch (err: any) {
-      console.warn("Error fetching tank_dip_logs:", err);
-      setErrorMsg("Error connecting to database.");
+    } catch (err) {
+      console.warn("Error fetching daily_dip_sessions:", err);
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchDipLogs();
+    fetchDipSessions();
   }, []);
 
-  // Show temporary toast notification
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3000);
-  };
+  // Compute live multi-tank calculations for entry modal
+  const modalCalculations = useMemo(() => {
+    let totalSys = 0;
+    let totalPhys = 0;
+    let totalVar = 0;
+    let hasAnyInput = false;
 
-  // Form Submission Handler
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+    const tankRows = availableTanks.map(tank => {
+      const sysVol = Number(tank.currentLevel) || 0;
+      const rawInput = dipInputs[tank.id];
+      const physVol = rawInput !== undefined && rawInput.trim() !== '' ? Number(rawInput) : sysVol;
+      
+      if (rawInput !== undefined && rawInput.trim() !== '') {
+        hasAnyInput = true;
+      }
 
-    const selectedTankObj = availableTanks.find(t => t.id === formData.tankId) || availableTanks[0];
-    const tankName = selectedTankObj ? (selectedTankObj.name || selectedTankObj.id) : formData.tankId;
-    const fuelType = selectedTankObj ? selectedTankObj.fuelType : 'Petrol 92';
+      const varianceL = physVol - sysVol;
+      const varPct = sysVol > 0 ? (varianceL / sysVol) * 100 : 0;
+      
+      let status: 'Normal' | 'Gain' | 'Loss' | 'Warning' = 'Normal';
+      if (Math.abs(varPct) > 1.5) {
+        status = 'Warning';
+      } else if (varianceL > 0) {
+        status = 'Gain';
+      } else if (varianceL < 0) {
+        status = 'Loss';
+      }
 
-    const open = Number(formData.openingDip) || 0;
-    const close = Number(formData.closingDip) || 0;
-    const receipts = Number(formData.bowserReceipts) || 0;
-    const sales = Number(formData.pumpSales) || 0;
+      totalSys += sysVol;
+      totalPhys += physVol;
+      totalVar += varianceL;
 
-    const expected = open + receipts - sales;
-    const varianceL = close - expected;
-    const variancePct = expected > 0 ? (varianceL / expected) * 100 : 0;
-
-    const newRecord: TankDipLog = {
-      id: `dip_${Date.now()}`,
-      date: formData.date || new Date().toISOString().slice(0, 10),
-      tankId: formData.tankId,
-      tankName: tankName,
-      fuelType: fuelType,
-      openingDip: open,
-      closingDip: close,
-      bowserReceipts: receipts,
-      pumpSales: sales,
-      expectedStock: expected,
-      varianceLiters: varianceL,
-      variancePercentage: variancePct,
-      recordedBy: formData.recordedBy || 'Supervisor',
-      notes: formData.notes
-    };
-
-    // Optimistic UI update
-    setDipLogs(prev => [newRecord, ...prev]);
-    setIsModalOpen(false);
-
-    // Reset Form
-    setFormData({
-      date: new Date().toISOString().slice(0, 10),
-      tankId: availableTanks[0]?.id || 'tank-1',
-      openingDip: '',
-      closingDip: '',
-      pumpSales: '0',
-      bowserReceipts: '0',
-      recordedBy: 'Supervisor',
-      notes: ''
+      return {
+        tankId: tank.id,
+        tankName: tank.name,
+        fuelType: tank.fuelType,
+        systemVolume: sysVol,
+        physicalDip: physVol,
+        rawInput: rawInput || '',
+        varianceLiters: varianceL,
+        variancePercentage: varPct,
+        status
+      };
     });
 
-    showToast("Daily Dip Record successfully saved to database!");
+    return {
+      tankRows,
+      totalSys,
+      totalPhys,
+      totalVar,
+      hasAnyInput
+    };
+  }, [availableTanks, dipInputs]);
 
-    // Save directly to Supabase
+  // Handle Save All-Tanks Daily Dip Record
+  const handleSaveDailyDip = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const tankEntries: TankDipEntry[] = modalCalculations.tankRows.map(row => ({
+      tankId: row.tankId,
+      tankName: row.tankName,
+      fuelType: row.fuelType,
+      systemVolume: row.systemVolume,
+      physicalDip: row.physicalDip,
+      varianceLiters: row.varianceLiters,
+      variancePercentage: row.variancePercentage,
+      status: row.status
+    }));
+
+    const newSession: DailyDipSession = {
+      id: `dip_session_${Date.now()}`,
+      date: formData.date || new Date().toISOString().slice(0, 10),
+      time: formData.time || '08:00',
+      shift: formData.shift,
+      supervisor: formData.supervisor || 'Supervisor',
+      remarks: formData.remarks,
+      entries: tankEntries,
+      totalSystemVolume: modalCalculations.totalSys,
+      totalPhysicalDip: modalCalculations.totalPhys,
+      totalVarianceLiters: modalCalculations.totalVar,
+      tanksCount: tankEntries.length,
+      createdAt: new Date().toISOString()
+    };
+
+    // Optimistic UI state update
+    const updatedSessions = [newSession, ...sessions];
+    setSessions(updatedSessions);
     try {
-      const { error } = await supabase.from('tank_dip_logs').insert([{
-        id: newRecord.id,
-        date: newRecord.date,
-        tank_id: newRecord.tankId,
-        tank_name: newRecord.tankName,
-        fuel_type: newRecord.fuelType,
-        opening_dip: newRecord.openingDip,
-        closing_dip: newRecord.closingDip,
-        bowser_receipts: newRecord.bowserReceipts,
-        pump_sales: newRecord.pumpSales,
-        expected_stock: newRecord.expectedStock,
-        variance_liters: newRecord.varianceLiters,
-        variance_percentage: newRecord.variancePercentage,
-        recorded_by: newRecord.recordedBy,
-        notes: newRecord.notes
+      localStorage.setItem(STORAGE_KEY_SESSIONS, JSON.stringify(updatedSessions));
+    } catch (_) {}
+
+    setIsEntryModalOpen(false);
+    showToast(`Daily Dip Record (${tankEntries.length} tanks) saved successfully!`);
+
+    // Sync to Supabase
+    try {
+      const { error } = await supabase.from('daily_dip_sessions').insert([{
+        id: newSession.id,
+        date: newSession.date,
+        time: newSession.time,
+        shift: newSession.shift,
+        supervisor: newSession.supervisor,
+        remarks: newSession.remarks,
+        entries: newSession.entries,
+        total_system_volume: newSession.totalSystemVolume,
+        total_physical_dip: newSession.totalPhysicalDip,
+        total_variance_liters: newSession.totalVarianceLiters,
+        tanks_count: newSession.tanksCount,
+        created_at: newSession.createdAt
       }]);
 
       if (error) {
-        console.warn("Supabase insert notice:", error.message);
-      } else {
-        // Re-fetch to ensure sync with remote DB ID
-        fetchDipLogs();
+        console.warn("Supabase insert notice for daily_dip_sessions:", error.message);
       }
     } catch (err) {
-      console.warn("Supabase dip insert catch:", err);
+      console.warn("Supabase dip insert error:", err);
     }
   };
 
-  // Filtered Logs
-  const filteredDipLogs = useMemo(() => {
-    return dipLogs.filter(log => {
+  // Filtered Sessions
+  const filteredSessions = useMemo(() => {
+    return sessions.filter(session => {
       const matchesSearch = 
-        log.date.includes(searchQuery) || 
-        log.tankName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        log.fuelType.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (log.recordedBy || '').toLowerCase().includes(searchQuery.toLowerCase());
+        session.date.includes(searchQuery) ||
+        session.supervisor.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (session.remarks || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        session.shift.toLowerCase().includes(searchQuery.toLowerCase());
 
-      const matchesTank = selectedTankFilter === 'all' || log.tankId === selectedTankFilter || log.fuelType === selectedTankFilter;
+      const matchesShift = selectedShiftFilter === 'all' || session.shift === selectedShiftFilter;
 
-      return matchesSearch && matchesTank;
+      return matchesSearch && matchesShift;
     });
-  }, [dipLogs, searchQuery, selectedTankFilter]);
+  }, [sessions, searchQuery, selectedShiftFilter]);
 
-  // Statistics
-  const stats = useMemo(() => {
-    const totalEntries = dipLogs.length;
-    const netVarianceLiters = dipLogs.reduce((acc, curr) => acc + curr.varianceLiters, 0);
-    const latestEntry = dipLogs[0]?.date || 'N/A';
-    const totalPumpSales = dipLogs.reduce((acc, curr) => acc + curr.pumpSales, 0);
-
-    return { totalEntries, netVarianceLiters, latestEntry, totalPumpSales };
-  }, [dipLogs]);
-
-  // Export CSV
-  const exportCSV = () => {
-    if (dipLogs.length === 0) return;
+  // Master Export CSV Functionality
+  const exportMasterCSV = () => {
+    if (sessions.length === 0) {
+      showToast("No dip records available to export.");
+      return;
+    }
 
     const headers = [
-      'Date', 'Tank Name', 'Fuel Grade', 'Opening Dip (L)', 
-      'Bowser Receipts (L)', 'Dispensed Sales (L)', 'Expected Stock (L)', 
-      'Closing Dip (L)', 'Gain/Loss Variance (L)', 'Variance (%)', 'Recorded By'
+      'Audit Date', 'Audit Time', 'Shift/Session', 'Supervisor', 
+      'Total Tanks', 'Total System Volume (L)', 'Total Physical Dip (L)', 
+      'Net Variance (L)', 'Net Variance (%)', 'Remarks'
     ];
 
-    const rows = dipLogs.map(d => [
-      d.date,
-      d.tankName,
-      d.fuelType,
-      d.openingDip,
-      d.bowserReceipts,
-      d.pumpSales,
-      d.expectedStock,
-      d.closingDip,
-      d.varianceLiters.toFixed(2),
-      d.variancePercentage.toFixed(2) + '%',
-      d.recordedBy || 'Supervisor'
-    ]);
+    const rows = sessions.map(s => {
+      const varPct = s.totalSystemVolume > 0 ? (s.totalVarianceLiters / s.totalSystemVolume) * 100 : 0;
+      return [
+        s.date,
+        s.time,
+        `"${s.shift}"`,
+        `"${s.supervisor}"`,
+        s.tanksCount,
+        s.totalSystemVolume.toFixed(2),
+        s.totalPhysicalDip.toFixed(2),
+        s.totalVarianceLiters.toFixed(2),
+        `${varPct.toFixed(2)}%`,
+        `"${(s.remarks || '').replace(/"/g, '""')}"`
+      ];
+    });
 
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `Manual_Dip_Records_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute('download', `Daily_Dip_Audit_Master_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast("Master Dip Records exported to CSV successfully.");
+  };
+
+  // Single Session Tank-by-Tank CSV Export
+  const exportSingleSessionCSV = (session: DailyDipSession) => {
+    const headers = [
+      'Audit Date', 'Shift', 'Tank Name', 'Fuel Grade', 
+      'System Volume (L)', 'Physical Dip (L)', 'Variance (L)', 'Variance (%)', 'Status', 'Supervisor'
+    ];
+
+    const rows = session.entries.map(e => [
+      session.date,
+      `"${session.shift}"`,
+      `"${e.tankName}"`,
+      `"${e.fuelType}"`,
+      e.systemVolume.toFixed(2),
+      e.physicalDip.toFixed(2),
+      e.varianceLiters.toFixed(2),
+      `${e.variancePercentage.toFixed(2)}%`,
+      e.status,
+      `"${session.supervisor}"`
+    ]);
+
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `Dip_Breakdown_${session.date}_${session.shift.replace(/\s+/g, '_')}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -257,38 +352,57 @@ export default function ManualDipTab({ tanks = [] }: ManualDipTabProps) {
     <div className="space-y-6 font-sans">
       {/* Toast Notification */}
       {toastMessage && (
-        <div className="fixed top-5 right-5 z-50 bg-gray-900 text-white px-4 py-3 rounded-2xl shadow-xl flex items-center gap-2.5 text-xs font-semibold animate-in fade-in slide-in-from-top-2 duration-200">
-          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+        <div className="fixed top-5 right-5 z-50 bg-slate-900 text-white px-4 py-3 rounded-2xl shadow-xl flex items-center gap-2.5 text-xs font-semibold animate-in fade-in slide-in-from-top-2 duration-200">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>{toastMessage}</span>
         </div>
       )}
 
-      {/* Top Section Header */}
+      {/* Top Action Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <div className="p-1.5 bg-blue-50 text-blue-600 rounded-xl border border-blue-100">
               <Droplet className="w-4 h-4" />
             </div>
-            <h1 className="text-lg font-bold text-slate-900 tracking-tight font-sans">Manual Dip Record</h1>
+            <h1 className="text-lg font-bold text-slate-900 tracking-tight font-sans">Manual Dip Record &amp; Stock Audit</h1>
           </div>
           <p className="text-xs text-gray-500 font-medium pl-0.5">
-            Record physical underground tank dip readings and perform daily stock reconciliation with automatic evaporation gain/loss calculations.
+            Simultaneously record physical dip readings across all underground storage tanks, calculate live variances, and review audit history.
           </p>
         </div>
 
         <div className="flex items-center gap-2.5 self-start sm:self-auto">
           <button
-            onClick={() => setIsModalOpen(true)}
+            onClick={fetchDipSessions}
+            className="p-2 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs"
+            title="Refresh from Database"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+          </button>
+
+          <button
+            onClick={exportMasterCSV}
+            disabled={sessions.length === 0}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white hover:bg-gray-50 disabled:opacity-50 text-gray-700 border border-gray-200 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs"
+          >
+            <Download className="w-3.5 h-3.5 text-gray-600" />
+            <span>Export CSV</span>
+          </button>
+
+          {/* Prominent Add New Dip Button */}
+          <button
+            id="btn-add-daily-dip"
+            onClick={handleOpenNewDipModal}
             className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-sm hover:shadow-md active:scale-95"
           >
             <Plus className="w-4 h-4" />
-            <span>Add Daily Dip Record</span>
+            <span>Add New Dip</span>
           </button>
         </div>
       </div>
 
-      {/* Main Dip Logs Table & Filters */}
+      {/* Master Daily Dip History List Table */}
       <div className="bg-white rounded-2xl border border-gray-200/80 p-5 shadow-2xs space-y-4">
         {/* Controls Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-100">
@@ -296,7 +410,7 @@ export default function ManualDipTab({ tanks = [] }: ManualDipTabProps) {
             <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
-              placeholder="Search date, tank name, supervisor..."
+              placeholder="Search by date, supervisor, shift..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-9 pr-3 py-1.5 bg-gray-50 border border-gray-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
@@ -304,34 +418,18 @@ export default function ManualDipTab({ tanks = [] }: ManualDipTabProps) {
           </div>
 
           <div className="flex items-center gap-2.5">
-            <span className="text-xs font-bold text-gray-500">Filter Tank:</span>
+            <span className="text-xs font-bold text-gray-500">Filter Shift:</span>
             <select
-              value={selectedTankFilter}
-              onChange={(e) => setSelectedTankFilter(e.target.value)}
+              value={selectedShiftFilter}
+              onChange={(e) => setSelectedShiftFilter(e.target.value)}
               className="px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
             >
-              <option value="all">All Tanks & Grades</option>
-              {availableTanks.map(t => (
-                <option key={t.id} value={t.id}>{t.name} ({t.fuelType})</option>
-              ))}
+              <option value="all">All Shifts &amp; Audits</option>
+              <option value="Morning (06:00 - 14:00)">Morning (06:00 - 14:00)</option>
+              <option value="Evening (14:00 - 22:00)">Evening (14:00 - 22:00)</option>
+              <option value="Night (22:00 - 06:00)">Night (22:00 - 06:00)</option>
+              <option value="Daily Audit / Dip Reconciliation">Daily Audit / Dip Reconciliation</option>
             </select>
-
-            <button
-              onClick={fetchDipLogs}
-              className="p-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs"
-              title="Refresh Data from Supabase"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-            </button>
-
-            <button
-              onClick={exportCSV}
-              disabled={dipLogs.length === 0}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 disabled:opacity-50 text-gray-700 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs"
-            >
-              <Download className="w-3.5 h-3.5 text-gray-600" />
-              <span>Export CSV</span>
-            </button>
           </div>
         </div>
 
@@ -339,60 +437,117 @@ export default function ManualDipTab({ tanks = [] }: ManualDipTabProps) {
         {errorMsg && (
           <div className="p-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl text-xs font-medium flex items-center justify-between">
             <span>{errorMsg}</span>
-            <button onClick={fetchDipLogs} className="underline font-bold text-amber-950 cursor-pointer">Retry</button>
+            <button onClick={fetchDipSessions} className="underline font-bold text-amber-950 cursor-pointer">Retry</button>
           </div>
         )}
 
-        {/* Table View */}
-        {isLoading ? (
+        {/* Master History Table */}
+        {isLoading && sessions.length === 0 ? (
           <div className="py-12 text-center text-xs text-gray-400 font-semibold animate-pulse">
-            Loading daily dip logs from Supabase...
+            Loading daily dip audit sessions...
           </div>
-        ) : filteredDipLogs.length > 0 ? (
+        ) : filteredSessions.length > 0 ? (
           <div className="overflow-x-auto border border-gray-100 rounded-xl">
             <table className="w-full text-left text-xs">
               <thead className="bg-gray-50 font-bold text-gray-500 text-[10px] uppercase border-b border-gray-100">
                 <tr>
-                  <th className="p-3">Date</th>
-                  <th className="p-3">Tank & Fuel Grade</th>
-                  <th className="p-3 text-right">Opening Dip (L)</th>
-                  <th className="p-3 text-right">Bowser Receipts (L)</th>
-                  <th className="p-3 text-right">Meter Sales (L)</th>
-                  <th className="p-3 text-right">Expected Stock (L)</th>
-                  <th className="p-3 text-right">Closing Dip (L)</th>
-                  <th className="p-3 text-right">Gain / Loss Variance</th>
-                  <th className="p-3">Recorded By</th>
+                  <th className="p-3.5">Audit Date &amp; Time</th>
+                  <th className="p-3.5">Shift / Session</th>
+                  <th className="p-3.5">Recorded By</th>
+                  <th className="p-3.5 text-center">Tanks</th>
+                  <th className="p-3.5 text-right">System Book Volume</th>
+                  <th className="p-3.5 text-right">Physical Measured Dip</th>
+                  <th className="p-3.5 text-right">Net Total Variance</th>
+                  <th className="p-3.5 text-center">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 font-medium text-gray-800">
-                {filteredDipLogs.map((log) => {
-                  const isLoss = log.varianceLiters < 0;
+                {filteredSessions.map((session) => {
+                  const isLoss = session.totalVarianceLiters < 0;
+                  const isGain = session.totalVarianceLiters > 0;
+                  const varPct = session.totalSystemVolume > 0 
+                    ? (session.totalVarianceLiters / session.totalSystemVolume) * 100 
+                    : 0;
+
                   return (
-                    <tr key={log.id} className="hover:bg-gray-50/50 transition-colors">
-                      <td className="p-3 font-semibold text-gray-700 whitespace-nowrap">{log.date}</td>
-                      <td className="p-3 font-bold text-gray-900">
-                        <span>{log.tankName}</span>
-                        <span className="text-[10px] text-gray-500 font-normal ml-1.5">({log.fuelType})</span>
+                    <tr 
+                      key={session.id} 
+                      className="hover:bg-blue-50/30 transition-colors group cursor-pointer"
+                      onClick={() => setSelectedDetailSession(session)}
+                    >
+                      <td className="p-3.5 whitespace-nowrap">
+                        <div className="flex items-center gap-2">
+                          <Calendar className="w-3.5 h-3.5 text-blue-600" />
+                          <span className="font-bold text-slate-900">{session.date}</span>
+                          <span className="text-[11px] text-gray-400 font-medium">{session.time}</span>
+                        </div>
                       </td>
-                      <td className="p-3 text-right text-gray-700">{log.openingDip.toLocaleString('en-LK')} L</td>
-                      <td className="p-3 text-right text-emerald-700 font-semibold">{log.bowserReceipts > 0 ? `+${log.bowserReceipts.toLocaleString('en-LK')} L` : '0 L'}</td>
-                      <td className="p-3 text-right text-blue-600 font-semibold">{log.pumpSales.toLocaleString('en-LK')} L</td>
-                      <td className="p-3 text-right text-gray-700">{log.expectedStock.toLocaleString('en-LK')} L</td>
-                      <td className="p-3 text-right font-bold text-gray-900">{log.closingDip.toLocaleString('en-LK')} L</td>
-                      <td className="p-3 text-right whitespace-nowrap">
+
+                      <td className="p-3.5 font-semibold text-gray-700 whitespace-nowrap">
+                        <span className="px-2 py-0.5 rounded-lg bg-gray-100 text-gray-700 text-[11px] font-semibold">
+                          {session.shift}
+                        </span>
+                      </td>
+
+                      <td className="p-3.5 text-gray-700 font-semibold whitespace-nowrap">
+                        <div className="flex items-center gap-1.5">
+                          <User className="w-3.5 h-3.5 text-gray-400" />
+                          <span>{session.supervisor}</span>
+                        </div>
+                      </td>
+
+                      <td className="p-3.5 text-center whitespace-nowrap">
+                        <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-bold text-[11px]">
+                          {session.tanksCount || (session.entries?.length ?? 0)} Tanks
+                        </span>
+                      </td>
+
+                      <td className="p-3.5 text-right text-gray-600 font-semibold tabular-nums whitespace-nowrap">
+                        {session.totalSystemVolume.toLocaleString('en-LK', { maximumFractionDigits: 1 })} L
+                      </td>
+
+                      <td className="p-3.5 text-right font-bold text-slate-900 tabular-nums whitespace-nowrap">
+                        {session.totalPhysicalDip.toLocaleString('en-LK', { maximumFractionDigits: 1 })} L
+                      </td>
+
+                      <td className="p-3.5 text-right whitespace-nowrap">
                         {isLoss ? (
                           <span className="inline-flex items-center gap-1 font-bold text-rose-600 bg-rose-50 px-2.5 py-0.5 rounded-md border border-rose-200">
-                            <AlertTriangle className="w-3 h-3" />
-                            <span>{log.varianceLiters.toFixed(2)} L ({log.variancePercentage.toFixed(2)}%)</span>
+                            <TrendingDown className="w-3 h-3 shrink-0" />
+                            <span>{session.totalVarianceLiters.toFixed(1)} L ({varPct.toFixed(2)}%)</span>
+                          </span>
+                        ) : isGain ? (
+                          <span className="inline-flex items-center gap-1 font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-md border border-emerald-200">
+                            <TrendingUp className="w-3 h-3 shrink-0" />
+                            <span>+{session.totalVarianceLiters.toFixed(1)} L (+{varPct.toFixed(2)}%)</span>
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-md border border-emerald-200">
-                            <TrendingUp className="w-3 h-3" />
-                            <span>+{log.varianceLiters.toFixed(2)} L (+{log.variancePercentage.toFixed(2)}%)</span>
+                          <span className="inline-flex items-center gap-1 font-semibold text-gray-600 bg-gray-50 px-2 py-0.5 rounded-md border border-gray-200">
+                            <span>0.0 L (0.00%)</span>
                           </span>
                         )}
                       </td>
-                      <td className="p-3 text-gray-600 font-semibold">{log.recordedBy}</td>
+
+                      <td className="p-3.5 text-center whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            onClick={() => setSelectedDetailSession(session)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-[11px] font-bold transition-all cursor-pointer"
+                            title="View Tank Breakdown"
+                          >
+                            <Eye className="w-3 h-3" />
+                            <span>View Breakdown</span>
+                          </button>
+
+                          <button
+                            onClick={() => exportSingleSessionCSV(session)}
+                            className="p-1 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
+                            title="Export Session CSV"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}
@@ -404,181 +559,409 @@ export default function ManualDipTab({ tanks = [] }: ManualDipTabProps) {
             <div className="w-12 h-12 bg-blue-50 border border-blue-100 rounded-2xl flex items-center justify-center mx-auto text-blue-600">
               <Droplet className="w-6 h-6" />
             </div>
-            <h4 className="text-sm font-bold text-gray-900">No Daily Dip Logs Found</h4>
-            <p className="text-xs text-gray-500 max-w-sm mx-auto font-medium">
-              There are no physical dip records in Supabase. Click the button above to add your first daily tank dip reading.
+            <h4 className="text-sm font-bold text-gray-900">No Daily Dip Sessions Found</h4>
+            <p className="text-xs text-gray-500 max-w-md mx-auto font-medium">
+              No daily dip reconciliation entries match your criteria. Click the <strong className="text-blue-600">Add New Dip</strong> button above to record your first multi-tank dip measurement.
             </p>
           </div>
         )}
       </div>
 
-      {/* ENTRY FORM MODAL */}
-      {isModalOpen && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl space-y-5 border border-gray-200 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between pb-3 border-b border-gray-100">
-              <div className="flex items-center gap-2">
-                <Droplet className="w-5 h-5 text-blue-600" />
-                <h3 className="text-sm font-bold text-gray-900">Add Daily Dip Record</h3>
+      {/* ========================================================================= */}
+      {/* ALL-TANKS DAILY DIP ENTRY MODAL (SCREEN)                                   */}
+      {/* ========================================================================= */}
+      {isEntryModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-4xl w-full p-5 sm:p-7 shadow-2xl border border-gray-200 my-auto max-h-[92vh] flex flex-col">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-4 border-b border-gray-100 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-blue-50 text-blue-600 rounded-xl border border-blue-100">
+                  <Droplet className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 tracking-tight font-sans">
+                    Record All-Tanks Daily Dip Audit
+                  </h3>
+                  <p className="text-xs text-gray-500 font-medium">
+                    Enter physical measured dip volumes for all registered storage tanks simultaneously.
+                  </p>
+                </div>
               </div>
               <button
-                onClick={() => setIsModalOpen(false)}
-                className="p-1 hover:bg-gray-100 text-gray-400 hover:text-gray-600 rounded-lg transition-colors cursor-pointer"
+                onClick={() => setIsEntryModalOpen(false)}
+                className="p-1.5 hover:bg-gray-100 text-gray-400 hover:text-gray-600 rounded-xl transition-colors cursor-pointer"
               >
-                <X className="w-4 h-4" />
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4 text-xs">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* Modal Form Scrollable Body */}
+            <form onSubmit={handleSaveDailyDip} className="space-y-5 overflow-y-auto pt-4 flex-1 pr-1">
+              {/* Global Metadata Inputs */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 bg-slate-50/80 p-3.5 rounded-2xl border border-slate-200/80 text-xs">
                 <div>
-                  <label className="block font-semibold text-gray-700 mb-1">Date</label>
+                  <label className="block font-semibold text-gray-700 mb-1">Audit Date</label>
+                  <div className="relative">
+                    <input
+                      type="date"
+                      required
+                      value={formData.date}
+                      onChange={(e) => setFormData(p => ({ ...p, date: e.target.value }))}
+                      className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-gray-700 mb-1">Time</label>
                   <input
-                    type="date"
+                    type="time"
                     required
-                    value={formData.date}
-                    onChange={(e) => setFormData(p => ({ ...p, date: e.target.value }))}
-                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold"
+                    value={formData.time}
+                    onChange={(e) => setFormData(p => ({ ...p, time: e.target.value }))}
+                    className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold"
                   />
                 </div>
 
                 <div>
-                  <label className="block font-semibold text-gray-700 mb-1">Underground Tank Selection</label>
+                  <label className="block font-semibold text-gray-700 mb-1">Shift / Session</label>
                   <select
-                    value={formData.tankId}
-                    onChange={(e) => setFormData(p => ({ ...p, tankId: e.target.value }))}
-                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold"
+                    value={formData.shift}
+                    onChange={(e) => setFormData(p => ({ ...p, shift: e.target.value }))}
+                    className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold"
                   >
-                    {availableTanks.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name} ({t.fuelType})
-                      </option>
-                    ))}
+                    <option value="Morning (06:00 - 14:00)">Morning (06:00 - 14:00)</option>
+                    <option value="Evening (14:00 - 22:00)">Evening (14:00 - 22:00)</option>
+                    <option value="Night (22:00 - 06:00)">Night (22:00 - 06:00)</option>
+                    <option value="Daily Audit / Dip Reconciliation">Daily Audit / Dip Reconciliation</option>
                   </select>
                 </div>
-              </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold text-gray-700 mb-1">Opening Dip (Liters)</label>
+                  <label className="block font-semibold text-gray-700 mb-1">Supervisor Name</label>
                   <input
-                    type="number"
-                    step="any"
+                    type="text"
                     required
-                    placeholder="e.g. 15000"
-                    value={formData.openingDip}
-                    onChange={(e) => setFormData(p => ({ ...p, openingDip: e.target.value }))}
-                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-semibold text-gray-700 mb-1">Closing Dip (Liters)</label>
-                  <input
-                    type="number"
-                    step="any"
-                    required
-                    placeholder="e.g. 12450"
-                    value={formData.closingDip}
-                    onChange={(e) => setFormData(p => ({ ...p, closingDip: e.target.value }))}
-                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold"
+                    placeholder="Supervisor"
+                    value={formData.supervisor}
+                    onChange={(e) => setFormData(p => ({ ...p, supervisor: e.target.value }))}
+                    className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-semibold text-gray-700 mb-1">Dispensed Meter Sales (L)</label>
-                  <input
-                    type="number"
-                    step="any"
-                    placeholder="0"
-                    value={formData.pumpSales}
-                    onChange={(e) => setFormData(p => ({ ...p, pumpSales: e.target.value }))}
-                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold"
-                  />
+              {/* Tank-by-Tank Multi-Entry Table */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                    Underground Storage Tanks Dip Measurements ({availableTanks.length} Tanks)
+                  </h4>
+                  <span className="text-[11px] text-gray-500 font-medium">
+                    Auto-calculates variance = (Physical Dip - System Book Volume)
+                  </span>
                 </div>
 
-                <div>
-                  <label className="block font-semibold text-gray-700 mb-1">Bowser Receipts (L)</label>
-                  <input
-                    type="number"
-                    step="any"
-                    placeholder="0"
-                    value={formData.bowserReceipts}
-                    onChange={(e) => setFormData(p => ({ ...p, bowserReceipts: e.target.value }))}
-                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold"
-                  />
+                <div className="border border-gray-200 rounded-xl overflow-x-auto shadow-2xs">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-100 text-slate-700 font-bold uppercase text-[10px] border-b border-gray-200">
+                      <tr>
+                        <th className="p-3">#</th>
+                        <th className="p-3">Tank Identifier &amp; Grade</th>
+                        <th className="p-3 text-right">System Book Volume (L)</th>
+                        <th className="p-3 text-right w-44">Physical Dip Input (L)</th>
+                        <th className="p-3 text-right">Live Variance (L)</th>
+                        <th className="p-3 text-center">Variance % &amp; Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 font-medium text-slate-800">
+                      {modalCalculations.tankRows.map((row, idx) => {
+                        const isLoss = row.varianceLiters < 0;
+                        const isGain = row.varianceLiters > 0;
+                        return (
+                          <tr key={row.tankId} className="hover:bg-slate-50/60 transition-colors">
+                            <td className="p-3 text-center text-gray-400 font-bold">{idx + 1}</td>
+                            <td className="p-3">
+                              <div className="font-bold text-slate-900">{row.tankName}</div>
+                              <div className="text-[11px] text-gray-500">{row.fuelType}</div>
+                            </td>
+
+                            <td className="p-3 text-right text-slate-600 font-semibold tabular-nums">
+                              {row.systemVolume.toLocaleString('en-LK', { maximumFractionDigits: 1 })} L
+                            </td>
+
+                            <td className="p-3 text-right">
+                              <div className="relative">
+                                <input
+                                  type="number"
+                                  step="any"
+                                  min="0"
+                                  placeholder={row.systemVolume.toString()}
+                                  value={dipInputs[row.tankId] ?? ''}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setDipInputs(prev => ({ ...prev, [row.tankId]: val }));
+                                  }}
+                                  className="w-full px-3 py-1.5 text-right font-bold text-slate-900 bg-white border border-blue-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 tabular-nums text-xs"
+                                />
+                              </div>
+                            </td>
+
+                            <td className="p-3 text-right whitespace-nowrap tabular-nums">
+                              {isLoss ? (
+                                <span className="font-bold text-rose-600">
+                                  {row.varianceLiters.toFixed(1)} L
+                                </span>
+                              ) : isGain ? (
+                                <span className="font-bold text-emerald-600">
+                                  +{row.varianceLiters.toFixed(1)} L
+                                </span>
+                              ) : (
+                                <span className="font-semibold text-gray-500">0.0 L</span>
+                              )}
+                            </td>
+
+                            <td className="p-3 text-center whitespace-nowrap">
+                              {row.status === 'Warning' ? (
+                                <span className="inline-flex items-center gap-1 font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200 text-[10px]">
+                                  <AlertTriangle className="w-3 h-3" />
+                                  <span>{row.variancePercentage.toFixed(2)}% (High Deviation)</span>
+                                </span>
+                              ) : isLoss ? (
+                                <span className="inline-flex items-center gap-1 font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-200 text-[10px]">
+                                  <TrendingDown className="w-3 h-3" />
+                                  <span>{row.variancePercentage.toFixed(2)}% Loss</span>
+                                </span>
+                              ) : isGain ? (
+                                <span className="inline-flex items-center gap-1 font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200 text-[10px]">
+                                  <TrendingUp className="w-3 h-3" />
+                                  <span>+{row.variancePercentage.toFixed(2)}% Gain</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 font-semibold text-gray-600 bg-gray-50 px-2 py-0.5 rounded-md text-[10px]">
+                                  <span>0.00% Balanced</span>
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    {/* Multi-Tank Totals Summary Footer */}
+                    <tfoot className="bg-slate-50 border-t-2 border-slate-300 font-bold text-xs">
+                      <tr>
+                        <td colSpan={2} className="p-3 text-slate-800 uppercase tracking-wider font-extrabold">
+                          Total All Tanks:
+                        </td>
+                        <td className="p-3 text-right text-slate-700 tabular-nums">
+                          {modalCalculations.totalSys.toLocaleString('en-LK', { maximumFractionDigits: 1 })} L
+                        </td>
+                        <td className="p-3 text-right text-slate-900 font-extrabold tabular-nums">
+                          {modalCalculations.totalPhys.toLocaleString('en-LK', { maximumFractionDigits: 1 })} L
+                        </td>
+                        <td className="p-3 text-right tabular-nums">
+                          <span className={modalCalculations.totalVar >= 0 ? 'text-emerald-700 font-extrabold' : 'text-rose-600 font-extrabold'}>
+                            {modalCalculations.totalVar >= 0 ? `+${modalCalculations.totalVar.toFixed(1)} L` : `${modalCalculations.totalVar.toFixed(1)} L`}
+                          </span>
+                        </td>
+                        <td className="p-3 text-center">
+                          <span className={`text-[11px] font-extrabold ${modalCalculations.totalVar >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
+                            {modalCalculations.totalSys > 0 ? ((modalCalculations.totalVar / modalCalculations.totalSys) * 100).toFixed(2) : '0.00'}% Net
+                          </span>
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
                 </div>
               </div>
 
-              {/* LIVE CALCULATION PREVIEW BOX */}
-              {(() => {
-                const open = Number(formData.openingDip) || 0;
-                const close = Number(formData.closingDip) || 0;
-                const sales = Number(formData.pumpSales) || 0;
-                const receipts = Number(formData.bowserReceipts) || 0;
-                const expected = open + receipts - sales;
-                const variance = close - expected;
-                const varPct = expected > 0 ? (variance / expected) * 100 : 0;
-                const isLoss = variance < 0;
-
-                return (
-                  <div className="bg-blue-50/70 p-3.5 rounded-xl border border-blue-100 space-y-2">
-                    <span className="text-[10px] font-bold text-blue-900 uppercase tracking-wider block">Live Stock Calculation Preview</span>
-                    
-                    <div className="flex items-center justify-between text-xs text-gray-700 font-medium">
-                      <span>Expected Stock (Opening + Bowser Receipts - Sales):</span>
-                      <span className="font-bold text-gray-900">{expected.toLocaleString('en-LK')} L</span>
-                    </div>
-
-                    <div className="flex items-center justify-between text-xs text-gray-700 font-medium pt-1.5 border-t border-blue-100">
-                      <span>Evaporation Gain / Loss Variance:</span>
-                      <span className={`font-bold ${isLoss ? 'text-rose-600' : 'text-emerald-700'}`}>
-                        {variance >= 0 ? '+' : ''}{variance.toFixed(2)} L ({varPct >= 0 ? '+' : ''}{varPct.toFixed(2)}%)
-                      </span>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              <div>
-                <label className="block font-semibold text-gray-700 mb-1">Supervisor / Recorded By</label>
-                <input
-                  type="text"
-                  value={formData.recordedBy}
-                  onChange={(e) => setFormData(p => ({ ...p, recordedBy: e.target.value }))}
-                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold"
-                />
-              </div>
-
-              <div>
-                <label className="block font-semibold text-gray-700 mb-1">Notes / Remarks (Optional)</label>
+              {/* General Remarks Input */}
+              <div className="text-xs">
+                <label className="block font-semibold text-gray-700 mb-1">Audit Remarks &amp; Observations (Optional)</label>
                 <textarea
                   rows={2}
-                  placeholder="e.g. Temperature changes during dip measurement..."
-                  value={formData.notes}
-                  onChange={(e) => setFormData(p => ({ ...p, notes: e.target.value }))}
-                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold"
+                  placeholder="e.g., Dip measurements recorded after shift changeover. Calibration dip rod verified clean with water-finding paste..."
+                  value={formData.remarks}
+                  onChange={(e) => setFormData(p => ({ ...p, remarks: e.target.value }))}
+                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-medium"
                 />
               </div>
 
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-gray-100">
+              {/* Action Buttons */}
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-gray-100 shrink-0">
                 <button
                   type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                  onClick={() => setIsEntryModalOpen(false)}
+                  className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl text-xs font-bold transition-all cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs"
+                  className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-sm hover:shadow-md active:scale-95"
                 >
-                  Save Dip Record
+                  <Check className="w-4 h-4" />
+                  <span>Save Daily Dip Record</span>
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* DETAILED SINGLE RECORD BREAKDOWN VIEW MODAL                                */}
+      {/* ========================================================================= */}
+      {selectedDetailSession && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-3xl w-full p-6 shadow-2xl border border-gray-200 my-auto max-h-[92vh] flex flex-col space-y-5">
+            {/* Breakdown Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-gray-100 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-blue-50 text-blue-600 rounded-xl border border-blue-100">
+                  <FileText className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 tracking-tight font-sans">
+                    Daily Dip Audit Breakdown
+                  </h3>
+                  <div className="flex items-center gap-2 text-xs text-gray-500 font-medium">
+                    <span>{selectedDetailSession.date}</span>
+                    <span>•</span>
+                    <span>{selectedDetailSession.time}</span>
+                    <span>•</span>
+                    <span className="font-semibold text-blue-700">{selectedDetailSession.shift}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => exportSingleSessionCSV(selectedDetailSession)}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-bold transition-all cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Export CSV</span>
+                </button>
+                <button
+                  onClick={() => setSelectedDetailSession(null)}
+                  className="p-1.5 hover:bg-gray-100 text-gray-400 hover:text-gray-600 rounded-xl transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Summary Strip */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200/80 text-xs">
+              <div>
+                <span className="text-[10px] text-gray-400 uppercase font-bold block">Supervisor</span>
+                <span className="font-bold text-slate-800">{selectedDetailSession.supervisor}</span>
+              </div>
+              <div>
+                <span className="text-[10px] text-gray-400 uppercase font-bold block">Total System (L)</span>
+                <span className="font-bold text-slate-800 tabular-nums">
+                  {selectedDetailSession.totalSystemVolume.toLocaleString('en-LK', { maximumFractionDigits: 1 })} L
+                </span>
+              </div>
+              <div>
+                <span className="text-[10px] text-gray-400 uppercase font-bold block">Total Physical Dip (L)</span>
+                <span className="font-bold text-slate-900 tabular-nums">
+                  {selectedDetailSession.totalPhysicalDip.toLocaleString('en-LK', { maximumFractionDigits: 1 })} L
+                </span>
+              </div>
+              <div>
+                <span className="text-[10px] text-gray-400 uppercase font-bold block">Net Variance</span>
+                <span className={`font-extrabold tabular-nums ${selectedDetailSession.totalVarianceLiters >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
+                  {selectedDetailSession.totalVarianceLiters >= 0 ? `+${selectedDetailSession.totalVarianceLiters.toFixed(1)} L` : `${selectedDetailSession.totalVarianceLiters.toFixed(1)} L`}
+                </span>
+              </div>
+            </div>
+
+            {/* Tank-by-Tank Detailed Breakdown Table */}
+            <div className="overflow-y-auto flex-1 border border-gray-200 rounded-xl">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-gray-100 font-bold uppercase text-[10px] text-slate-600 border-b border-gray-200 sticky top-0">
+                  <tr>
+                    <th className="p-3">#</th>
+                    <th className="p-3">Tank &amp; Fuel Grade</th>
+                    <th className="p-3 text-right">System Book (L)</th>
+                    <th className="p-3 text-right">Physical Dip (L)</th>
+                    <th className="p-3 text-right">Variance (L)</th>
+                    <th className="p-3 text-right">Variance (%)</th>
+                    <th className="p-3 text-center">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 font-medium text-slate-800">
+                  {selectedDetailSession.entries.map((entry, idx) => {
+                    const isLoss = entry.varianceLiters < 0;
+                    const isGain = entry.varianceLiters > 0;
+                    return (
+                      <tr key={entry.tankId || idx} className="hover:bg-slate-50/50">
+                        <td className="p-3 text-center text-gray-400 font-bold">{idx + 1}</td>
+                        <td className="p-3 font-bold text-slate-900">
+                          <div>{entry.tankName}</div>
+                          <div className="text-[10px] text-gray-500 font-normal">{entry.fuelType}</div>
+                        </td>
+                        <td className="p-3 text-right text-gray-600 tabular-nums">
+                          {entry.systemVolume.toLocaleString('en-LK', { maximumFractionDigits: 1 })} L
+                        </td>
+                        <td className="p-3 text-right font-bold text-slate-900 tabular-nums">
+                          {entry.physicalDip.toLocaleString('en-LK', { maximumFractionDigits: 1 })} L
+                        </td>
+                        <td className="p-3 text-right font-bold tabular-nums whitespace-nowrap">
+                          <span className={isLoss ? 'text-rose-600' : isGain ? 'text-emerald-700' : 'text-gray-500'}>
+                            {isGain ? '+' : ''}{entry.varianceLiters.toFixed(1)} L
+                          </span>
+                        </td>
+                        <td className="p-3 text-right font-semibold tabular-nums whitespace-nowrap">
+                          <span className={isLoss ? 'text-rose-600' : isGain ? 'text-emerald-700' : 'text-gray-500'}>
+                            {entry.variancePercentage >= 0 ? '+' : ''}{entry.variancePercentage.toFixed(2)}%
+                          </span>
+                        </td>
+                        <td className="p-3 text-center whitespace-nowrap">
+                          {entry.status === 'Warning' ? (
+                            <span className="px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-md font-bold text-[10px]">
+                              High Deviation
+                            </span>
+                          ) : isLoss ? (
+                            <span className="px-2 py-0.5 bg-rose-50 text-rose-700 border border-rose-200 rounded-md font-bold text-[10px]">
+                              Loss
+                            </span>
+                          ) : isGain ? (
+                            <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md font-bold text-[10px]">
+                              Gain
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 bg-gray-50 text-gray-600 border border-gray-200 rounded-md font-semibold text-[10px]">
+                              Balanced
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Remarks Section */}
+            {selectedDetailSession.remarks && (
+              <div className="bg-blue-50/60 p-3 rounded-xl border border-blue-100 text-xs">
+                <span className="font-bold text-blue-950 block mb-0.5">Audit Remarks:</span>
+                <p className="text-slate-700 leading-relaxed font-medium">{selectedDetailSession.remarks}</p>
+              </div>
+            )}
+
+            {/* Close Button */}
+            <div className="flex items-center justify-end pt-3 border-t border-gray-100 shrink-0">
+              <button
+                onClick={() => setSelectedDetailSession(null)}
+                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
+              >
+                Close Breakdown
+              </button>
+            </div>
           </div>
         </div>
       )}
