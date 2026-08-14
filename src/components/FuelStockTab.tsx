@@ -291,21 +291,6 @@ export default function FuelStockTab({
             Real-time liquid levels in underground storage tanks linked with pricing boards
           </p>
         </div>
-
-                <button
-          id="btn-trigger-delivery"
-          onClick={() => {
-            setModalError(null);
-            setDeliveryQty('');
-            setDeliveryInvoiceNo('');
-            setDeliverySupplier('Ceylon Petroleum Corporation');
-            setIsDeliveryModalOpen(true);
-          }}
-          className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-blue-500 text-white font-bold text-sm rounded-xl hover:brightness-110 transition-all shadow-md shadow-blue-500/10 cursor-pointer"
-        >
-          <ShoppingBag className="w-4 h-4" />
-          <span>New Purchase</span>
-        </button>
       </div>
 
       {/* Tank Gauges Grid (Beautiful visual representations of tanks!) */}

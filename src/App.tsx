@@ -17,6 +17,7 @@ import DashboardTab from './components/DashboardTab';
 import ShiftManagementTab from './components/ShiftManagementTab';
 import FuelStockTab from './components/FuelStockTab';
 import OilStorageTab from './components/OilStorageTab';
+import PurchasesTab from './components/PurchasesTab';
 import DailySalesTab from './components/DailySalesTab';
 import ReportsTab from './components/ReportsTab';
 import ManualDipTab from './components/ManualDipTab';
@@ -1305,6 +1306,18 @@ export default function App() {
               <OilStorageTab
                 oilTanks={oilTanks}
                 setOilTanks={setOilTanks}
+                employees={employees}
+              />
+            )}
+
+            {activeTab === 'purchases' && (
+              <PurchasesTab
+                tanks={tanks}
+                setTanks={setTanks}
+                oilTanks={oilTanks}
+                setOilTanks={setOilTanks}
+                deliveries={deliveries}
+                setDeliveries={setDeliveries}
                 employees={employees}
               />
             )}

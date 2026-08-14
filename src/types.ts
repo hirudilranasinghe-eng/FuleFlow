@@ -253,3 +253,51 @@ export interface TankDipLog {
   notes?: string;
 }
 
+export interface ReceiptDesignerConfig {
+  primaryBrandColor: string; // e.g. '#123d82'
+  accentColor: string; // e.g. '#d62828'
+  companyName: string;
+  tagline: string;
+  address: string;
+  contactPhone: string;
+  email: string;
+  dealerCode: string;
+  regNo: string;
+  logoUrl?: string;
+  documentTitle: string; // e.g. 'PURCHASE RECEIPT'
+  receiptNoPrefix: string; // e.g. 'PR-2026-'
+  defaultRemarks: string;
+  signatureLine1Title: string;
+  signatureLine1Sub: string;
+  signatureLine2Title: string;
+  signatureLine2Sub: string;
+  signatureLine3Title: string;
+  signatureLine3Sub: string;
+  footerNote: string;
+  footerDisclaimer: string;
+}
+
+export const DEFAULT_RECEIPT_CONFIG: ReceiptDesignerConfig = {
+  primaryBrandColor: '#123d82',
+  accentColor: '#d62828',
+  companyName: 'Samse Auto Mart (Pvt) Ltd',
+  tagline: 'Quality Fuel, Trusted Service',
+  address: 'No. 123, Main Road, Kurunegala, Sri Lanka',
+  contactPhone: '+94 37 222 3456',
+  email: 'info@samseautomart.lk',
+  dealerCode: 'CPC-NW-4491',
+  regNo: 'PV-00239108',
+  logoUrl: '',
+  documentTitle: 'PURCHASE RECEIPT',
+  receiptNoPrefix: 'PR-2026-',
+  defaultRemarks: 'Underground tank calibration and density quality checks performed before and after decanting. Free water test negative, temperature adjusted dip levels confirmed. Stock automatically reflected in fuel inventory register.',
+  signatureLine1Title: 'Prepared By',
+  signatureLine1Sub: 'Samse Auto Mart',
+  signatureLine2Title: 'Received By',
+  signatureLine2Sub: 'Supplier / Bowser Driver',
+  signatureLine3Title: 'Authorized By',
+  signatureLine3Sub: 'Management & Accounts',
+  footerNote: 'This is a computer generated purchase receipt.',
+  footerDisclaimer: 'Samse Auto Mart Management System • Verified & Logged Automatically'
+};
+

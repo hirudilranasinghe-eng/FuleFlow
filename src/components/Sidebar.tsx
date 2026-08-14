@@ -7,7 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   LayoutDashboard, Clock, Fuel, BarChart3, FileText, Users, 
   ShieldCheck, ChevronLeft, ChevronRight, ChevronDown,
-  Droplet, CreditCard, TrendingUp, Droplets, Settings
+  Droplet, CreditCard, TrendingUp, Droplets, Settings, Truck
 } from 'lucide-react';
 
 import { AuthUser, resolveUserRole } from '../types';
@@ -59,6 +59,7 @@ export default function Sidebar({
     { id: 'shift', name: 'Shift Management', icon: Clock },
     { id: 'stock', name: 'Fuel Stock', icon: Fuel },
     { id: 'oil-storage', name: 'Oil (Lubricant) Storage', icon: Droplets },
+    { id: 'purchases', name: 'Purchases', icon: Truck },
     { id: 'manual-dip-record', name: 'Manual Dip Record', icon: Droplet },
     { id: 'reports', name: 'Reports', icon: FileText },
     { id: 'customers', name: 'Customers', icon: Users },

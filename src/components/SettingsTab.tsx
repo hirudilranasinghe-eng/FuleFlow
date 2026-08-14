@@ -3,16 +3,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Building2, MessageSquare, Sliders, Database, Save, 
   CheckCircle2, AlertTriangle, ShieldCheck, Phone, Mail, 
   MapPin, Landmark, Send, RefreshCw, Download, FileJson, 
   FileSpreadsheet, Lock, Unlock, Eye, EyeOff, Copy, 
   Check, Info, Sparkles, Bell, Radio, AlertCircle, 
-  RotateCcw, HelpCircle, HardDrive, Smartphone, Key
+  RotateCcw, HelpCircle, HardDrive, Smartphone, Key,
+  Palette, Printer, Image, Upload, Trash2, Type, Hash, 
+  FileText, Layers, SlidersHorizontal, Truck
 } from 'lucide-react';
-import { FuelTank, OilTank, Employee, Shift, StockDelivery, Customer, CreditTransaction, CreditPayment } from '../types';
+import { 
+  FuelTank, OilTank, Employee, Shift, StockDelivery, 
+  Customer, CreditTransaction, CreditPayment,
+  ReceiptDesignerConfig, DEFAULT_RECEIPT_CONFIG 
+} from '../types';
 import { supabase } from '../lib/supabase';
 import { SUPABASE_SQL } from '../lib/sqlSchema';
 import { formatSriLankanPhoneNumber, dispatchTextLKSMS, SMSDispatchResult } from '../lib/smsService';
@@ -42,8 +48,8 @@ export default function SettingsTab({
   payments = [],
   onResetAllData
 }: SettingsTabProps) {
-  // Sub-navigation: 'profile' | 'sms' | 'rules' | 'data'
-  const [activeSubTab, setActiveSubTab] = useState<'profile' | 'sms' | 'rules' | 'data'>('profile');
+  // Sub-navigation: 'profile' | 'designer' | 'sms' | 'rules' | 'data'
+  const [activeSubTab, setActiveSubTab] = useState<'profile' | 'designer' | 'sms' | 'rules' | 'data'>('profile');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
@@ -54,6 +60,82 @@ export default function SettingsTab({
   // Currency Formatter
   const formatCurrency = (val: number) => {
     return `Rs. ${(val || 0).toLocaleString('en-LK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
+
+  // =========================================================================
+  // 0. RECEIPT & INVOICE DESIGNER STATE
+  // =========================================================================
+  const [receiptConfig, setReceiptConfig] = useState<ReceiptDesignerConfig>(() => {
+    try {
+      const stored = localStorage.getItem('fms_receipt_designer_config');
+      if (stored) return { ...DEFAULT_RECEIPT_CONFIG, ...JSON.parse(stored) };
+    } catch (_) {}
+    return DEFAULT_RECEIPT_CONFIG;
+  });
+
+  const previewPrintRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const primaryPresets = [
+    { label: 'Ceypetco Blue', hex: '#123d82' },
+    { label: 'Ceylon Navy', hex: '#0b2545' },
+    { label: 'Emerald Station', hex: '#047857' },
+    { label: 'Crimson Red', hex: '#991b1b' },
+    { label: 'Slate Graphite', hex: '#1e293b' },
+    { label: 'Deep Teal', hex: '#0f766e' },
+    { label: 'Royal Purple', hex: '#581c87' }
+  ];
+
+  const accentPresets = [
+    { label: 'Bold Red', hex: '#d62828' },
+    { label: 'Amber Orange', hex: '#ea580c' },
+    { label: 'Goldenrod', hex: '#d97706' },
+    { label: 'Royal Indigo', hex: '#4338ca' },
+    { label: 'Emerald Green', hex: '#059669' },
+    { label: 'Rose Pink', hex: '#e11d48' }
+  ];
+
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 2 * 1024 * 1024) {
+        alert("Image size should be under 2MB.");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const base64 = event.target?.result as string;
+        setReceiptConfig(prev => ({ ...prev, logoUrl: base64 }));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleRemoveLogo = () => {
+    setReceiptConfig(prev => ({ ...prev, logoUrl: '' }));
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleSaveReceiptConfig = () => {
+    localStorage.setItem('fms_receipt_designer_config', JSON.stringify(receiptConfig));
+    // Dispatch custom event for real-time reactivity in PurchasesTab and other components
+    window.dispatchEvent(new CustomEvent('receipt_config_updated', { detail: receiptConfig }));
+    showToast('Receipt & Invoice template design saved successfully!');
+  };
+
+  const handleResetReceiptConfig = () => {
+    if (confirm('Reset receipt template design to standard default styling & colors?')) {
+      setReceiptConfig(DEFAULT_RECEIPT_CONFIG);
+      localStorage.setItem('fms_receipt_designer_config', JSON.stringify(DEFAULT_RECEIPT_CONFIG));
+      window.dispatchEvent(new CustomEvent('receipt_config_updated', { detail: DEFAULT_RECEIPT_CONFIG }));
+      showToast('Receipt template design reset to default layout.');
+    }
+  };
+
+  const handlePrintSampleReceipt = () => {
+    window.print();
   };
 
   // =========================================================================
@@ -417,6 +499,18 @@ export default function SettingsTab({
         </button>
 
         <button
+          onClick={() => setActiveSubTab('designer')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+            activeSubTab === 'designer'
+              ? 'bg-[#1C1C1C] text-white shadow-sm'
+              : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200/60'
+          }`}
+        >
+          <Palette className="w-4 h-4 text-rose-500" />
+          <span>Receipt &amp; Invoice Designer</span>
+        </button>
+
+        <button
           onClick={() => setActiveSubTab('sms')}
           className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
             activeSubTab === 'sms'
@@ -630,6 +724,815 @@ export default function SettingsTab({
             </div>
           </div>
         </form>
+      )}
+
+      {/* ========================================================================= */}
+      {/* VIEW: RECEIPT & INVOICE DESIGNER */}
+      {/* ========================================================================= */}
+      {activeSubTab === 'designer' && (
+        <div className="space-y-6">
+          {/* Top Info Banner */}
+          <div className="bg-gradient-to-r from-slate-900 to-slate-800 rounded-2xl p-5 text-white shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3.5">
+              <div className="p-3 bg-white/10 rounded-xl backdrop-blur-xs border border-white/10">
+                <Palette className="w-6 h-6 text-rose-400" />
+              </div>
+              <div>
+                <h3 className="font-bold text-sm text-white flex items-center gap-2">
+                  <span>Receipt &amp; Invoice Visual Designer</span>
+                  <span className="text-[10px] bg-rose-500/20 text-rose-300 font-bold px-2 py-0.5 rounded-full border border-rose-500/30">
+                    Live Customizer
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-300 mt-0.5">
+                  Customize the brand colors, station headers, logos, signatures, and layout printed for bowser deliveries and oil purchases.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <button
+                type="button"
+                onClick={handleResetReceiptConfig}
+                className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-2 bg-white/10 hover:bg-white/20 text-slate-200 rounded-xl text-xs font-bold transition-all border border-white/10 cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Reset Defaults</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveReceiptConfig}
+                className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>Save Design</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Designer Main Grid: Left Controls (5 cols) & Right Live Preview (7 cols) */}
+          <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+            {/* ------------------------------------------------------------- */}
+            {/* LEFT PANEL: CUSTOMIZATION CONTROLS */}
+            {/* ------------------------------------------------------------- */}
+            <div className="xl:col-span-5 space-y-4">
+              {/* Section 1: Theme & Colors */}
+              <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4 shadow-sm">
+                <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+                  <h4 className="font-bold text-[#1C1C1C] text-xs uppercase tracking-wider flex items-center gap-2">
+                    <SlidersHorizontal className="w-4 h-4 text-blue-600" />
+                    <span>Theme &amp; Brand Colors</span>
+                  </h4>
+                  <span className="text-[11px] font-mono text-gray-400">Color System</span>
+                </div>
+
+                <div className="space-y-4 text-xs">
+                  {/* Primary Brand Color */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="font-bold text-gray-700">
+                        Primary Brand Color <span className="text-gray-400 font-normal">(Headers, Table &amp; Grand Total)</span>
+                      </label>
+                      <span className="font-mono font-bold text-slate-700 uppercase">{receiptConfig.primaryBrandColor}</span>
+                    </div>
+
+                    <div className="flex items-center gap-2.5">
+                      <div 
+                        className="w-10 h-10 rounded-xl border border-gray-200 shadow-xs relative overflow-hidden flex-shrink-0 cursor-pointer"
+                        style={{ backgroundColor: receiptConfig.primaryBrandColor }}
+                      >
+                        <input
+                          type="color"
+                          value={receiptConfig.primaryBrandColor}
+                          onChange={(e) => setReceiptConfig({ ...receiptConfig, primaryBrandColor: e.target.value })}
+                          className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
+                        />
+                      </div>
+                      <input
+                        type="text"
+                        value={receiptConfig.primaryBrandColor}
+                        onChange={(e) => setReceiptConfig({ ...receiptConfig, primaryBrandColor: e.target.value })}
+                        className="flex-1 px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-mono font-semibold uppercase focus:outline-none focus:border-blue-500"
+                        placeholder="#123d82"
+                      />
+                    </div>
+
+                    {/* Presets */}
+                    <div className="flex flex-wrap items-center gap-1.5 mt-2.5">
+                      <span className="text-[10px] font-medium text-gray-400 mr-1">Presets:</span>
+                      {primaryPresets.map((preset) => (
+                        <button
+                          key={preset.hex}
+                          type="button"
+                          onClick={() => setReceiptConfig({ ...receiptConfig, primaryBrandColor: preset.hex })}
+                          className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${
+                            receiptConfig.primaryBrandColor.toLowerCase() === preset.hex.toLowerCase()
+                              ? 'border-blue-600 bg-blue-50 text-blue-900 shadow-2xs'
+                              : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                          }`}
+                        >
+                          <span className="w-2.5 h-2.5 rounded-full border border-black/10" style={{ backgroundColor: preset.hex }}></span>
+                          <span>{preset.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Accent / Receipt No Color */}
+                  <div className="pt-3 border-t border-gray-100">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="font-bold text-gray-700">
+                        Accent Color <span className="text-gray-400 font-normal">(Receipt Number &amp; Badges)</span>
+                      </label>
+                      <span className="font-mono font-bold text-slate-700 uppercase">{receiptConfig.accentColor}</span>
+                    </div>
+
+                    <div className="flex items-center gap-2.5">
+                      <div 
+                        className="w-10 h-10 rounded-xl border border-gray-200 shadow-xs relative overflow-hidden flex-shrink-0 cursor-pointer"
+                        style={{ backgroundColor: receiptConfig.accentColor }}
+                      >
+                        <input
+                          type="color"
+                          value={receiptConfig.accentColor}
+                          onChange={(e) => setReceiptConfig({ ...receiptConfig, accentColor: e.target.value })}
+                          className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
+                        />
+                      </div>
+                      <input
+                        type="text"
+                        value={receiptConfig.accentColor}
+                        onChange={(e) => setReceiptConfig({ ...receiptConfig, accentColor: e.target.value })}
+                        className="flex-1 px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-mono font-semibold uppercase focus:outline-none focus:border-rose-500"
+                        placeholder="#d62828"
+                      />
+                    </div>
+
+                    {/* Accent Presets */}
+                    <div className="flex flex-wrap items-center gap-1.5 mt-2.5">
+                      <span className="text-[10px] font-medium text-gray-400 mr-1">Presets:</span>
+                      {accentPresets.map((preset) => (
+                        <button
+                          key={preset.hex}
+                          type="button"
+                          onClick={() => setReceiptConfig({ ...receiptConfig, accentColor: preset.hex })}
+                          className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${
+                            receiptConfig.accentColor.toLowerCase() === preset.hex.toLowerCase()
+                              ? 'border-rose-600 bg-rose-50 text-rose-900 shadow-2xs'
+                              : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                          }`}
+                        >
+                          <span className="w-2.5 h-2.5 rounded-full border border-black/10" style={{ backgroundColor: preset.hex }}></span>
+                          <span>{preset.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 2: Header & Company Branding */}
+              <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4 shadow-sm">
+                <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+                  <h4 className="font-bold text-[#1C1C1C] text-xs uppercase tracking-wider flex items-center gap-2">
+                    <Building2 className="w-4 h-4 text-emerald-600" />
+                    <span>Header &amp; Station Identity</span>
+                  </h4>
+                  <span className="text-[11px] font-mono text-gray-400">Header Block</span>
+                </div>
+
+                <div className="space-y-3.5 text-xs">
+                  <div>
+                    <label className="font-bold text-gray-700 block mb-1">Company / Station Name</label>
+                    <input
+                      type="text"
+                      value={receiptConfig.companyName}
+                      onChange={(e) => setReceiptConfig({ ...receiptConfig, companyName: e.target.value })}
+                      className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-semibold focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-gray-700 block mb-1">Tagline / Slogan</label>
+                    <input
+                      type="text"
+                      value={receiptConfig.tagline}
+                      onChange={(e) => setReceiptConfig({ ...receiptConfig, tagline: e.target.value })}
+                      className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 focus:outline-none focus:border-blue-500 italic"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-gray-700 block mb-1">Station Address</label>
+                    <input
+                      type="text"
+                      value={receiptConfig.address}
+                      onChange={(e) => setReceiptConfig({ ...receiptConfig, address: e.target.value })}
+                      className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="font-bold text-gray-700 block mb-1">Contact Telephone</label>
+                      <input
+                        type="text"
+                        value={receiptConfig.contactPhone}
+                        onChange={(e) => setReceiptConfig({ ...receiptConfig, contactPhone: e.target.value })}
+                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-mono focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="font-bold text-gray-700 block mb-1">Contact Email</label>
+                      <input
+                        type="text"
+                        value={receiptConfig.email}
+                        onChange={(e) => setReceiptConfig({ ...receiptConfig, email: e.target.value })}
+                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-mono focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="font-bold text-gray-700 block mb-1">CPC / Dealer Code</label>
+                      <input
+                        type="text"
+                        value={receiptConfig.dealerCode}
+                        onChange={(e) => setReceiptConfig({ ...receiptConfig, dealerCode: e.target.value })}
+                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-mono font-bold focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="font-bold text-gray-700 block mb-1">Business Reg No</label>
+                      <input
+                        type="text"
+                        value={receiptConfig.regNo}
+                        onChange={(e) => setReceiptConfig({ ...receiptConfig, regNo: e.target.value })}
+                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-mono focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Logo Image */}
+                  <div className="pt-2 border-t border-gray-100">
+                    <label className="font-bold text-gray-700 block mb-1">Station Logo Image</label>
+                    <div className="flex items-center gap-3">
+                      {receiptConfig.logoUrl ? (
+                        <div className="relative w-12 h-12 rounded-xl border border-gray-200 p-1 bg-gray-50 flex items-center justify-center flex-shrink-0">
+                          <img 
+                            src={receiptConfig.logoUrl} 
+                            alt="Logo" 
+                            className="max-h-full max-w-full object-contain"
+                            referrerPolicy="no-referrer"
+                          />
+                        </div>
+                      ) : (
+                        <div 
+                          className="w-12 h-12 rounded-xl flex items-center justify-center text-white font-black text-sm flex-shrink-0 shadow-2xs"
+                          style={{ backgroundColor: receiptConfig.primaryBrandColor }}
+                        >
+                          SA
+                        </div>
+                      )}
+
+                      <div className="flex-1 space-y-1.5">
+                        <div className="flex items-center gap-2">
+                          <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept="image/*"
+                            onChange={handleLogoUpload}
+                            className="hidden"
+                            id="receipt-logo-file-input"
+                          />
+                          <label
+                            htmlFor="receipt-logo-file-input"
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-slate-800 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                          >
+                            <Upload className="w-3.5 h-3.5" />
+                            <span>Upload Logo</span>
+                          </label>
+
+                          {receiptConfig.logoUrl && (
+                            <button
+                              type="button"
+                              onClick={handleRemoveLogo}
+                              className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-xl transition-all cursor-pointer"
+                              title="Remove custom logo"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-gray-400">PNG, JPG, or SVG up to 2MB (Monogram used if no logo uploaded)</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 3: Document Title & Numbering */}
+              <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4 shadow-sm">
+                <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+                  <h4 className="font-bold text-[#1C1C1C] text-xs uppercase tracking-wider flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-purple-600" />
+                    <span>Document Title &amp; Numbering</span>
+                  </h4>
+                  <span className="text-[11px] font-mono text-gray-400">Identifiers</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <label className="font-bold text-gray-700 block mb-1">Document Title Heading</label>
+                    <input
+                      type="text"
+                      value={receiptConfig.documentTitle}
+                      onChange={(e) => setReceiptConfig({ ...receiptConfig, documentTitle: e.target.value })}
+                      className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-bold uppercase focus:outline-none focus:border-purple-500"
+                      placeholder="PURCHASE RECEIPT"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-gray-700 block mb-1">Receipt Number Prefix</label>
+                    <input
+                      type="text"
+                      value={receiptConfig.receiptNoPrefix}
+                      onChange={(e) => setReceiptConfig({ ...receiptConfig, receiptNoPrefix: e.target.value })}
+                      className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-mono font-bold focus:outline-none focus:border-purple-500"
+                      placeholder="PR-2026-"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 4: Default Remarks */}
+              <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4 shadow-sm">
+                <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+                  <h4 className="font-bold text-[#1C1C1C] text-xs uppercase tracking-wider flex items-center gap-2">
+                    <Info className="w-4 h-4 text-amber-600" />
+                    <span>Default Verification Remarks</span>
+                  </h4>
+                  <span className="text-[11px] font-mono text-gray-400">Notes Box</span>
+                </div>
+
+                <div className="text-xs">
+                  <label className="font-bold text-gray-700 block mb-1">Default Audit &amp; Calibration Statement</label>
+                  <textarea
+                    rows={3}
+                    value={receiptConfig.defaultRemarks}
+                    onChange={(e) => setReceiptConfig({ ...receiptConfig, defaultRemarks: e.target.value })}
+                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-800 leading-relaxed focus:outline-none focus:border-blue-500 text-[11px]"
+                  />
+                  <p className="text-[10px] text-gray-400 mt-1">Printed in the remarks verification box below itemized fuel deliveries.</p>
+                </div>
+              </div>
+
+              {/* Section 5: Signatures & Authorization */}
+              <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4 shadow-sm">
+                <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+                  <h4 className="font-bold text-[#1C1C1C] text-xs uppercase tracking-wider flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-blue-600" />
+                    <span>3-Tier Authorization Signatures</span>
+                  </h4>
+                  <span className="text-[11px] font-mono text-gray-400">Sign-Offs</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                  {/* Signature 1 */}
+                  <div className="p-3 bg-gray-50 rounded-xl border border-gray-200 space-y-2">
+                    <span className="font-bold text-slate-700 text-[11px] block">Signature #1</span>
+                    <div>
+                      <label className="text-[10px] font-medium text-gray-500 block">Title</label>
+                      <input
+                        type="text"
+                        value={receiptConfig.signatureLine1Title}
+                        onChange={(e) => setReceiptConfig({ ...receiptConfig, signatureLine1Title: e.target.value })}
+                        className="w-full px-2.5 py-1.5 bg-white border border-gray-200 rounded-lg text-slate-900 font-semibold focus:outline-none focus:border-blue-500 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-medium text-gray-500 block">Sub-Label</label>
+                      <input
+                        type="text"
+                        value={receiptConfig.signatureLine1Sub}
+                        onChange={(e) => setReceiptConfig({ ...receiptConfig, signatureLine1Sub: e.target.value })}
+                        className="w-full px-2.5 py-1.5 bg-white border border-gray-200 rounded-lg text-slate-700 focus:outline-none focus:border-blue-500 text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Signature 2 */}
+                  <div className="p-3 bg-gray-50 rounded-xl border border-gray-200 space-y-2">
+                    <span className="font-bold text-slate-700 text-[11px] block">Signature #2</span>
+                    <div>
+                      <label className="text-[10px] font-medium text-gray-500 block">Title</label>
+                      <input
+                        type="text"
+                        value={receiptConfig.signatureLine2Title}
+                        onChange={(e) => setReceiptConfig({ ...receiptConfig, signatureLine2Title: e.target.value })}
+                        className="w-full px-2.5 py-1.5 bg-white border border-gray-200 rounded-lg text-slate-900 font-semibold focus:outline-none focus:border-blue-500 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-medium text-gray-500 block">Sub-Label</label>
+                      <input
+                        type="text"
+                        value={receiptConfig.signatureLine2Sub}
+                        onChange={(e) => setReceiptConfig({ ...receiptConfig, signatureLine2Sub: e.target.value })}
+                        className="w-full px-2.5 py-1.5 bg-white border border-gray-200 rounded-lg text-slate-700 focus:outline-none focus:border-blue-500 text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Signature 3 */}
+                  <div className="p-3 bg-gray-50 rounded-xl border border-gray-200 space-y-2">
+                    <span className="font-bold text-slate-700 text-[11px] block">Signature #3</span>
+                    <div>
+                      <label className="text-[10px] font-medium text-gray-500 block">Title</label>
+                      <input
+                        type="text"
+                        value={receiptConfig.signatureLine3Title}
+                        onChange={(e) => setReceiptConfig({ ...receiptConfig, signatureLine3Title: e.target.value })}
+                        className="w-full px-2.5 py-1.5 bg-white border border-gray-200 rounded-lg text-slate-900 font-semibold focus:outline-none focus:border-blue-500 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-medium text-gray-500 block">Sub-Label</label>
+                      <input
+                        type="text"
+                        value={receiptConfig.signatureLine3Sub}
+                        onChange={(e) => setReceiptConfig({ ...receiptConfig, signatureLine3Sub: e.target.value })}
+                        className="w-full px-2.5 py-1.5 bg-white border border-gray-200 rounded-lg text-slate-700 focus:outline-none focus:border-blue-500 text-xs"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 6: Footer & Disclaimers */}
+              <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4 shadow-sm">
+                <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+                  <h4 className="font-bold text-[#1C1C1C] text-xs uppercase tracking-wider flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                    <span>Footer Notes &amp; Disclaimers</span>
+                  </h4>
+                  <span className="text-[11px] font-mono text-gray-400">Footer</span>
+                </div>
+
+                <div className="space-y-3 text-xs">
+                  <div>
+                    <label className="font-bold text-gray-700 block mb-1">Footer Main Note</label>
+                    <input
+                      type="text"
+                      value={receiptConfig.footerNote}
+                      onChange={(e) => setReceiptConfig({ ...receiptConfig, footerNote: e.target.value })}
+                      className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-gray-700 block mb-1">System Audit Disclaimer</label>
+                    <input
+                      type="text"
+                      value={receiptConfig.footerDisclaimer}
+                      onChange={(e) => setReceiptConfig({ ...receiptConfig, footerDisclaimer: e.target.value })}
+                      className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-mono text-[11px] focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={handleSaveReceiptConfig}
+                  className="flex-1 flex items-center justify-center gap-2 px-5 py-3 bg-[#123d82] hover:bg-[#0e2f65] text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>Save Template Design</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleResetReceiptConfig}
+                  className="px-4 py-3 bg-gray-100 hover:bg-gray-200 text-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                  title="Reset to default layout"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* ------------------------------------------------------------- */}
+            {/* RIGHT PANEL: LIVE TEMPLATE PREVIEW (1:1 Output Scale) */}
+            {/* ------------------------------------------------------------- */}
+            <div className="xl:col-span-7 space-y-3 sticky top-4">
+              <div className="bg-slate-900 text-white rounded-2xl p-4 flex items-center justify-between shadow-sm">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></div>
+                  <span className="font-bold text-xs uppercase tracking-wider text-slate-200">
+                    Live Template Preview (Real-Time 1:1 Scale)
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-mono bg-slate-800 text-blue-300 px-2.5 py-1 rounded-lg">
+                    900px Print Canvas
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handlePrintSampleReceipt}
+                    className="flex items-center gap-1.5 px-3 py-1 bg-white/10 hover:bg-white/20 text-white rounded-lg text-xs font-bold transition-all cursor-pointer"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Print Sample</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Printable Scale Preview Container */}
+              <div className="bg-slate-200/70 p-3 sm:p-4 rounded-2xl border border-slate-300/80 overflow-x-auto shadow-inner">
+                <div 
+                  ref={previewPrintRef}
+                  className="bg-white rounded-xl shadow-lg border border-slate-300 p-6 sm:p-8 space-y-5 font-sans mx-auto transition-all"
+                  style={{ minWidth: '600px', maxWidth: '900px' }}
+                >
+                  {/* 1. Exact Header & Branding Styling */}
+                  <div className="pb-4" style={{ borderBottom: `3px solid ${receiptConfig.primaryBrandColor}` }}>
+                    <div className="flex flex-col sm:flex-row items-start justify-between gap-4">
+                      {/* Left: Company Branding */}
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2.5">
+                          {receiptConfig.logoUrl ? (
+                            <img 
+                              src={receiptConfig.logoUrl} 
+                              alt="Logo" 
+                              className="w-10 h-10 object-contain rounded-lg shadow-2xs"
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            <div 
+                              className="w-10 h-10 rounded-lg flex items-center justify-center text-white font-black text-base shadow-2xs"
+                              style={{ backgroundColor: receiptConfig.primaryBrandColor }}
+                            >
+                              {receiptConfig.companyName.substring(0, 2).toUpperCase()}
+                            </div>
+                          )}
+                          <div>
+                            <h1 
+                              className="text-xl font-black tracking-tight uppercase" 
+                              style={{ color: receiptConfig.primaryBrandColor }}
+                            >
+                              {receiptConfig.companyName}
+                            </h1>
+                            <p className="text-xs font-medium italic text-slate-600">
+                              {receiptConfig.tagline}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="text-[11px] text-slate-600 pt-1 space-y-0.5">
+                          <p>{receiptConfig.address}</p>
+                          <p className="font-mono text-slate-500">
+                            Tel: {receiptConfig.contactPhone} | Email: {receiptConfig.email}
+                          </p>
+                          <p className="text-[10px] text-slate-400 font-mono">
+                            CPC Dealer Code: {receiptConfig.dealerCode} • Business Reg: {receiptConfig.regNo}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Right: Title & Receipt Meta */}
+                      <div className="sm:text-right space-y-1">
+                        <h2 
+                          className="text-xl sm:text-2xl font-black tracking-wider uppercase font-sans" 
+                          style={{ color: receiptConfig.primaryBrandColor }}
+                        >
+                          {receiptConfig.documentTitle}
+                        </h2>
+                        <div className="text-xs font-mono font-bold">
+                          <span className="text-slate-500 font-normal">Receipt No: </span>
+                          <span style={{ color: receiptConfig.accentColor }} className="font-extrabold text-sm">
+                            {receiptConfig.receiptNoPrefix}00482
+                          </span>
+                        </div>
+                        <div className="text-xs font-mono text-slate-600">
+                          <span className="text-slate-500 font-normal">Date &amp; Time: </span>
+                          <span className="font-bold text-slate-800">2026-08-14 • 10:30 AM</span>
+                        </div>
+                        <div className="text-[11px] font-mono text-slate-500">
+                          <span className="text-slate-400">Payment Terms: </span>
+                          <span className="font-semibold text-slate-700">Bank Transfer / Advance</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 2. Dual Info Boxes Grid (info-grid) */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                    {/* Box 1: SUPPLIER DETAILS */}
+                    <div className="rounded-xl border border-slate-200 overflow-hidden shadow-2xs">
+                      <div 
+                        className="px-3.5 py-1.5 text-white font-bold text-xs uppercase tracking-wider flex items-center justify-between"
+                        style={{ backgroundColor: receiptConfig.primaryBrandColor }}
+                      >
+                        <span>SUPPLIER DETAILS</span>
+                        <Building2 className="w-3.5 h-3.5 opacity-80" />
+                      </div>
+                      <div className="p-3 bg-slate-50/70 text-xs space-y-1 text-slate-700">
+                        <div className="flex items-start justify-between">
+                          <span className="text-slate-500 font-medium">Supplier Name:</span>
+                          <span className="font-bold text-slate-900 text-right">Ceylon Petroleum Corporation</span>
+                        </div>
+                        <div className="flex items-start justify-between">
+                          <span className="text-slate-500 font-medium">Terminal / Address:</span>
+                          <span className="font-medium text-slate-800 text-right">Kolonnawa Terminal, CPSTL Installation</span>
+                        </div>
+                        <div className="flex items-start justify-between">
+                          <span className="text-slate-500 font-medium">Contact No:</span>
+                          <span className="font-mono text-slate-800 text-right">+94 11 257 2000 / 2001</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Box 2: PURCHASE DETAILS */}
+                    <div className="rounded-xl border border-slate-200 overflow-hidden shadow-2xs">
+                      <div 
+                        className="px-3.5 py-1.5 text-white font-bold text-xs uppercase tracking-wider flex items-center justify-between"
+                        style={{ backgroundColor: receiptConfig.primaryBrandColor }}
+                      >
+                        <span>PURCHASE DETAILS</span>
+                        <Truck className="w-3.5 h-3.5 opacity-80" />
+                      </div>
+                      <div className="p-3 bg-slate-50/70 text-xs space-y-1 text-slate-700">
+                        <div className="flex items-start justify-between">
+                          <span className="text-slate-500 font-medium">Purchase Type:</span>
+                          <span className="font-bold text-slate-900 text-right">Fuel Tanker (Bowser)</span>
+                        </div>
+                        <div className="flex items-start justify-between">
+                          <span className="text-slate-500 font-medium">Reference / Invoice:</span>
+                          <span className="font-mono font-bold text-slate-900 text-right">CPSTL-INV-9921</span>
+                        </div>
+                        <div className="flex items-start justify-between">
+                          <span className="text-slate-500 font-medium">Delivery Note No:</span>
+                          <span className="font-mono text-slate-800 text-right">DN-884920</span>
+                        </div>
+                        <div className="flex items-start justify-between">
+                          <span className="text-slate-500 font-medium">Vehicle / Truck No:</span>
+                          <span className="font-mono font-bold text-slate-900 text-right">WP-LI-8492 (Bowser Tanker)</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 3. Items Table (purchase-table) */}
+                  <div className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
+                    <table className="w-full text-left text-xs">
+                      <thead 
+                        className="text-white font-bold uppercase text-[10px] tracking-wider"
+                        style={{ backgroundColor: receiptConfig.primaryBrandColor }}
+                      >
+                        <tr>
+                          <th className="py-2 px-3 text-center w-8">#</th>
+                          <th className="py-2 px-3">Item Description</th>
+                          <th className="py-2 px-3 text-center">Unit</th>
+                          <th className="py-2 px-3 text-right">Quantity</th>
+                          <th className="py-2 px-3 text-right">Unit Price (LKR)</th>
+                          <th className="py-2 px-3 text-right">Total (LKR)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-slate-800 bg-white">
+                        <tr>
+                          <td className="py-2.5 px-3 text-center font-mono text-slate-500 font-bold">1</td>
+                          <td className="py-2.5 px-3">
+                            <div className="font-bold text-slate-900">Auto Diesel (Super Clean)</div>
+                            <div className="text-[10px] text-slate-500 font-mono mt-0.5">
+                              Destination: <span className="font-semibold text-slate-700">Tank 01 (Diesel Underground 10,000L)</span>
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-3 text-center font-mono font-medium text-slate-600">L</td>
+                          <td className="py-2.5 px-3 text-right font-mono font-bold tabular-nums text-slate-900">
+                            6,600
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono tabular-nums text-slate-700">
+                            Rs. 317.00
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono font-extrabold tabular-nums text-slate-900">
+                            Rs. 2,092,200.00
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* 4. Bottom Section & Calculations */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 items-start">
+                    {/* Left: REMARKS box */}
+                    <div 
+                      className="rounded-xl p-3 bg-slate-50/70 text-xs space-y-1"
+                      style={{ border: '1px solid #d8dee8' }}
+                    >
+                      <div className="font-bold text-slate-800 uppercase tracking-wider text-[10px] flex items-center gap-1.5">
+                        <Info className="w-3.5 h-3.5 text-blue-600" />
+                        <span>REMARKS &amp; VERIFICATION NOTES</span>
+                      </div>
+                      <p className="text-slate-600 text-[10px] leading-relaxed">
+                        {receiptConfig.defaultRemarks}
+                      </p>
+                      <div className="text-[9px] font-mono text-slate-500 pt-1 border-t border-slate-200 flex items-center justify-between">
+                        <span>Decanting Bay: Pump Island #1</span>
+                        <span>Density: 0.832 @ 15°C</span>
+                      </div>
+                    </div>
+
+                    {/* Right: Totals Card */}
+                    <div className="rounded-xl border border-slate-200 overflow-hidden shadow-2xs text-xs">
+                      <div className="p-2.5 bg-slate-50 space-y-1 font-mono">
+                        <div className="flex items-center justify-between text-slate-600">
+                          <span>Sub Total:</span>
+                          <span className="font-bold tabular-nums text-slate-900">Rs. 2,092,200.00</span>
+                        </div>
+                        <div className="flex items-center justify-between text-slate-500 text-[10px]">
+                          <span>Discount (0.0%):</span>
+                          <span className="tabular-nums">Rs. 0.00</span>
+                        </div>
+                        <div className="flex items-center justify-between text-slate-500 text-[10px]">
+                          <span>VAT / Taxes (Included):</span>
+                          <span className="tabular-nums">Rs. 0.00</span>
+                        </div>
+                      </div>
+
+                      {/* Solid Grand Total banner */}
+                      <div 
+                        className="p-3 text-white flex items-center justify-between"
+                        style={{ backgroundColor: receiptConfig.primaryBrandColor }}
+                      >
+                        <span className="font-extrabold uppercase tracking-wider text-xs">
+                          GRAND TOTAL (LKR):
+                        </span>
+                        <span className="font-black font-mono text-base tabular-nums">
+                          Rs. 2,092,200.00
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 5. Signatures Section */}
+                  <div className="pt-4 border-t border-dashed border-slate-300">
+                    <div className="grid grid-cols-3 gap-4 text-center text-xs">
+                      {/* Prepared By */}
+                      <div className="space-y-4">
+                        <div className="h-8 border-b border-slate-400 flex items-end justify-center pb-1">
+                          <span className="text-[10px] text-slate-400 italic font-mono">Station Staff</span>
+                        </div>
+                        <div>
+                          <p className="font-bold text-slate-800 text-[11px]">{receiptConfig.signatureLine1Title}</p>
+                          <p className="text-[10px] text-slate-500">{receiptConfig.signatureLine1Sub}</p>
+                        </div>
+                      </div>
+
+                      {/* Received By */}
+                      <div className="space-y-4">
+                        <div className="h-8 border-b border-slate-400 flex items-end justify-center pb-1">
+                          <span className="text-[10px] text-slate-400 italic font-mono">CPC Bowser Driver</span>
+                        </div>
+                        <div>
+                          <p className="font-bold text-slate-800 text-[11px]">{receiptConfig.signatureLine2Title}</p>
+                          <p className="text-[10px] text-slate-500">{receiptConfig.signatureLine2Sub}</p>
+                        </div>
+                      </div>
+
+                      {/* Authorized By */}
+                      <div className="space-y-4">
+                        <div className="h-8 border-b border-slate-400 flex items-end justify-center pb-1">
+                          <span className="text-[10px] text-slate-400 italic font-mono">Station Manager</span>
+                        </div>
+                        <div>
+                          <p className="font-bold text-slate-800 text-[11px]">{receiptConfig.signatureLine3Title}</p>
+                          <p className="text-[10px] text-slate-500">{receiptConfig.signatureLine3Sub}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 6. Footer */}
+                  <div 
+                    className="pt-3 text-center text-[10px] text-slate-500 font-sans"
+                    style={{ borderTop: `1px solid ${receiptConfig.primaryBrandColor}` }}
+                  >
+                    <p className="font-medium text-slate-600">
+                      {receiptConfig.footerNote}
+                    </p>
+                    <p className="text-[9px] text-slate-400 mt-0.5 font-mono">
+                      {receiptConfig.footerDisclaimer}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ========================================================================= */}
