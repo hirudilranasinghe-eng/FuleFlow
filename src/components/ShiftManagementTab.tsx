@@ -8,15 +8,19 @@ import {
   Search, Plus, Clock, Fuel, ArrowUpRight, DollarSign, 
   User, CheckCircle, AlertCircle, Sparkles, X, Download, RotateCcw,
   ShieldCheck, Check, Save, AlertTriangle, TrendingUp, RefreshCw,
-  Lock, Unlock, Edit2, ArrowLeft, Users, Package, ChevronDown, CheckSquare, Square, Calendar, Droplet
+  Lock, Unlock, Edit2, ArrowLeft, Users, Package, ChevronDown, CheckSquare, Square, Calendar, Droplet,
+  MessageCircle, Smartphone
 } from 'lucide-react';
 import { supabase, saveCreditSale, saveCardSale, syncCreditAndCardSales, upsertPumpReadings } from '../lib/supabaseClient';
-import { Employee, FuelTank, Pump, PumpMachine, PumpReading, Shift, FuelType } from '../types';
+import { Employee, FuelTank, OilTank, Pump, PumpMachine, PumpReading, Shift, FuelType, ChamberReading } from '../types';
+import WhatsAppDispatchModal from './WhatsAppDispatchModal';
 
 interface ShiftManagementTabProps {
   employees: Employee[];
   tanks: FuelTank[];
   setTanks?: React.Dispatch<React.SetStateAction<FuelTank[]>>;
+  oilTanks?: OilTank[];
+  setOilTanks?: React.Dispatch<React.SetStateAction<OilTank[]>>;
   pumps?: Pump[];
   setPumps?: React.Dispatch<React.SetStateAction<Pump[]>>;
   pumpMachines?: PumpMachine[];
@@ -31,6 +35,8 @@ export default function ShiftManagementTab({
   employees,
   tanks,
   setTanks,
+  oilTanks = [],
+  setOilTanks,
   pumps = [],
   setPumps,
   pumpMachines = [],
@@ -47,6 +53,8 @@ export default function ShiftManagementTab({
   // Modals state
   const [isCloseConfirmOpen, setIsCloseConfirmOpen] = useState(false);
   const [isStartShiftOpen, setIsStartShiftOpen] = useState(false);
+  const [whatsappModalShift, setWhatsappModalShift] = useState<Shift | null>(null);
+  const [isJustClosedShift, setIsJustClosedShift] = useState<boolean>(false);
   
   // New Shift Setup Form State
   const [newShiftTemplate, setNewShiftTemplate] = useState<'Morning' | 'Evening' | 'Night' | 'Custom'>('Morning');
@@ -68,6 +76,40 @@ export default function ShiftManagementTab({
   const [isAddPumperModalOpen, setIsAddPumperModalOpen] = useState(false);
   const [savedPumperIds, setSavedPumperIds] = useState<{ [key: string]: boolean }>({});
   const [savedPumperCards, setSavedPumperCards] = useState<{ [key: string]: boolean }>({});
+  const [lockedStartMeters, setLockedStartMeters] = useState<Record<string, boolean>>({});
+  const [lockedEndMeters, setLockedEndMeters] = useState<Record<string, boolean>>({});
+  const [finalizedPumperCards, setFinalizedPumperCards] = useState<Record<string, boolean>>({});
+
+  // Helper to retrieve locks from localStorage
+  const getStoredLocks = (shiftId: string) => {
+    try {
+      const storedLocksStr = localStorage.getItem(`fuelflow_shift_locks_${shiftId}`);
+      if (storedLocksStr) {
+        return JSON.parse(storedLocksStr);
+      }
+    } catch (e) {
+      console.warn('Could not read locks from localStorage', e);
+    }
+    return null;
+  };
+
+  // Helper to persist lock states to localStorage
+  const saveLocksToStorage = (
+    shiftId: string,
+    starts: Record<string, boolean>,
+    ends: Record<string, boolean>,
+    finalized: Record<string, boolean>
+  ) => {
+    try {
+      localStorage.setItem(`fuelflow_shift_locks_${shiftId}`, JSON.stringify({
+        lockedStartMeters: starts,
+        lockedEndMeters: ends,
+        finalizedPumperCards: finalized
+      }));
+    } catch (err) {
+      console.warn('Failed to save locks to localStorage', err);
+    }
+  };
 
   // Debounce timer store for remote database syncing
   const debounceTimersRef = useRef<{ [key: string]: NodeJS.Timeout }>({});
@@ -167,27 +209,97 @@ export default function ShiftManagementTab({
   // Track settled pumpers per active shift
   const [settledPumperIds, setSettledPumperIds] = useState<Record<string, boolean>>({});
 
+  // Default 4-chamber dispenser configuration helper
+  const getDefaultChambers = (oilTanksList?: OilTank[]): ChamberReading[] => {
+    const chambers = (oilTanksList || []).filter(t => t.type === 'chamber');
+    if (chambers.length > 0) {
+      return chambers.map((ch, idx) => ({
+        chamberId: ch.id,
+        chamberNumber: ch.chamberNumber || (idx + 1),
+        grade: ch.grade,
+        openingLiters: ch.currentLevel,
+        closingLiters: ch.currentLevel,
+        openingLevel: ch.currentLevel,
+        closingLevel: ch.currentLevel,
+        soldLiters: 0,
+        ratePerLiter: ch.pricePerLiter,
+        totalAmount: 0
+      }));
+    }
+    return [
+      { chamberId: 'ch-1', chamberNumber: 1, grade: 'Caltex 20W-50', openingLiters: 75, closingLiters: 75, openingLevel: 75, closingLevel: 75, soldLiters: 0, ratePerLiter: 1850, totalAmount: 0 },
+      { chamberId: 'ch-2', chamberNumber: 2, grade: 'Lanka 2T Super', openingLiters: 60, closingLiters: 60, openingLevel: 60, closingLevel: 60, soldLiters: 0, ratePerLiter: 1450, totalAmount: 0 },
+      { chamberId: 'ch-3', chamberNumber: 3, grade: 'Hydraulic 68', openingLiters: 80, closingLiters: 80, openingLevel: 80, closingLevel: 80, soldLiters: 0, ratePerLiter: 1200, totalAmount: 0 },
+      { chamberId: 'ch-4', chamberNumber: 4, grade: 'Radiator Coolant 50/50', openingLiters: 50, closingLiters: 50, openingLevel: 50, closingLevel: 50, soldLiters: 0, ratePerLiter: 950, totalAmount: 0 },
+    ];
+  };
+
   // Sync draft states when activeShift changes
   React.useEffect(() => {
     if (activeShift) {
       const availablePumpsList = pumps || [];
       const availablePumps = availablePumpsList.some(p => p.id === 'pump-oil-bay')
         ? availablePumpsList
-        : [...availablePumpsList, { id: 'pump-oil-bay', name: 'Oil & Lubricants Bay', fuelType: 'Oil & Lubricants' as FuelType, tankId: '', status: 'Active' }];
+        : [...availablePumpsList, { id: 'pump-oil-bay', name: 'Forecourt Dispenser Station (4-Chamber Unit)', fuelType: 'Oil & Lubricants' as FuelType, tankId: '', status: 'Active' }];
       const currentReadings = activeShift.pumpReadings || [];
       const readingMap = new Map(currentReadings.map(r => [r.pumpId, r]));
 
-      const ensuredReadings: PumpReading[] = availablePumps.map(p => {
-        if (readingMap.has(p.id)) {
-          return readingMap.get(p.id)!;
+      // Initialize stepwise locked meters & finalized pumper cards from active shift readings + localStorage
+      const initialLockedStarts: Record<string, boolean> = {};
+      const initialLockedEnds: Record<string, boolean> = {};
+      const initialFinalized: Record<string, boolean> = {};
+
+      const storedLocks = getStoredLocks(activeShift.id);
+      if (storedLocks) {
+        if (storedLocks.lockedStartMeters) Object.assign(initialLockedStarts, storedLocks.lockedStartMeters);
+        if (storedLocks.lockedEndMeters) Object.assign(initialLockedEnds, storedLocks.lockedEndMeters);
+        if (storedLocks.finalizedPumperCards) Object.assign(initialFinalized, storedLocks.finalizedPumperCards);
+      }
+
+      currentReadings.forEach(r => {
+        if (r.isStartSaved || initialLockedStarts[r.pumpId] || (r.isLocked && r.startMeter !== undefined && r.startMeter >= 0)) {
+          initialLockedStarts[r.pumpId] = true;
         }
+        if (r.isCardFinalized || initialLockedEnds[r.pumpId] || (r.isLocked && r.endMeter !== undefined && r.endMeter > 0 && r.endMeter >= r.startMeter)) {
+          initialLockedEnds[r.pumpId] = true;
+        }
+        if (r.assignedPumperId && (r.isCardFinalized || initialFinalized[r.assignedPumperId] || (r.isLocked && r.status === 'Completed'))) {
+          initialFinalized[r.assignedPumperId] = true;
+        }
+      });
+
+      const ensuredReadings: PumpReading[] = availablePumps.map(p => {
+        const isOil = p.id === 'pump-oil-bay' || p.fuelType === 'Oil & Lubricants' || p.name.toLowerCase().includes('oil') || p.name.toLowerCase().includes('dispenser');
+        
+        if (readingMap.has(p.id)) {
+          const existing = readingMap.get(p.id)!;
+          const isStartSaved = !!(existing.isStartSaved || initialLockedStarts[p.id] || (existing.isLocked && existing.startMeter !== undefined && existing.startMeter >= 0));
+          const isCardFinalized = !!(existing.isCardFinalized || (existing.assignedPumperId && initialFinalized[existing.assignedPumperId]) || (existing.isLocked && existing.status === 'Completed'));
+          if (isOil && (!existing.chamberReadings || existing.chamberReadings.length === 0)) {
+            return {
+              ...existing,
+              isStartSaved,
+              isCardFinalized,
+              isLocked: isCardFinalized || !!existing.isLocked,
+              pumpName: 'Forecourt Dispenser Station (4-Chamber Unit)',
+              chamberReadings: getDefaultChambers(oilTanks)
+            };
+          }
+          return {
+            ...existing,
+            isStartSaved,
+            isCardFinalized,
+            isLocked: isCardFinalized || !!existing.isLocked
+          };
+        }
+
         const carryForward = getPreviousEndMeterForPump(p.id);
         const pStartMeter = (p as Pump).startMeter;
         const initialMeter = pStartMeter !== undefined && pStartMeter > 0 ? Math.max(carryForward, pStartMeter) : carryForward;
         const tank = tanks.find(t => t.id === p.tankId || t.fuelType === p.fuelType);
         return {
           pumpId: p.id,
-          pumpName: p.name,
+          pumpName: isOil ? 'Forecourt Dispenser Station (4-Chamber Unit)' : p.name,
           fuelType: p.fuelType,
           tankId: p.tankId || tank?.id || '',
           assignedPumperId: null,
@@ -196,7 +308,10 @@ export default function ShiftManagementTab({
           testingQty: 0,
           status: 'Idle',
           isLocked: false,
-          unitPrice: tank ? tank.pricePerLiter : 355
+          isStartSaved: !!initialLockedStarts[p.id],
+          isCardFinalized: false,
+          unitPrice: tank ? tank.pricePerLiter : 355,
+          chamberReadings: isOil ? getDefaultChambers(oilTanks) : undefined
         };
       });
 
@@ -211,6 +326,10 @@ export default function ShiftManagementTab({
       
       const stored = localStorage.getItem(`fuelflow_settled_pumpers_${activeShift.id}`);
       setSettledPumperIds(stored ? JSON.parse(stored) : {});
+
+      setLockedStartMeters(initialLockedStarts);
+      setLockedEndMeters(initialLockedEnds);
+      setFinalizedPumperCards(initialFinalized);
     } else {
       setDraftReadings([]);
       setDraftSupervisorId('');
@@ -221,8 +340,11 @@ export default function ShiftManagementTab({
       setReplacementPumperId('');
       setHandoverNotes('');
       setSettledPumperIds({});
+      setLockedStartMeters({});
+      setLockedEndMeters({});
+      setFinalizedPumperCards({});
     }
-  }, [activeShift, pumps, tanks]);
+  }, [activeShift, pumps, tanks, oilTanks]);
 
   // Fetch latest recorded end meters for pumps from Supabase for automatic start meter carryover
   const [supabaseLatestMeters, setSupabaseLatestMeters] = React.useState<Record<string, number>>({});
@@ -633,6 +755,7 @@ export default function ShiftManagementTab({
   // Handle consolidated single cash handover entry for multi-pump assigned pumper
   const handleUpdateConsolidatedCashForPumper = (pumperId: string, newTotalCash: number) => {
     if (!activeShift) return;
+    if (finalizedPumperCards[pumperId]) return;
 
     const pumperReadings = draftReadings.filter(r => r.assignedPumperId === pumperId);
     if (pumperReadings.length === 0) return;
@@ -672,8 +795,6 @@ export default function ShiftManagementTab({
 
     const updatedReadings = draftReadings.map(r => {
       if (r.assignedPumperId === pumperId && newCashPerPump[r.pumpId] !== undefined) {
-        if (r.status === 'Completed') return r; // preserve locked pump status
-
         const actCash = newCashPerPump[r.pumpId];
         const fuelPrice = getPriceForFuelType(r.fuelType);
         const fuelSold = Math.max(0, r.endMeter - r.startMeter);
@@ -729,8 +850,16 @@ export default function ShiftManagementTab({
 
     const updatedReadings = draftReadings.map(r => {
       if (r.pumpId === pumpId) {
-        // Block editing if completed
-        if (r.status === 'Completed') {
+        // Block editing if this entire pumper card is finalized
+        if (r.assignedPumperId && finalizedPumperCards[r.assignedPumperId]) {
+          return r;
+        }
+
+        // Block editing only if that specific meter field is explicitly locked
+        if (field === 'startMeter' && lockedStartMeters[pumpId]) {
+          return r;
+        }
+        if (field === 'endMeter' && lockedEndMeters[pumpId]) {
           return r;
         }
 
@@ -806,11 +935,14 @@ export default function ShiftManagementTab({
     let totalSales = 0;
 
     updatedReadings.forEach(dr => {
-      const fuel = Math.max(0, dr.endMeter - dr.startMeter);
-      const net = Math.max(0, fuel - dr.testingQty);
+      const isOil = dr.pumpId === 'pump-oil-bay' || dr.fuelType === 'Oil & Lubricants' || dr.pumpName?.toLowerCase().includes('dispenser') || dr.pumpName?.toLowerCase().includes('oil');
+      const fuel = isOil ? 0 : Math.max(0, dr.endMeter - dr.startMeter);
+      const net = isOil ? 0 : Math.max(0, fuel - dr.testingQty);
+      const fuelRev = isOil ? 0 : (net * getPriceForFuelType(dr.fuelType));
+      const oilRev = dr.oilSalesAmount || 0;
       totalFuel += fuel;
       totalNet += net;
-      totalSales += (net * getPriceForFuelType(dr.fuelType));
+      totalSales += (fuelRev + oilRev);
     });
 
     setActiveShift({
@@ -822,22 +954,310 @@ export default function ShiftManagementTab({
     });
   };
 
-  // Explicitly commit/save a specific pumper's assigned pump readings & handed-over cash to Supabase
-  const handleSavePumperReadings = async (pumperId: string) => {
+  // Handle live updates to a specific chamber's closing level in Forecourt Dispenser Station
+  const handleUpdateChamberClosingLevel = (pumpId: string, chamberId: string, closingLevel: number) => {
+    if (!activeShift) return;
+
+    const updatedReadings = draftReadings.map(r => {
+      if (r.pumpId === pumpId) {
+        if (r.assignedPumperId && finalizedPumperCards[r.assignedPumperId]) return r;
+
+        const currentChambers = r.chamberReadings && r.chamberReadings.length > 0
+          ? r.chamberReadings
+          : getDefaultChambers(oilTanks);
+
+        const updatedChambers = currentChambers.map(ch => {
+          if (ch.chamberId === chamberId) {
+            const opLevel = ch.openingLevel ?? ch.openingLiters ?? 0;
+            const soldLiters = Math.max(0, Number((opLevel - closingLevel).toFixed(2)));
+            const totalAmount = soldLiters * ch.ratePerLiter;
+            return {
+              ...ch,
+              openingLiters: opLevel,
+              closingLiters: closingLevel,
+              openingLevel: opLevel,
+              closingLevel,
+              soldLiters,
+              totalAmount
+            };
+          }
+          return ch;
+        });
+
+        const totalOilSales = updatedChambers.reduce((sum, ch) => sum + ch.totalAmount, 0);
+        const creditVal = r.creditSalesAmount || 0;
+        const cardVal = r.cardSalesAmount || 0;
+        const actCash = r.actualCash || 0;
+        const netExpectedCash = Math.max(0, totalOilSales - (creditVal + cardVal));
+        const computedVariance = actCash - netExpectedCash;
+
+        const updatedReading: PumpReading = {
+          ...r,
+          chamberReadings: updatedChambers,
+          oilSalesAmount: totalOilSales,
+          cashVariance: computedVariance
+        };
+
+        // Remote sync debounce
+        const syncKey = `${pumpId}_sync`;
+        if (debounceTimersRef.current[syncKey]) {
+          clearTimeout(debounceTimersRef.current[syncKey]);
+        }
+        debounceTimersRef.current[syncKey] = setTimeout(() => {
+          upsertPumpReadings(supabase, [updatedReading], activeShift.id);
+        }, 500);
+
+        return updatedReading;
+      }
+      return r;
+    });
+
+    setDraftReadings(updatedReadings);
+
+    let totalFuel = 0;
+    let totalNet = 0;
+    let totalSales = 0;
+
+    updatedReadings.forEach(dr => {
+      const isOil = dr.pumpId === 'pump-oil-bay' || dr.fuelType === 'Oil & Lubricants' || dr.pumpName?.toLowerCase().includes('dispenser') || dr.pumpName?.toLowerCase().includes('oil');
+      const fuel = isOil ? 0 : Math.max(0, dr.endMeter - dr.startMeter);
+      const net = isOil ? 0 : Math.max(0, fuel - dr.testingQty);
+      const fuelRev = isOil ? 0 : (net * getPriceForFuelType(dr.fuelType));
+      const oilRev = dr.oilSalesAmount || 0;
+      totalFuel += fuel;
+      totalNet += net;
+      totalSales += (fuelRev + oilRev);
+    });
+
+    setActiveShift({
+      ...activeShift,
+      pumpReadings: updatedReadings,
+      totalFuelSold: totalFuel,
+      totalNetSold: totalNet,
+      totalNetSales: totalSales
+    });
+  };
+
+  // Handle live updates to a specific chamber's opening level in Forecourt Dispenser Station
+  const handleUpdateChamberOpeningLevel = (pumpId: string, chamberId: string, openingLevel: number) => {
+    if (!activeShift) return;
+
+    const updatedReadings = draftReadings.map(r => {
+      if (r.pumpId === pumpId) {
+        if (lockedStartMeters[pumpId] || (r.assignedPumperId && finalizedPumperCards[r.assignedPumperId])) return r;
+
+        const currentChambers = r.chamberReadings && r.chamberReadings.length > 0
+          ? r.chamberReadings
+          : getDefaultChambers(oilTanks);
+
+        const updatedChambers = currentChambers.map(ch => {
+          if (ch.chamberId === chamberId) {
+            const clLevel = ch.closingLevel ?? ch.closingLiters ?? 0;
+            const soldLiters = Math.max(0, Number((openingLevel - clLevel).toFixed(2)));
+            const totalAmount = soldLiters * ch.ratePerLiter;
+            return {
+              ...ch,
+              openingLiters: openingLevel,
+              closingLiters: clLevel,
+              openingLevel,
+              closingLevel: clLevel,
+              soldLiters,
+              totalAmount
+            };
+          }
+          return ch;
+        });
+
+        const totalOilSales = updatedChambers.reduce((sum, ch) => sum + ch.totalAmount, 0);
+        const creditVal = r.creditSalesAmount || 0;
+        const cardVal = r.cardSalesAmount || 0;
+        const actCash = r.actualCash || 0;
+        const netExpectedCash = Math.max(0, totalOilSales - (creditVal + cardVal));
+        const computedVariance = actCash - netExpectedCash;
+
+        const updatedReading: PumpReading = {
+          ...r,
+          chamberReadings: updatedChambers,
+          oilSalesAmount: totalOilSales,
+          cashVariance: computedVariance
+        };
+
+        return updatedReading;
+      }
+      return r;
+    });
+
+    setDraftReadings(updatedReadings);
+
+    let totalFuel = 0;
+    let totalNet = 0;
+    let totalSales = 0;
+
+    updatedReadings.forEach(dr => {
+      const isOil = dr.pumpId === 'pump-oil-bay' || dr.fuelType === 'Oil & Lubricants' || dr.pumpName?.toLowerCase().includes('dispenser') || dr.pumpName?.toLowerCase().includes('oil');
+      const fuel = isOil ? 0 : Math.max(0, dr.endMeter - dr.startMeter);
+      const net = isOil ? 0 : Math.max(0, fuel - dr.testingQty);
+      const fuelRev = isOil ? 0 : (net * getPriceForFuelType(dr.fuelType));
+      const oilRev = dr.oilSalesAmount || 0;
+      totalFuel += fuel;
+      totalNet += net;
+      totalSales += (fuelRev + oilRev);
+    });
+
+    setActiveShift({
+      ...activeShift,
+      pumpReadings: updatedReadings,
+      totalFuelSold: totalFuel,
+      totalNetSold: totalNet,
+      totalNetSales: totalSales
+    });
+  };
+
+  // PHASE 1: Save Start Meter & Lock Only Start Meter for a Pumper's assigned pumps
+  const handleSaveStartMeterForPumper = async (pumperId: string) => {
     if (!activeShift) return;
 
     const pumperObj = employees.find(e => e.id === pumperId);
     const pumperName = pumperObj?.name || 'Pumper';
     const pumperReadings = draftReadings.filter(r => r.assignedPumperId === pumperId);
 
-    // Save pump readings to Supabase pump_readings table
-    if (pumperReadings.length > 0) {
-      const readingsToSave = pumperReadings.map(r => ({
-        ...r,
-        status: 'Completed' as const,
-        isLocked: true
-      }));
-      await upsertPumpReadings(supabase, readingsToSave, activeShift.id);
+    if (pumperReadings.length === 0) {
+      setToastMessage(`No pumps assigned to ${pumperName}. Please assign pumps first.`);
+      setTimeout(() => setToastMessage(null), 3000);
+      return;
+    }
+
+    // Validate that Start Meters are non-negative
+    const invalidStart = pumperReadings.find(r => r.startMeter === undefined || r.startMeter === null || r.startMeter < 0 || isNaN(r.startMeter));
+    if (invalidStart) {
+      setToastMessage(`Please enter a valid non-negative Start Meter for ${invalidStart.pumpName}.`);
+      setTimeout(() => setToastMessage(null), 3000);
+      return;
+    }
+
+    // Lock ONLY Start Meters
+    const newLockedStarts = { ...lockedStartMeters };
+    pumperReadings.forEach(r => {
+      newLockedStarts[r.pumpId] = true;
+    });
+    setLockedStartMeters(newLockedStarts);
+    saveLocksToStorage(activeShift.id, newLockedStarts, lockedEndMeters, finalizedPumperCards);
+
+    // Update draftReadings with isStartSaved: true & status: Active
+    const updatedDraftReadings = draftReadings.map(dr => {
+      if (dr.assignedPumperId === pumperId) {
+        return {
+          ...dr,
+          isStartSaved: true,
+          status: dr.status === 'Completed' ? ('Completed' as const) : ('Active' as const)
+        };
+      }
+      return dr;
+    });
+    setDraftReadings(updatedDraftReadings);
+
+    // Save pump readings to Supabase
+    try {
+      await upsertPumpReadings(supabase, updatedDraftReadings.filter(r => r.assignedPumperId === pumperId), activeShift.id);
+    } catch (err) {
+      console.warn('Start meter sync note:', err);
+    }
+
+    // Update React activeShift state
+    let totalFuel = 0;
+    let totalNet = 0;
+    let totalSales = 0;
+
+    updatedDraftReadings.forEach(dr => {
+      const isOil = dr.pumpId === 'pump-oil-bay' || dr.fuelType === 'Oil & Lubricants' || dr.pumpName?.toLowerCase().includes('dispenser') || dr.pumpName?.toLowerCase().includes('oil');
+      const fuel = isOil ? 0 : Math.max(0, dr.endMeter - dr.startMeter);
+      const net = isOil ? 0 : Math.max(0, fuel - dr.testingQty);
+      const fuelRev = isOil ? 0 : (net * getPriceForFuelType(dr.fuelType));
+      const oilRev = dr.oilSalesAmount || 0;
+      totalFuel += fuel;
+      totalNet += net;
+      totalSales += (fuelRev + oilRev);
+    });
+
+    setActiveShift({
+      ...activeShift,
+      pumpReadings: updatedDraftReadings,
+      totalFuelSold: totalFuel,
+      totalNetSold: totalNet,
+      totalNetSales: totalSales
+    });
+
+    setToastMessage(`Start Meter saved & locked for ${pumperName}. Shift operations are active!`);
+    setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  // PHASE 2: Save & Finalize Pumper Record (Locks Start Meter, End Meter, Non-Cash, Test, Cash Handover)
+  const handleFinalizePumperRecord = async (pumperId: string) => {
+    if (!activeShift) return;
+
+    const pumperObj = employees.find(e => e.id === pumperId);
+    const pumperName = pumperObj?.name || 'Pumper';
+    const pumperReadings = draftReadings.filter(r => r.assignedPumperId === pumperId);
+
+    if (pumperReadings.length === 0) {
+      setToastMessage(`No pumps assigned to ${pumperName}.`);
+      setTimeout(() => setToastMessage(null), 3000);
+      return;
+    }
+
+    // Validate that End Meter is entered and >= Start Meter for fuel pumps
+    for (const r of pumperReadings) {
+      const isOil = r.pumpId === 'pump-oil-bay' || r.fuelType === 'Oil & Lubricants' || r.pumpName?.toLowerCase().includes('dispenser') || r.pumpName?.toLowerCase().includes('oil');
+      if (!isOil) {
+        if (r.endMeter === undefined || r.endMeter === null || isNaN(r.endMeter)) {
+          setToastMessage(`Please enter End Meter reading for ${r.pumpName}.`);
+          setTimeout(() => setToastMessage(null), 3500);
+          return;
+        }
+        if (r.endMeter < r.startMeter) {
+          setToastMessage(`End Meter (${r.endMeter} L) on ${r.pumpName} cannot be less than Start Meter (${r.startMeter} L).`);
+          setTimeout(() => setToastMessage(null), 4000);
+          return;
+        }
+      }
+    }
+
+    // Lock Start Meters, End Meters, and the whole Pumper Card
+    const newLockedStarts = { ...lockedStartMeters };
+    const newLockedEnds = { ...lockedEndMeters };
+    const newFinalized = { ...finalizedPumperCards, [pumperId]: true };
+    pumperReadings.forEach(r => {
+      newLockedStarts[r.pumpId] = true;
+      newLockedEnds[r.pumpId] = true;
+    });
+
+    setLockedStartMeters(newLockedStarts);
+    setLockedEndMeters(newLockedEnds);
+    setFinalizedPumperCards(newFinalized);
+    setSavedPumperCards(prev => ({ ...prev, [pumperId]: true }));
+    setSavedPumperIds(prev => ({ ...prev, [pumperId]: true }));
+    saveLocksToStorage(activeShift.id, newLockedStarts, newLockedEnds, newFinalized);
+
+    // Update draftReadings with isStartSaved: true, isCardFinalized: true, isLocked: true and status: Completed
+    const updatedDraftReadings = draftReadings.map(dr => {
+      if (dr.assignedPumperId === pumperId) {
+        return {
+          ...dr,
+          isStartSaved: true,
+          isCardFinalized: true,
+          isLocked: true,
+          status: 'Completed' as const
+        };
+      }
+      return dr;
+    });
+    setDraftReadings(updatedDraftReadings);
+
+    // Save pump readings to Supabase
+    try {
+      await upsertPumpReadings(supabase, updatedDraftReadings.filter(r => r.assignedPumperId === pumperId), activeShift.id);
+    } catch (err) {
+      console.warn('Pump readings sync note:', err);
     }
 
     // Save pumper assignment & handed over cash summary to Supabase shift_pumper_assignments
@@ -856,7 +1276,7 @@ export default function ShiftManagementTab({
         expected_cash: expCash,
         cash_variance: variance,
         assigned_pumps_count: pumperReadings.length,
-        status: 'Saved',
+        status: 'Completed',
         updated_at: new Date().toISOString()
       };
 
@@ -867,26 +1287,12 @@ export default function ShiftManagementTab({
           shift_id: activeShift.id,
           pumper_id: pumperId,
           actual_cash: actualCash,
-          status: 'Saved'
+          status: 'Completed'
         }]);
       }
     } catch (err) {
       console.warn('shift_pumper_assignments sync note:', err);
     }
-
-    // Mark assigned readings in draftReadings as Completed & locked for shift closure
-    const updatedDraftReadings = draftReadings.map(dr => {
-      if (dr.assignedPumperId === pumperId) {
-        return {
-          ...dr,
-          status: 'Completed' as const,
-          isLocked: true
-        };
-      }
-      return dr;
-    });
-
-    setDraftReadings(updatedDraftReadings);
 
     // Update activeShift state in React
     let totalFuel = 0;
@@ -894,11 +1300,14 @@ export default function ShiftManagementTab({
     let totalSales = 0;
 
     updatedDraftReadings.forEach(dr => {
-      const fuel = Math.max(0, dr.endMeter - dr.startMeter);
-      const net = Math.max(0, fuel - dr.testingQty);
+      const isOil = dr.pumpId === 'pump-oil-bay' || dr.fuelType === 'Oil & Lubricants' || dr.pumpName?.toLowerCase().includes('dispenser') || dr.pumpName?.toLowerCase().includes('oil');
+      const fuel = isOil ? 0 : Math.max(0, dr.endMeter - dr.startMeter);
+      const net = isOil ? 0 : Math.max(0, fuel - dr.testingQty);
+      const fuelRev = isOil ? 0 : (net * getPriceForFuelType(dr.fuelType));
+      const oilRev = dr.oilSalesAmount || 0;
       totalFuel += fuel;
       totalNet += net;
-      totalSales += (net * getPriceForFuelType(dr.fuelType));
+      totalSales += (fuelRev + oilRev);
     });
 
     setActiveShift({
@@ -909,18 +1318,77 @@ export default function ShiftManagementTab({
       totalNetSales: totalSales
     });
 
-    // Temporary green "Saved!" status indicator & toast notification
-    setSavedPumperIds(prev => ({ ...prev, [pumperId]: true }));
-    setSavedPumperCards(prev => ({ ...prev, [pumperId]: true }));
-    setToastMessage(`Saved readings & handed over cash for ${pumperName}!`);
+    setToastMessage(`Pumper record for ${pumperName} finalized & locked!`);
+    setTimeout(() => setToastMessage(null), 3000);
+  };
 
-    setTimeout(() => {
-      setSavedPumperIds(prev => ({ ...prev, [pumperId]: false }));
-    }, 3000);
+  // Unlock pumper record for supervisor adjustments
+  const handleUnlockPumperRecord = (pumperId: string) => {
+    if (!activeShift) return;
+    const pumperObj = employees.find(e => e.id === pumperId);
+    const pumperName = pumperObj?.name || 'Pumper';
 
-    setTimeout(() => {
-      setToastMessage(null);
-    }, 3000);
+    const newFinalized = { ...finalizedPumperCards };
+    delete newFinalized[pumperId];
+    setFinalizedPumperCards(newFinalized);
+
+    const newLockedEnds = { ...lockedEndMeters };
+    draftReadings.filter(r => r.assignedPumperId === pumperId).forEach(r => {
+      delete newLockedEnds[r.pumpId];
+    });
+    setLockedEndMeters(newLockedEnds);
+    saveLocksToStorage(activeShift.id, lockedStartMeters, newLockedEnds, newFinalized);
+
+    const updatedDraftReadings = draftReadings.map(dr => {
+      if (dr.assignedPumperId === pumperId) {
+        return {
+          ...dr,
+          isCardFinalized: false,
+          isLocked: false,
+          status: 'Active' as const
+        };
+      }
+      return dr;
+    });
+
+    setDraftReadings(updatedDraftReadings);
+
+    let totalFuel = 0;
+    let totalNet = 0;
+    let totalSales = 0;
+
+    updatedDraftReadings.forEach(dr => {
+      const isOil = dr.pumpId === 'pump-oil-bay' || dr.fuelType === 'Oil & Lubricants' || dr.pumpName?.toLowerCase().includes('dispenser') || dr.pumpName?.toLowerCase().includes('oil');
+      const fuel = isOil ? 0 : Math.max(0, dr.endMeter - dr.startMeter);
+      const net = isOil ? 0 : Math.max(0, fuel - dr.testingQty);
+      const fuelRev = isOil ? 0 : (net * getPriceForFuelType(dr.fuelType));
+      const oilRev = dr.oilSalesAmount || 0;
+      totalFuel += fuel;
+      totalNet += net;
+      totalSales += (fuelRev + oilRev);
+    });
+
+    setActiveShift({
+      ...activeShift,
+      pumpReadings: updatedDraftReadings,
+      totalFuelSold: totalFuel,
+      totalNetSold: totalNet,
+      totalNetSales: totalSales
+    });
+
+    setToastMessage(`Pumper record for ${pumperName} unlocked for adjustments.`);
+    setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  // Backwards-compatible alias for single-call invocation
+  const handleSavePumperReadings = async (pumperId: string) => {
+    const assignedReadings = draftReadings.filter(r => r.assignedPumperId === pumperId);
+    const isStartSaved = assignedReadings.length > 0 && assignedReadings.every(r => !!r.isStartSaved || !!lockedStartMeters[r.pumpId]);
+    if (!isStartSaved) {
+      await handleSaveStartMeterForPumper(pumperId);
+    } else {
+      await handleFinalizePumperRecord(pumperId);
+    }
   };
 
   // Save and lock a single pump's starting readings (Assigned Pumper & Start Meter), marking it Active
@@ -948,7 +1416,7 @@ export default function ShiftManagementTab({
         return { 
           ...dr, 
           endMeter: dr.endMeter || 0,
-          isLocked: true, 
+          isStartSaved: true,
           status: 'Active' as const 
         };
       }
@@ -978,7 +1446,10 @@ export default function ShiftManagementTab({
       totalNetSales: totalSales
     });
 
-    setToastMessage(`${r.pumpName} successfully saved! End Meter & Testing Quantity are now unlocked.`);
+    const newStarts = { ...lockedStartMeters, [pumpId]: true };
+    setLockedStartMeters(newStarts);
+    saveLocksToStorage(activeShift.id, newStarts, lockedEndMeters, finalizedPumperCards);
+    setToastMessage(`${r.pumpName} start meter successfully saved! End Meter & Testing Quantity are now unlocked.`);
     setTimeout(() => setToastMessage(null), 3000);
   };
 
@@ -1099,6 +1570,8 @@ export default function ShiftManagementTab({
       totalNetSales: totalSales
     });
 
+    setLockedStartMeters(prev => { const next = { ...prev }; delete next[pumpId]; return next; });
+    setLockedEndMeters(prev => { const next = { ...prev }; delete next[pumpId]; return next; });
     setToastMessage(`${r.pumpName} unlocked. Start Meter and Pumper can now be adjusted.`);
     setTimeout(() => setToastMessage(null), 3000);
   };
@@ -1210,6 +1683,8 @@ export default function ShiftManagementTab({
       totalNetSales: totalSales
     });
 
+    setLockedStartMeters(prev => ({ ...prev, [pumpId]: true }));
+    setLockedEndMeters(prev => ({ ...prev, [pumpId]: true }));
     setToastMessage(`${r.pumpName} shift successfully completed and locked!`);
     setTimeout(() => setToastMessage(null), 3000);
   };
@@ -1424,22 +1899,24 @@ export default function ShiftManagementTab({
     const pumpsListRaw = pumps || [];
     const pumpsList = pumpsListRaw.some(p => p.id === 'pump-oil-bay')
       ? pumpsListRaw
-      : [...pumpsListRaw, { id: 'pump-oil-bay', name: 'Oil & Lubricants Bay', fuelType: 'Oil & Lubricants' as FuelType, tankId: '', status: 'Active' }];
+      : [...pumpsListRaw, { id: 'pump-oil-bay', name: 'Forecourt Dispenser Station (4-Chamber Unit)', fuelType: 'Oil & Lubricants' as FuelType, tankId: '', status: 'Active' }];
 
     const newPumpReadings: PumpReading[] = pumpsList.map((pump) => {
+      const isOil = pump.id === 'pump-oil-bay' || pump.fuelType === 'Oil & Lubricants' || pump.name.toLowerCase().includes('dispenser') || pump.name.toLowerCase().includes('oil');
       // Automatically fetch previous shift's recorded endmeter for each pump
       const carryForwardStart = getPreviousEndMeterForPump(pump.id);
 
       return {
         pumpId: pump.id,
-        pumpName: pump.name,
+        pumpName: isOil ? 'Forecourt Dispenser Station (4-Chamber Unit)' : pump.name,
         fuelType: pump.fuelType,
         tankId: pump.tankId,
         assignedPumperId: null, // start as unassigned
         startMeter: carryForwardStart,
         endMeter: 0, // initially 0 until manually entered
         testingQty: 0,
-        status: 'Idle'
+        status: 'Idle',
+        chamberReadings: isOil ? getDefaultChambers(oilTanks) : undefined
       };
     });
 
@@ -1565,6 +2042,8 @@ export default function ShiftManagementTab({
 
     onCloseShift(closedShift);
     setIsCloseConfirmOpen(false);
+    setIsJustClosedShift(true);
+    setWhatsappModalShift(closedShift);
   };
 
   // Export current shift to CSV
@@ -1621,7 +2100,19 @@ export default function ShiftManagementTab({
         </div>
 
         {activeShift ? (
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+            <button
+              id="btn-whatsapp-summary-active"
+              onClick={() => {
+                setIsJustClosedShift(false);
+                setWhatsappModalShift(activeShift);
+              }}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 font-bold text-xs sm:text-sm rounded-xl transition-all border border-emerald-200 shadow-xs cursor-pointer"
+              title="Preview / Send WhatsApp Digest to Owner/Manager"
+            >
+              <MessageCircle className="w-4 h-4 text-emerald-600" />
+              <span>WhatsApp Digest</span>
+            </button>
             <button
               id="btn-close-shift"
               onClick={handleEndShiftClick}
@@ -1864,11 +2355,19 @@ export default function ShiftManagementTab({
                   const pumperId = p.pumperId;
                   const pumperName = p.pumperName;
                   const assignedReadings = p.assignedReadings;
+                  const isPumperFinalized = !!finalizedPumperCards[pumperId] || (assignedReadings.length > 0 && assignedReadings.every(r => !!r.isCardFinalized));
+                  const isPumperStartSaved = assignedReadings.length > 0 && assignedReadings.every(r => !!r.isStartSaved || !!lockedStartMeters[r.pumpId]);
 
                   return (
                     <div
                       key={`pumper-card-${pumperId}`}
-                      className="glass-panel p-4 rounded-xl space-y-3 border border-gray-200/90 transition-all shadow-2xs hover:border-blue-300 flex flex-col justify-between"
+                      className={`glass-panel p-4 rounded-xl space-y-3 border transition-all shadow-2xs flex flex-col justify-between ${
+                        isPumperFinalized
+                          ? 'border-emerald-200 bg-emerald-50/20'
+                          : isPumperStartSaved
+                          ? 'border-blue-200 bg-blue-50/10'
+                          : 'border-gray-200/90 hover:border-blue-300'
+                      }`}
                     >
                       <div className="space-y-3">
                         {/* Pumper Card Header */}
@@ -1883,6 +2382,19 @@ export default function ShiftManagementTab({
                                 <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 border border-blue-100 text-[9px] font-extrabold uppercase rounded shrink-0">
                                   Pumper
                                 </span>
+                                {isPumperFinalized ? (
+                                  <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-800 border border-emerald-300 text-[9px] font-extrabold uppercase rounded shrink-0 flex items-center gap-0.5">
+                                    <Lock className="w-2.5 h-2.5" /> Reconciled
+                                  </span>
+                                ) : isPumperStartSaved ? (
+                                  <span className="px-1.5 py-0.5 bg-blue-100 text-blue-800 border border-blue-300 text-[9px] font-extrabold uppercase rounded shrink-0 flex items-center gap-0.5">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse" /> Active
+                                  </span>
+                                ) : (
+                                  <span className="px-1.5 py-0.5 bg-amber-100 text-amber-800 border border-amber-300 text-[9px] font-extrabold uppercase rounded shrink-0">
+                                    Pending Start
+                                  </span>
+                                )}
                               </div>
                               <p className="text-[11px] text-gray-500 font-medium truncate">
                                 {assignedReadings.length} {assignedReadings.length === 1 ? 'Pump Assigned' : 'Pumps Assigned'}
@@ -1892,67 +2404,69 @@ export default function ShiftManagementTab({
 
                           <div className="flex items-center gap-2 shrink-0">
                             {/* Dropdown Pump Assignment Menu */}
-                            <div className="relative">
-                              <button
-                                onClick={() => setOpenPumpSelectorPumperId(openPumpSelectorPumperId === pumperId ? null : pumperId)}
-                                className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 text-xs font-bold rounded-lg flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
-                              >
-                                <Fuel className="w-3.5 h-3.5" />
-                                <span>Assign Pumps</span>
-                                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${openPumpSelectorPumperId === pumperId ? 'rotate-180' : ''}`} />
-                              </button>
+                            {!isPumperFinalized && (
+                              <div className="relative">
+                                <button
+                                  onClick={() => setOpenPumpSelectorPumperId(openPumpSelectorPumperId === pumperId ? null : pumperId)}
+                                  className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 text-xs font-bold rounded-lg flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                                >
+                                  <Fuel className="w-3.5 h-3.5" />
+                                  <span>Assign Pumps</span>
+                                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${openPumpSelectorPumperId === pumperId ? 'rotate-180' : ''}`} />
+                                </button>
 
-                              {/* Dropdown Checklist */}
-                              {openPumpSelectorPumperId === pumperId && (
-                                <div className="absolute right-0 mt-1.5 w-64 bg-white rounded-xl shadow-xl border border-gray-200 p-2.5 z-30 space-y-2 animate-in fade-in zoom-in-95">
-                                  <div className="flex items-center justify-between pb-1.5 border-b border-gray-100">
-                                    <span className="text-[11px] font-extrabold text-gray-800 uppercase tracking-wider">
-                                      Assign Pumps: {pumperName.split(' ')[0]}
-                                    </span>
-                                    <button
-                                      onClick={() => setOpenPumpSelectorPumperId(null)}
-                                      className="text-gray-400 hover:text-gray-600 p-0.5 cursor-pointer"
-                                    >
-                                      <X className="w-3.5 h-3.5" />
-                                    </button>
-                                  </div>
-                                  <div className="max-h-56 overflow-y-auto space-y-1 pr-0.5">
-                                    {draftReadings.map(pumpR => {
-                                      const isAssignedToThis = pumpR.assignedPumperId === pumperId;
-                                      const isAssignedToOther = pumpR.assignedPumperId && pumpR.assignedPumperId !== pumperId;
-                                      const otherPumperName = isAssignedToOther ? employees.find(e => e.id === pumpR.assignedPumperId)?.name : null;
+                                {/* Dropdown Checklist */}
+                                {openPumpSelectorPumperId === pumperId && (
+                                  <div className="absolute right-0 mt-1.5 w-64 bg-white rounded-xl shadow-xl border border-gray-200 p-2.5 z-30 space-y-2 animate-in fade-in zoom-in-95">
+                                    <div className="flex items-center justify-between pb-1.5 border-b border-gray-100">
+                                      <span className="text-[11px] font-extrabold text-gray-800 uppercase tracking-wider">
+                                        Assign Pumps: {pumperName.split(' ')[0]}
+                                      </span>
+                                      <button
+                                        onClick={() => setOpenPumpSelectorPumperId(null)}
+                                        className="text-gray-400 hover:text-gray-600 p-0.5 cursor-pointer"
+                                      >
+                                        <X className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                    <div className="max-h-56 overflow-y-auto space-y-1 pr-0.5">
+                                      {draftReadings.map(pumpR => {
+                                        const isAssignedToThis = pumpR.assignedPumperId === pumperId;
+                                        const isAssignedToOther = pumpR.assignedPumperId && pumpR.assignedPumperId !== pumperId;
+                                        const otherPumperName = isAssignedToOther ? employees.find(e => e.id === pumpR.assignedPumperId)?.name : null;
 
-                                      return (
-                                        <label
-                                          key={`popover-pump-${pumpR.pumpId}`}
-                                          className={`flex items-center justify-between p-1.5 rounded-lg text-xs cursor-pointer transition-colors ${
-                                            isAssignedToThis ? 'bg-blue-50 border border-blue-200 font-bold' : 'hover:bg-gray-50 border border-transparent'
-                                          }`}
-                                        >
-                                          <div className="flex items-center gap-2 min-w-0">
-                                            <input
-                                              type="checkbox"
-                                              checked={isAssignedToThis}
-                                              onChange={() => handleTogglePumperPumpAssignment(pumperId, pumpR.pumpId)}
-                                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5 cursor-pointer shrink-0"
-                                            />
-                                            <div className="min-w-0">
-                                              <span className="font-extrabold text-gray-900 block truncate">{pumpR.pumpName}</span>
-                                              <span className="text-[10px] text-gray-500 block truncate">{pumpR.fuelType}</span>
+                                        return (
+                                          <label
+                                            key={`popover-pump-${pumpR.pumpId}`}
+                                            className={`flex items-center justify-between p-1.5 rounded-lg text-xs cursor-pointer transition-colors ${
+                                              isAssignedToThis ? 'bg-blue-50 border border-blue-200 font-bold' : 'hover:bg-gray-50 border border-transparent'
+                                            }`}
+                                          >
+                                            <div className="flex items-center gap-2 min-w-0">
+                                              <input
+                                                type="checkbox"
+                                                checked={isAssignedToThis}
+                                                onChange={() => handleTogglePumperPumpAssignment(pumperId, pumpR.pumpId)}
+                                                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5 cursor-pointer shrink-0"
+                                              />
+                                              <div className="min-w-0">
+                                                <span className="font-extrabold text-gray-900 block truncate">{pumpR.pumpName}</span>
+                                                <span className="text-[10px] text-gray-500 block truncate">{pumpR.fuelType}</span>
+                                              </div>
                                             </div>
-                                          </div>
-                                          {isAssignedToOther && (
-                                            <span className="text-[9px] text-amber-600 font-semibold px-1.5 py-0.5 bg-amber-50 rounded shrink-0">
-                                              {otherPumperName?.split(' ')[0]}
-                                            </span>
-                                          )}
-                                        </label>
-                                      );
-                                    })}
+                                            {isAssignedToOther && (
+                                              <span className="text-[9px] text-amber-600 font-semibold px-1.5 py-0.5 bg-amber-50 rounded shrink-0">
+                                                {otherPumperName?.split(' ')[0]}
+                                              </span>
+                                            )}
+                                          </label>
+                                        );
+                                      })}
+                                    </div>
                                   </div>
-                                </div>
-                              )}
-                            </div>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </div>
 
@@ -2009,13 +2523,15 @@ export default function ShiftManagementTab({
                                           </span>
                                         )}
                                       </div>
-                                      <button
-                                        onClick={() => handleAssignPumpToPumper(r.pumpId, null)}
-                                        className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                                        title="Unassign Pump"
-                                      >
-                                        <X className="w-3.5 h-3.5" />
-                                      </button>
+                                      {!isPumperFinalized && (
+                                        <button
+                                          onClick={() => handleAssignPumpToPumper(r.pumpId, null)}
+                                          className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                          title="Unassign Pump"
+                                        >
+                                          <X className="w-3.5 h-3.5" />
+                                        </button>
+                                      )}
                                     </div>
 
                                     {/* Meter Inputs */}
@@ -2023,13 +2539,33 @@ export default function ShiftManagementTab({
                                       <div className="grid grid-cols-3 gap-2 text-xs">
                                         <div>
                                           {(() => {
-                                            const isStartMeterLocked = !!savedPumperCards[pumperId] || r.status === 'Saved' || r.status === 'Completed';
+                                            const isStartMeterLocked = !!r.isStartSaved || !!lockedStartMeters[r.pumpId] || isPumperFinalized;
                                             return (
                                               <>
                                                 <label className="text-[10px] font-extrabold text-slate-600 mb-0.5 uppercase flex items-center justify-between">
                                                   <span>Start Meter</span>
                                                   {isStartMeterLocked && (
-                                                    <Lock className="w-2.5 h-2.5 text-slate-400 shrink-0" title="Start Meter Locked" />
+                                                    <span className="flex items-center gap-1">
+                                                      <Lock className="w-2.5 h-2.5 text-slate-400 shrink-0" title="Start Meter Locked" />
+                                                      {!isPumperFinalized && (
+                                                        <button
+                                                          type="button"
+                                                          onClick={() => {
+                                                            const newStarts = { ...lockedStartMeters };
+                                                            delete newStarts[r.pumpId];
+                                                            setLockedStartMeters(newStarts);
+                                                            if (activeShift) {
+                                                              saveLocksToStorage(activeShift.id, newStarts, lockedEndMeters, finalizedPumperCards);
+                                                            }
+                                                            setDraftReadings(prev => prev.map(dr => dr.pumpId === r.pumpId ? { ...dr, isStartSaved: false } : dr));
+                                                          }}
+                                                          className="text-[9px] text-blue-600 hover:text-blue-800 underline font-normal lowercase cursor-pointer"
+                                                          title="Unlock Start Meter"
+                                                        >
+                                                          unlock
+                                                        </button>
+                                                      )}
+                                                    </span>
                                                   )}
                                                 </label>
                                                 <input
@@ -2050,16 +2586,52 @@ export default function ShiftManagementTab({
                                           })()}
                                         </div>
                                         <div>
-                                          <label className="text-[10px] font-extrabold text-slate-600 block mb-0.5 uppercase">End Meter</label>
-                                          <input
-                                            type="number"
-                                            step="any"
-                                            value={r.endMeter ?? 0}
-                                            disabled={r.status === 'Completed'}
-                                            onFocus={(e) => e.target.select()}
-                                            onChange={(e) => handleUpdateReading(r.pumpId, 'endMeter', parseFloat(e.target.value) || 0)}
-                                            className="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-center tabular-nums focus:outline-none focus:border-blue-500 disabled:bg-slate-100 disabled:text-slate-500"
-                                          />
+                                          {(() => {
+                                            const isEndMeterLocked = !!r.isCardFinalized || !!lockedEndMeters[r.pumpId] || isPumperFinalized;
+                                            return (
+                                              <>
+                                                <label className="text-[10px] font-extrabold text-slate-600 mb-0.5 uppercase flex items-center justify-between">
+                                                  <span>End Meter</span>
+                                                  {isEndMeterLocked && (
+                                                    <span className="flex items-center gap-1">
+                                                      <Lock className="w-2.5 h-2.5 text-slate-400 shrink-0" title="End Meter Locked" />
+                                                      {!isPumperFinalized && (
+                                                        <button
+                                                          type="button"
+                                                          onClick={() => {
+                                                            const newEnds = { ...lockedEndMeters };
+                                                            delete newEnds[r.pumpId];
+                                                            setLockedEndMeters(newEnds);
+                                                            if (activeShift) {
+                                                              saveLocksToStorage(activeShift.id, lockedStartMeters, newEnds, finalizedPumperCards);
+                                                            }
+                                                            setDraftReadings(prev => prev.map(dr => dr.pumpId === r.pumpId ? { ...dr, isCardFinalized: false } : dr));
+                                                          }}
+                                                          className="text-[9px] text-blue-600 hover:text-blue-800 underline font-normal lowercase cursor-pointer"
+                                                          title="Unlock End Meter"
+                                                        >
+                                                          unlock
+                                                        </button>
+                                                      )}
+                                                    </span>
+                                                  )}
+                                                </label>
+                                                <input
+                                                  type="number"
+                                                  step="any"
+                                                  value={r.endMeter ?? 0}
+                                                  disabled={isEndMeterLocked}
+                                                  onFocus={(e) => e.target.select()}
+                                                  onChange={(e) => handleUpdateReading(r.pumpId, 'endMeter', parseFloat(e.target.value) || 0)}
+                                                  className={`w-full px-2 py-1 border rounded-lg text-xs font-bold text-center tabular-nums transition-colors ${
+                                                    isEndMeterLocked
+                                                      ? 'bg-slate-100 border-slate-200 text-slate-500 cursor-not-allowed select-none'
+                                                      : 'bg-white border-slate-200 text-slate-800 focus:outline-none focus:border-blue-500'
+                                                  }`}
+                                                />
+                                              </>
+                                            );
+                                          })()}
                                         </div>
                                         <div>
                                           <label className="text-[10px] font-extrabold text-slate-600 block mb-0.5 uppercase">Test (L)</label>
@@ -2067,26 +2639,121 @@ export default function ShiftManagementTab({
                                             type="number"
                                             step="any"
                                             value={r.testingQty ?? 0}
-                                            disabled={r.status === 'Completed'}
+                                            disabled={isPumperFinalized}
                                             onFocus={(e) => e.target.select()}
                                             onChange={(e) => handleUpdateReading(r.pumpId, 'testingQty', parseFloat(e.target.value) || 0)}
-                                            className="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-center tabular-nums focus:outline-none focus:border-blue-500 disabled:bg-slate-100 disabled:text-slate-500"
+                                            className={`w-full px-2 py-1 border rounded-lg text-xs font-bold text-center tabular-nums transition-colors ${
+                                              isPumperFinalized
+                                                ? 'bg-slate-100 border-slate-200 text-slate-500 cursor-not-allowed select-none'
+                                                : 'bg-white border-slate-200 text-slate-800 focus:outline-none focus:border-blue-500'
+                                            }`}
                                           />
                                         </div>
                                       </div>
                                     ) : (
-                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                                        <div>
-                                          <label className="text-[10px] font-extrabold text-amber-700 block mb-0.5 uppercase">Oil & Lube Total Sales (Rs.)</label>
-                                          <input
-                                            type="number"
-                                            step="any"
-                                            value={r.oilSalesAmount ?? 0}
-                                            disabled={r.status === 'Completed'}
-                                            onFocus={(e) => e.target.select()}
-                                            onChange={(e) => handleUpdateReading(r.pumpId, 'oilSalesAmount', parseFloat(e.target.value) || 0)}
-                                            className="w-full px-2 py-1 bg-white border border-amber-200 rounded-lg text-xs font-bold text-right tabular-nums focus:bg-white focus:outline-none focus:border-amber-500 disabled:bg-slate-100 disabled:text-slate-500"
-                                          />
+                                      <div className="space-y-2.5 text-xs">
+                                        <div className="flex items-center justify-between bg-amber-50/80 px-3 py-1.5 rounded-lg border border-amber-200">
+                                          <span className="font-extrabold text-amber-900 flex items-center gap-1.5 text-[11px]">
+                                            <Droplet className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                            <span>4-Chamber Forecourt Bulk Dispenser Reconcile</span>
+                                          </span>
+                                          <span className="text-[10px] font-bold text-amber-800 bg-amber-100/70 px-2 py-0.5 rounded border border-amber-300">
+                                            Forecourt Unit
+                                          </span>
+                                        </div>
+
+                                        <div className="overflow-x-auto rounded-xl border border-amber-200 bg-white">
+                                          <table className="w-full text-left border-collapse text-[11px]">
+                                            <thead>
+                                              <tr className="bg-amber-50/60 border-b border-amber-200 text-[10px] text-amber-950 uppercase font-black tracking-wider">
+                                                <th className="py-2 px-2.5">Chamber & Product</th>
+                                                <th className="py-2 px-2 text-right">Opening (L)</th>
+                                                <th className="py-2 px-2 text-right">Closing (L)</th>
+                                                <th className="py-2 px-2 text-right">Sold (L)</th>
+                                                <th className="py-2 px-2.5 text-right">Total (Rs.)</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-amber-100/60">
+                                              {(r.chamberReadings && r.chamberReadings.length > 0 ? r.chamberReadings : getDefaultChambers(oilTanks)).map((ch, chIdx) => {
+                                                const chamberNum = ch.chamberNumber || chIdx + 1;
+                                                const soldLiters = Math.max(0, Number((ch.openingLevel - ch.closingLevel).toFixed(2)));
+                                                const rowTotal = soldLiters * ch.ratePerLiter;
+                                                const isChamberOpeningLocked = !!r.isStartSaved || !!lockedStartMeters[r.pumpId] || isPumperFinalized;
+
+                                                return (
+                                                  <tr key={ch.chamberId || `chamber-row-${chIdx}`} className="hover:bg-amber-50/40 transition-colors">
+                                                    <td className="py-2 px-2.5 font-bold text-slate-800 whitespace-nowrap">
+                                                      <span className="inline-block px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-100 text-amber-900 border border-amber-300 mr-1.5">
+                                                        Ch 0{chamberNum}
+                                                      </span>
+                                                      <span>{ch.grade}</span>
+                                                    </td>
+                                                    <td className="py-2 px-2 text-right">
+                                                      <div className="flex items-center justify-end gap-1">
+                                                        <input
+                                                          type="number"
+                                                          step="any"
+                                                          disabled={isChamberOpeningLocked}
+                                                          value={ch.openingLevel ?? 0}
+                                                          onFocus={(e) => e.target.select()}
+                                                          onChange={(e) => handleUpdateChamberOpeningLevel(r.pumpId, ch.chamberId, parseFloat(e.target.value) || 0)}
+                                                          className="w-16 px-1.5 py-0.5 bg-slate-50 border border-slate-200 rounded text-right font-bold text-slate-900 tabular-nums focus:bg-white focus:outline-none focus:border-amber-500 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed text-[11px]"
+                                                        />
+                                                        {isChamberOpeningLocked && !isPumperFinalized && (
+                                                          <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                              const newStarts = { ...lockedStartMeters };
+                                                              delete newStarts[r.pumpId];
+                                                              setLockedStartMeters(newStarts);
+                                                              if (activeShift) {
+                                                                saveLocksToStorage(activeShift.id, newStarts, lockedEndMeters, finalizedPumperCards);
+                                                              }
+                                                              setDraftReadings(prev => prev.map(dr => dr.pumpId === r.pumpId ? { ...dr, isStartSaved: false } : dr));
+                                                            }}
+                                                            className="text-[9px] text-blue-600 hover:text-blue-800 underline cursor-pointer"
+                                                            title="Unlock Chamber Opening"
+                                                          >
+                                                            unlock
+                                                          </button>
+                                                        )}
+                                                      </div>
+                                                    </td>
+                                                    <td className="py-2 px-2 text-right">
+                                                      <input
+                                                        type="number"
+                                                        step="any"
+                                                        disabled={isPumperFinalized}
+                                                        value={ch.closingLevel ?? 0}
+                                                        onFocus={(e) => e.target.select()}
+                                                        onChange={(e) => handleUpdateChamberClosingLevel(r.pumpId, ch.chamberId, parseFloat(e.target.value) || 0)}
+                                                        className="w-16 px-1.5 py-0.5 bg-white border border-amber-300 rounded text-right font-bold text-slate-900 tabular-nums focus:outline-none focus:border-amber-600 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed text-[11px]"
+                                                      />
+                                                    </td>
+                                                    <td className="py-2 px-2 text-right font-bold text-amber-900 tabular-nums whitespace-nowrap">
+                                                      {soldLiters.toFixed(2)} L
+                                                    </td>
+                                                    <td className="py-2 px-2.5 text-right font-extrabold text-emerald-700 tabular-nums whitespace-nowrap">
+                                                      {formatCurrency(rowTotal)}
+                                                    </td>
+                                                  </tr>
+                                                );
+                                              })}
+                                            </tbody>
+                                            <tfoot>
+                                              <tr className="bg-amber-50/80 border-t border-amber-200 text-xs font-bold">
+                                                <td colSpan={3} className="py-2 px-2.5 text-amber-950 font-extrabold">
+                                                  Total Forecourt Bulk Oil Sales:
+                                                </td>
+                                                <td className="py-2 px-2 text-right text-amber-950 font-extrabold tabular-nums">
+                                                  {((r.chamberReadings || getDefaultChambers(oilTanks)).reduce((sum, ch) => sum + Math.max(0, ch.openingLevel - ch.closingLevel), 0)).toFixed(2)} L
+                                                </td>
+                                                <td className="py-2 px-2.5 text-right text-emerald-800 font-black tabular-nums text-xs">
+                                                  {formatCurrency(r.oilSalesAmount || 0)}
+                                                </td>
+                                              </tr>
+                                            </tfoot>
+                                          </table>
                                         </div>
                                       </div>
                                     )}
@@ -2098,11 +2765,11 @@ export default function ShiftManagementTab({
                                         <input
                                           type="number"
                                           step="any"
+                                          disabled={isPumperFinalized}
                                           value={r.creditSalesAmount ?? 0}
-                                          disabled={r.status === 'Completed'}
                                           onFocus={(e) => e.target.select()}
                                           onChange={(e) => handleUpdateReading(r.pumpId, 'creditSalesAmount', parseFloat(e.target.value) || 0)}
-                                          className="w-full px-2 py-1 bg-white border border-purple-200 rounded-lg text-xs font-bold text-right tabular-nums focus:bg-white focus:outline-none focus:border-purple-500 disabled:bg-slate-100 disabled:text-slate-500"
+                                          className="w-full px-2 py-1 bg-white border border-purple-200 rounded-lg text-xs font-bold text-right tabular-nums focus:bg-white focus:outline-none focus:border-purple-500 text-purple-900 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                                         />
                                       </div>
                                       <div>
@@ -2110,11 +2777,11 @@ export default function ShiftManagementTab({
                                         <input
                                           type="number"
                                           step="any"
+                                          disabled={isPumperFinalized}
                                           value={r.cardSalesAmount ?? 0}
-                                          disabled={r.status === 'Completed'}
                                           onFocus={(e) => e.target.select()}
                                           onChange={(e) => handleUpdateReading(r.pumpId, 'cardSalesAmount', parseFloat(e.target.value) || 0)}
-                                          className="w-full px-2 py-1 bg-white border border-indigo-200 rounded-lg text-xs font-bold text-right tabular-nums focus:outline-none focus:border-indigo-500 disabled:bg-slate-100 disabled:text-slate-500"
+                                          className="w-full px-2 py-1 bg-white border border-indigo-200 rounded-lg text-xs font-bold text-right tabular-nums focus:outline-none focus:border-indigo-500 text-indigo-900 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                                         />
                                       </div>
                                     </div>
@@ -2169,10 +2836,11 @@ export default function ShiftManagementTab({
                               <input
                                 type="number"
                                 step="any"
+                                disabled={isPumperFinalized}
                                 value={p.totalActualCash ?? 0}
                                 onFocus={(e) => e.target.select()}
                                 onChange={(e) => handleUpdateConsolidatedCashForPumper(pumperId, parseFloat(e.target.value) || 0)}
-                                className="px-2.5 py-1 bg-white border border-gray-300 rounded-lg text-xs font-extrabold text-right tabular-nums text-gray-900 focus:outline-none focus:border-blue-600 w-32"
+                                className="px-2.5 py-1 bg-white border border-gray-300 rounded-lg text-xs font-extrabold text-right tabular-nums text-gray-900 focus:outline-none focus:border-blue-600 w-32 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                                 placeholder="0.00"
                               />
                             </div>
@@ -2195,51 +2863,62 @@ export default function ShiftManagementTab({
                             </div>
                           </div>
 
-                          {/* Save Action */}
+                          {/* 2-Phase Save & Finalize Action Bar */}
                           <div className="pt-2 border-t border-gray-200/60 flex items-center justify-between gap-2">
-                            {(() => {
-                              const isSaved = !!savedPumperIds[pumperId] || !!savedPumperCards[pumperId];
-                              const hasValidEndMeter = assignedReadings.some(r => (r.endMeter !== undefined && r.endMeter > 0) || r.status === 'Completed');
-                              const isSaveLocked = isSaved && hasValidEndMeter;
+                            {isPumperFinalized ? (
+                              <>
+                                <span className="text-[11px] font-extrabold text-emerald-800 flex items-center gap-1.5">
+                                  <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                  <span>Shift Ended: Record reconciled</span>
+                                </span>
 
-                              return (
-                                <>
-                                  {isSaved ? (
-                                    <span className="text-[11px] font-extrabold text-emerald-700 flex items-center gap-1">
-                                      <Check className="w-3.5 h-3.5 text-emerald-600" />
-                                      <span>Readings & Cash Saved to Database</span>
-                                    </span>
-                                  ) : (
-                                    <span className="text-[11px] font-medium text-gray-500">
-                                      Save readings & cash handover
-                                    </span>
-                                  )}
-
+                                <div className="flex items-center gap-2">
                                   <button
                                     type="button"
-                                    disabled={isSaveLocked}
-                                    onClick={() => handleSavePumperReadings(pumperId)}
-                                    className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all flex items-center gap-1 shrink-0 ${
-                                      isSaveLocked
-                                        ? 'bg-slate-200 text-slate-500 border border-slate-300 shadow-none cursor-not-allowed select-none'
-                                        : 'bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white shadow-2xs cursor-pointer'
-                                    }`}
+                                    onClick={() => handleUnlockPumperRecord(pumperId)}
+                                    className="text-[11px] text-slate-500 hover:text-blue-600 font-semibold underline cursor-pointer"
+                                    title="Unlock record to make corrections"
                                   >
-                                    {isSaveLocked ? (
-                                      <>
-                                        <Check className="w-3.5 h-3.5" />
-                                        <span>Saved</span>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <Save className="w-3.5 h-3.5" />
-                                        <span>Save</span>
-                                      </>
-                                    )}
+                                    Unlock Record
                                   </button>
-                                </>
-                              );
-                            })()}
+                                  <div className="px-3 py-1.5 rounded-lg text-xs font-extrabold flex items-center gap-1.5 bg-emerald-100 text-emerald-800 border border-emerald-300 select-none">
+                                    <Lock className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                                    <span>✓ Fully Reconciled & Locked</span>
+                                  </div>
+                                </div>
+                              </>
+                            ) : isPumperStartSaved ? (
+                              <>
+                                <span className="text-[11px] font-medium text-slate-600 flex items-center gap-1.5">
+                                  <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                                  <span>Shift Active: Enter closing readings</span>
+                                </span>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleFinalizePumperRecord(pumperId)}
+                                  className="px-3.5 py-1.5 rounded-lg text-xs font-extrabold transition-all flex items-center gap-1.5 shrink-0 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white shadow-2xs cursor-pointer"
+                                >
+                                  <Check className="w-3.5 h-3.5" />
+                                  <span>Save & Finalize Pumper Record</span>
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <span className="text-[11px] font-medium text-slate-500">
+                                  Shift Start: Enter start meter readings
+                                </span>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleSaveStartMeterForPumper(pumperId)}
+                                  className="px-3.5 py-1.5 rounded-lg text-xs font-extrabold transition-all flex items-center gap-1.5 shrink-0 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white shadow-2xs cursor-pointer"
+                                >
+                                  <Lock className="w-3.5 h-3.5" />
+                                  <span>Save Start Meter</span>
+                                </button>
+                              </>
+                            )}
                           </div>
                         </div>
                       )}
@@ -2394,6 +3073,7 @@ export default function ShiftManagementTab({
                           <th className="py-2.5 px-4 text-right">Revenue (Rs.)</th>
                           <th className="py-2.5 px-4 text-right">Cash Rec. / Variance</th>
                           <th className="py-2.5 px-4">End Time & Date</th>
+                          <th className="py-2.5 px-3 text-center">WhatsApp</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100 text-xs">
@@ -2451,12 +3131,25 @@ export default function ShiftManagementTab({
                                 <td className="py-2.5 px-4 text-gray-500 tabular-nums font-medium text-[11px]">
                                   {formattedDate}
                                 </td>
+                                <td className="py-2.5 px-3 text-center">
+                                  <button
+                                    onClick={() => {
+                                      setIsJustClosedShift(false);
+                                      setWhatsappModalShift(shift);
+                                    }}
+                                    title="Open WhatsApp Closure Digest"
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200/80 font-bold text-[10px] transition-colors cursor-pointer"
+                                  >
+                                    <MessageCircle className="w-3 h-3 text-emerald-600" />
+                                    <span>Send</span>
+                                  </button>
+                                </td>
                               </tr>
                             );
                           })
                         ) : (
                           <tr>
-                            <td colSpan={6} className="py-12 text-center text-gray-400 font-medium text-xs">
+                            <td colSpan={7} className="py-12 text-center text-gray-400 font-medium text-xs">
                               No shift logs found. Click '+ Open New Shift' to record your first shift
                             </td>
                           </tr>
@@ -2910,6 +3603,20 @@ export default function ShiftManagementTab({
         </div>
       )}
       
+      {/* 1-Click WhatsApp Dispatch Modal */}
+      <WhatsAppDispatchModal
+        isOpen={!!whatsappModalShift}
+        onClose={() => {
+          setWhatsappModalShift(null);
+          setIsJustClosedShift(false);
+        }}
+        shift={whatsappModalShift}
+        employees={employees}
+        tanks={tanks}
+        oilTanks={oilTanks}
+        isJustClosed={isJustClosedShift}
+      />
+
       {/* Floating Toast Notification */}
       {toastMessage && (
         <div className="fixed bottom-5 right-5 bg-white text-[#1C1C1C] px-5 py-3 rounded-xl shadow-lg z-50 flex items-center gap-2 text-sm font-semibold animate-bounce shadow-emerald-500/10">

@@ -5,13 +5,13 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
-  Droplets, Package, Truck, Users, Plus, Search, 
+  Droplets, Package, Truck, Plus, Search, 
   AlertTriangle, CheckCircle2, DollarSign, Calendar, 
   ArrowDownRight, ArrowUpRight, Filter, Edit2, Trash2, 
   RefreshCw, Layers, ShieldAlert, ShoppingCart, FileText,
   Clock, Check, X, Tag, BarChart3, AlertCircle
 } from 'lucide-react';
-import { OilTank, PackagedOilItem, OilGRNRecord, PumperOilAllocation, Employee } from '../types';
+import { OilTank, PackagedOilItem, OilGRNRecord, Employee } from '../types';
 import { supabase } from '../lib/supabase';
 import { saveOilTank } from '../lib/supabaseClient';
 
@@ -26,8 +26,8 @@ export default function OilStorageTab({
   setOilTanks,
   employees = []
 }: OilStorageTabProps) {
-  // Sub-tabs: 'bulk' | 'packaged' | 'grn' | 'allocation'
-  const [activeSubTab, setActiveSubTab] = useState<'bulk' | 'packaged' | 'grn' | 'allocation'>('bulk');
+  // Sub-tabs: 'bulk' | 'packaged' | 'grn'
+  const [activeSubTab, setActiveSubTab] = useState<'bulk' | 'packaged' | 'grn'>('bulk');
 
   // Search & Filter States
   const [searchQuery, setSearchQuery] = useState('');
@@ -125,61 +125,6 @@ export default function OilStorageTab({
   }, [grnRecords]);
 
   // -------------------------------------------------------------
-  // 3. PUMPER OIL ALLOCATIONS STATE
-  // -------------------------------------------------------------
-  const [allocations, setAllocations] = useState<PumperOilAllocation[]>(() => {
-    try {
-      const stored = localStorage.getItem('fms_oil_pumper_allocations');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch (_) {}
-    return [
-      {
-        id: 'alloc-01',
-        date: new Date().toISOString().split('T')[0],
-        shiftName: 'Morning Shift (06:00 - 14:00)',
-        pumperId: employees[0]?.id || 'emp-01',
-        pumperName: employees[0]?.name || 'Nimal Bandara',
-        itemId: 'pkg-02',
-        itemName: 'Lanka 2T Super Two Stroke Oil',
-        packageSize: '500ml Bottle',
-        unitPrice: 950,
-        issuedQty: 10,
-        returnedQty: 3,
-        soldQty: 7,
-        totalAmount: 6650,
-        status: 'Reconciled',
-        notes: 'Morning shift cash handed over with shift sales.'
-      },
-      {
-        id: 'alloc-02',
-        date: new Date().toISOString().split('T')[0],
-        shiftName: 'Evening Shift (14:00 - 22:00)',
-        pumperId: employees[1]?.id || 'emp-02',
-        pumperName: employees[1]?.name || 'Kamal Silva',
-        itemId: 'pkg-08',
-        itemName: 'Lanka 2T Pouch Mini Pack',
-        packageSize: '200ml Pouch',
-        unitPrice: 420,
-        issuedQty: 20,
-        returnedQty: 0,
-        soldQty: 0,
-        totalAmount: 0,
-        status: 'Issued',
-        notes: 'Active shift allocation on dispenser island.'
-      }
-    ];
-  });
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('fms_oil_pumper_allocations', JSON.stringify(allocations));
-    } catch (_) {}
-  }, [allocations]);
-
-  // -------------------------------------------------------------
   // COMPUTED KPI METRICS
   // -------------------------------------------------------------
   const metrics = useMemo(() => {
@@ -193,12 +138,6 @@ export default function OilStorageTab({
     const totalPackagedValue = packagedItems.reduce((sum, i) => sum + ((i.currentStock || 0) * (i.retailPrice || 0)), 0);
     const lowStockItems = packagedItems.filter(i => i.currentStock <= i.minReorderLevel);
 
-    // Active allocations
-    const activeAllocationsCount = allocations.filter(a => a.status === 'Issued').length;
-    const todaySalesAmount = allocations
-      .filter(a => a.date === new Date().toISOString().split('T')[0])
-      .reduce((sum, a) => sum + (a.totalAmount || 0), 0);
-
     return {
       totalBulkLiters,
       totalBulkCapacity,
@@ -206,11 +145,9 @@ export default function OilStorageTab({
       totalBottles,
       totalPackagedValue,
       lowStockCount: lowStockItems.length,
-      activeAllocationsCount,
-      todaySalesAmount,
       totalCombinedValue: totalBulkValue + totalPackagedValue
     };
-  }, [oilTanks, packagedItems, allocations]);
+  }, [oilTanks, packagedItems]);
 
   // -------------------------------------------------------------
   // MODAL STATES
@@ -253,18 +190,101 @@ export default function OilStorageTab({
   const [itemFormPrice, setItemFormPrice] = useState<number>(2200);
   const [itemFormLocation, setItemFormLocation] = useState('Bay A1');
 
-  // 4. Pumper Allocation Modal
-  const [isAllocModalOpen, setIsAllocModalOpen] = useState(false);
-  const [allocPumperId, setAllocPumperId] = useState(employees[0]?.id || 'emp-01');
-  const [allocShiftName, setAllocShiftName] = useState('Morning Shift (06:00 - 14:00)');
-  const [allocItemId, setAllocItemId] = useState(packagedItems[0]?.id || '');
-  const [allocIssuedQty, setAllocIssuedQty] = useState<number>(10);
-  const [allocNotes, setAllocNotes] = useState('');
+  // 4. Refill Forecourt Dispenser Chamber Modal
+  const [isRefillModalOpen, setIsRefillModalOpen] = useState(false);
+  const [refillTargetChamberId, setRefillTargetChamberId] = useState('');
+  const [refillSourceDrumId, setRefillSourceDrumId] = useState('');
+  const [refillLiters, setRefillLiters] = useState<number>(20);
 
-  // 5. Reconcile Allocation Modal
-  const [isReconcileModalOpen, setIsReconcileModalOpen] = useState(false);
-  const [reconcilingAlloc, setReconcilingAlloc] = useState<PumperOilAllocation | null>(null);
-  const [reconcileReturnedQty, setReconcileReturnedQty] = useState<number>(0);
+  // Group Oil Tanks into Forecourt 4-Chamber Unit & Back Store 210L Drums
+  const forecourtChambers = useMemo(() => {
+    const chambers = oilTanks.filter(t => t.type === 'chamber' || t.name.toLowerCase().includes('chamber') || t.id.includes('chamber'));
+    if (chambers.length > 0) {
+      return [...chambers].sort((a, b) => (a.chamberNumber || 0) - (b.chamberNumber || 0));
+    }
+    return oilTanks.slice(0, 4);
+  }, [oilTanks]);
+
+  const backStoreDrums = useMemo(() => {
+    const drums = oilTanks.filter(t => t.type === 'drum' || t.name.toLowerCase().includes('drum') || t.name.toLowerCase().includes('barrel') || t.id.includes('drum'));
+    if (drums.length > 0) return drums;
+    return oilTanks.slice(4);
+  }, [oilTanks]);
+
+  // Refill Modal Helpers
+  const selectedTargetChamber = forecourtChambers.find(c => c.id === refillTargetChamberId) || forecourtChambers[0];
+  const selectedSourceDrum = backStoreDrums.find(d => d.id === refillSourceDrumId) || backStoreDrums[0];
+
+  const handleOpenRefillModal = (targetChamberId?: string) => {
+    const targetId = targetChamberId || forecourtChambers[0]?.id || '';
+    setRefillTargetChamberId(targetId);
+    const targetChamber = forecourtChambers.find(c => c.id === targetId) || forecourtChambers[0];
+    
+    if (targetChamber) {
+      const matchingDrum = backStoreDrums.find(d => d.grade === targetChamber.grade) || backStoreDrums[0];
+      if (matchingDrum) setRefillSourceDrumId(matchingDrum.id);
+      const availableSpace = Math.max(0, targetChamber.capacity - targetChamber.currentLevel);
+      setRefillLiters(Math.min(20, Math.max(1, availableSpace)));
+    } else {
+      setRefillSourceDrumId(backStoreDrums[0]?.id || '');
+      setRefillLiters(20);
+    }
+    setIsRefillModalOpen(true);
+  };
+
+  const handleSaveRefillSubmit = async () => {
+    const targetChamber = forecourtChambers.find(c => c.id === refillTargetChamberId) || forecourtChambers[0];
+    const sourceDrum = backStoreDrums.find(d => d.id === refillSourceDrumId) || backStoreDrums[0];
+
+    if (!targetChamber) {
+      alert('Please select a valid Forecourt Chamber.');
+      return;
+    }
+    if (!sourceDrum) {
+      alert('Please select a valid Back Store Drum.');
+      return;
+    }
+    if (refillLiters <= 0) {
+      alert('Refill volume must be greater than 0 liters.');
+      return;
+    }
+    if (sourceDrum.currentLevel < refillLiters) {
+      alert(`Insufficient stock in ${sourceDrum.name}. Only ${sourceDrum.currentLevel}L available.`);
+      return;
+    }
+
+    const spaceInChamber = targetChamber.capacity - targetChamber.currentLevel;
+    const actualTransferLiters = Math.min(refillLiters, spaceInChamber, sourceDrum.currentLevel);
+    if (actualTransferLiters <= 0) {
+      alert('Chamber is already at maximum capacity.');
+      return;
+    }
+
+    const updatedTargetChamber: OilTank = {
+      ...targetChamber,
+      currentLevel: targetChamber.currentLevel + actualTransferLiters
+    };
+
+    const updatedSourceDrum: OilTank = {
+      ...sourceDrum,
+      currentLevel: Math.max(0, sourceDrum.currentLevel - actualTransferLiters)
+    };
+
+    const nextTanks = oilTanks.map(t => {
+      if (t.id === updatedTargetChamber.id) return updatedTargetChamber;
+      if (t.id === updatedSourceDrum.id) return updatedSourceDrum;
+      return t;
+    });
+
+    setOilTanks(nextTanks);
+    try { localStorage.setItem('fms_oil_tanks', JSON.stringify(nextTanks)); } catch (_) {}
+    
+    await saveOilTank(supabase, updatedTargetChamber);
+    await saveOilTank(supabase, updatedSourceDrum);
+
+    setIsRefillModalOpen(false);
+    showToast(`Refilled +${actualTransferLiters}L into ${targetChamber.name.split(':')[0]} (${targetChamber.grade}) from ${sourceDrum.name}`);
+  };
 
   // -------------------------------------------------------------
   // HANDLERS
@@ -500,91 +520,6 @@ export default function OilStorageTab({
     }
   };
 
-  // Submit Pumper Issue Allocation
-  const handleSaveAllocSubmit = () => {
-    const targetItem = packagedItems.find(i => i.id === allocItemId);
-    const targetPumper = employees.find(e => e.id === allocPumperId) || { name: 'Pumper' };
-
-    if (!targetItem) {
-      alert('Please select an item.');
-      return;
-    }
-    if (allocIssuedQty <= 0) {
-      alert('Issued quantity must be greater than 0.');
-      return;
-    }
-    if (targetItem.currentStock < allocIssuedQty) {
-      alert(`Insufficient stock! Current stock is only ${targetItem.currentStock} units.`);
-      return;
-    }
-
-    // Deduct stock immediately upon issue
-    const updatedItem: PackagedOilItem = {
-      ...targetItem,
-      currentStock: targetItem.currentStock - allocIssuedQty
-    };
-    setPackagedItems(packagedItems.map(i => i.id === targetItem.id ? updatedItem : i));
-
-    const newAlloc: PumperOilAllocation = {
-      id: `alloc-${Date.now().toString().slice(-6)}`,
-      date: new Date().toISOString().split('T')[0],
-      shiftName: allocShiftName,
-      pumperId: allocPumperId,
-      pumperName: targetPumper.name,
-      itemId: targetItem.id,
-      itemName: targetItem.name,
-      packageSize: targetItem.packageSize,
-      unitPrice: targetItem.retailPrice,
-      issuedQty: allocIssuedQty,
-      returnedQty: 0,
-      soldQty: 0,
-      totalAmount: 0,
-      status: 'Issued',
-      notes: allocNotes
-    };
-
-    setAllocations([newAlloc, ...allocations]);
-    setIsAllocModalOpen(false);
-    showToast(`Issued ${allocIssuedQty}x ${targetItem.name} to ${targetPumper.name}`);
-  };
-
-  // Submit Reconcile
-  const handleReconcileSubmit = () => {
-    if (!reconcilingAlloc) return;
-    if (reconcileReturnedQty < 0 || reconcileReturnedQty > reconcilingAlloc.issuedQty) {
-      alert(`Returned count must be between 0 and ${reconcilingAlloc.issuedQty}.`);
-      return;
-    }
-
-    const soldQty = reconcilingAlloc.issuedQty - reconcileReturnedQty;
-    const totalAmount = soldQty * reconcilingAlloc.unitPrice;
-
-    // Put returned items back into stock
-    if (reconcileReturnedQty > 0) {
-      const targetItem = packagedItems.find(i => i.id === reconcilingAlloc.itemId);
-      if (targetItem) {
-        const updatedItem: PackagedOilItem = {
-          ...targetItem,
-          currentStock: targetItem.currentStock + reconcileReturnedQty
-        };
-        setPackagedItems(packagedItems.map(i => i.id === targetItem.id ? updatedItem : i));
-      }
-    }
-
-    const updatedAlloc: PumperOilAllocation = {
-      ...reconcilingAlloc,
-      returnedQty: reconcileReturnedQty,
-      soldQty,
-      totalAmount,
-      status: 'Reconciled'
-    };
-
-    setAllocations(allocations.map(a => a.id === reconcilingAlloc.id ? updatedAlloc : a));
-    setIsReconcileModalOpen(false);
-    setReconcilingAlloc(null);
-    showToast(`Reconciled: ${soldQty} sold (${formatCurrency(totalAmount)}), ${reconcileReturnedQty} returned.`);
-  };
-
   // Filtered Packaged Items
   const filteredPackagedItems = useMemo(() => {
     return packagedItems.filter(item => {
@@ -607,139 +542,21 @@ export default function OilStorageTab({
       )}
 
       {/* ========================================================================= */}
-      {/* 1. TOP HEADER & QUICK ACTION BUTTONS */}
+      {/* 1. TOP PAGE HEADING */}
       {/* ========================================================================= */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
+      <div id="oil-storage-header-block" className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center font-bold">
-              <Droplets className="w-5 h-5" />
-            </div>
-            <div>
-              <h1 className="text-lg font-bold text-slate-900 tracking-tight">Oil & Lubricant Storage</h1>
-              <p className="text-xs text-gray-500">
-                Bulk storage tanks, packaged bottle catalog, Goods Received Notes (GRN), and pumper shift allocations
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={handleOpenSaleModal}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
-          >
-            <ShoppingCart className="w-3.5 h-3.5" />
-            <span>Quick Retail Sale</span>
-          </button>
-
-          <button
-            onClick={handleOpenGRNModal}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
-          >
-            <Truck className="w-3.5 h-3.5" />
-            <span>Receive Stock (GRN)</span>
-          </button>
+          <h1 className="text-lg font-bold text-slate-900 tracking-tight font-sans">
+            Oil & Lubricant Storage
+          </h1>
+          <p className="text-gray-500 text-xs sm:text-sm mt-0.5 font-sans">
+            Bulk storage tanks, packaged bottle catalog, and Goods Received Notes (GRN)
+          </p>
         </div>
       </div>
 
       {/* ========================================================================= */}
-      {/* 2. STATS STRIP / KPI SUMMARY CARDS */}
-      {/* ========================================================================= */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
-        {/* Bulk Tanks Stock */}
-        <div className="bg-white p-3.5 rounded-2xl border border-gray-100 shadow-sm space-y-1.5">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Bulk Oil Tanks</span>
-            <div className="w-7 h-7 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
-              <Droplets className="w-3.5 h-3.5" />
-            </div>
-          </div>
-          <div className="flex items-baseline gap-1.5">
-            <span className="text-lg font-extrabold text-[#1C1C1C] tabular-nums">
-              {metrics.totalBulkLiters.toLocaleString()}
-            </span>
-            <span className="text-xs text-gray-400 font-bold">/ {metrics.totalBulkCapacity.toLocaleString()} L</span>
-          </div>
-          <div className="text-[11px] text-gray-500 font-medium flex items-center justify-between pt-1 border-t border-gray-50">
-            <span>Valuation:</span>
-            <strong className="text-slate-800 tabular-nums">{formatCurrency(metrics.totalBulkValue)}</strong>
-          </div>
-        </div>
-
-        {/* Packaged Bottles Stock */}
-        <div className="bg-white p-3.5 rounded-2xl border border-gray-100 shadow-sm space-y-1.5">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Packaged Bottles</span>
-            <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
-              <Package className="w-3.5 h-3.5" />
-            </div>
-          </div>
-          <div className="flex items-baseline gap-1.5">
-            <span className="text-lg font-extrabold text-[#1C1C1C] tabular-nums">
-              {metrics.totalBottles.toLocaleString()}
-            </span>
-            <span className="text-xs text-gray-400 font-bold">Units in stock</span>
-          </div>
-          <div className="text-[11px] text-gray-500 font-medium flex items-center justify-between pt-1 border-t border-gray-50">
-            <span>Valuation:</span>
-            <strong className="text-emerald-700 tabular-nums">{formatCurrency(metrics.totalPackagedValue)}</strong>
-          </div>
-        </div>
-
-        {/* Reorder Alerts */}
-        <div className="bg-white p-3.5 rounded-2xl border border-gray-100 shadow-sm space-y-1.5">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Reorder Alerts</span>
-            <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${
-              metrics.lowStockCount > 0 ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'
-            }`}>
-              <AlertTriangle className="w-3.5 h-3.5" />
-            </div>
-          </div>
-          <div className="flex items-baseline gap-1.5">
-            <span className={`text-lg font-extrabold tabular-nums ${
-              metrics.lowStockCount > 0 ? 'text-rose-600' : 'text-emerald-600'
-            }`}>
-              {metrics.lowStockCount}
-            </span>
-            <span className="text-xs text-gray-400 font-bold">
-              {metrics.lowStockCount === 1 ? 'Product low' : 'Products low'}
-            </span>
-          </div>
-          <div className="text-[11px] text-gray-500 font-medium flex items-center justify-between pt-1 border-t border-gray-50">
-            <span>Status:</span>
-            <span className={`font-bold text-[10px] px-1.5 py-0.2 rounded-full ${
-              metrics.lowStockCount > 0 ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'
-            }`}>
-              {metrics.lowStockCount > 0 ? 'Action Needed' : 'Healthy'}
-            </span>
-          </div>
-        </div>
-
-        {/* Shift Allocations */}
-        <div className="bg-white p-3.5 rounded-2xl border border-gray-100 shadow-sm space-y-1.5">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Pumper Shift Flow</span>
-            <div className="w-7 h-7 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center">
-              <Users className="w-3.5 h-3.5" />
-            </div>
-          </div>
-          <div className="flex items-baseline gap-1.5">
-            <span className="text-lg font-extrabold text-[#1C1C1C] tabular-nums">
-              {metrics.activeAllocationsCount}
-            </span>
-            <span className="text-xs text-gray-400 font-bold">Active issues</span>
-          </div>
-          <div className="text-[11px] text-gray-500 font-medium flex items-center justify-between pt-1 border-t border-gray-50">
-            <span>Today Sales:</span>
-            <strong className="text-purple-700 tabular-nums">{formatCurrency(metrics.todaySalesAmount)}</strong>
-          </div>
-        </div>
-      </div>
-
-      {/* ========================================================================= */}
-      {/* 3. SUB-TABS NAVIGATION */}
+      {/* 2. SUB-TABS NAVIGATION */}
       {/* ========================================================================= */}
       <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
         <button
@@ -777,102 +594,199 @@ export default function OilStorageTab({
           <Truck className="w-4 h-4 text-emerald-500" />
           <span>Receive Stock (GRN) ({grnRecords.length})</span>
         </button>
-
-        <button
-          onClick={() => setActiveSubTab('allocation')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
-            activeSubTab === 'allocation'
-              ? 'bg-[#1C1C1C] text-white shadow-sm'
-              : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200/60'
-          }`}
-        >
-          <Users className="w-4 h-4 text-purple-500" />
-          <span>Pumper Allocation ({allocations.length})</span>
-        </button>
       </div>
 
       {/* ========================================================================= */}
-      {/* VIEW 1: BULK OIL & BARRELS (LIVE METERS) */}
+      {/* VIEW 1: FORECOURT 4-CHAMBER DISPENSER & BACK STORE DRUM STORAGE */}
       {/* ========================================================================= */}
       {activeSubTab === 'bulk' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-bold text-slate-800">Bulk Storage Tanks & Drum Bays</h2>
-            <span className="text-xs text-gray-500 font-medium">Configured in Admin Control</span>
-          </div>
-
-          {oilTanks.length === 0 ? (
-            <div className="bg-white p-10 text-center rounded-2xl border border-gray-100 space-y-3">
-              <Droplets className="w-10 h-10 text-amber-500 mx-auto opacity-70" />
-              <h3 className="text-sm font-bold text-slate-800">No Bulk Oil Tanks Configured</h3>
-              <p className="text-xs text-gray-500 max-w-sm mx-auto">
-                Go to Admin Control &gt; Oil Storage to add and configure bulk lubricant tanks or barrels.
-              </p>
+        <div className="space-y-6">
+          {/* 1. FORECOURT DISPENSER STATION (4-CHAMBER UNIT) */}
+          <div className="space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-1 border-b border-gray-100">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse" />
+                  <h2 className="text-sm font-extrabold text-[#1C1C1C] uppercase tracking-wide">
+                    Forecourt Dispenser Station (4-Chamber Unit)
+                  </h2>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-50 text-amber-800 border border-amber-200">
+                    Forecourt Unit
+                  </span>
+                </div>
+                <p className="text-xs text-gray-500 mt-0.5 font-medium">
+                  Live Forecourt bulk dispenser with 4 segregated compartments for vehicle servicing & top-ups
+                </p>
+              </div>
             </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {oilTanks.map((tank) => {
-                const pct = tank.capacity > 0 ? Math.round((tank.currentLevel / tank.capacity) * 100) : 0;
-                const totalStockVal = tank.currentLevel * (tank.pricePerLiter || 0);
+
+            {/* 4 Chamber Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {forecourtChambers.map((chamber, idx) => {
+                const chamberNo = chamber.chamberNumber || idx + 1;
+                const capacity = chamber.capacity || 100;
+                const pct = capacity > 0 ? Math.round((chamber.currentLevel / capacity) * 100) : 0;
+                const stockVal = (chamber.currentLevel || 0) * (chamber.pricePerLiter || 0);
+                const isLow = pct < 25;
 
                 return (
-                  <div key={tank.id} className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4 shadow-sm hover:border-gray-200 transition-all">
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold">
-                          <Droplets className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-50 text-amber-800 border border-amber-200">
-                            {tank.grade}
+                  <div 
+                    key={chamber.id} 
+                    className="bg-white rounded-2xl border border-gray-200/80 p-4 space-y-3.5 shadow-sm hover:border-amber-300 transition-all relative overflow-hidden group"
+                  >
+                    {/* Top status bar indicator */}
+                    <div className={`absolute top-0 left-0 right-0 h-1.5 ${isLow ? 'bg-rose-500' : pct < 50 ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+
+                    <div className="flex items-start justify-between pt-1">
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-amber-100/80 text-amber-900 border border-amber-300/50">
+                            Chamber 0{chamberNo}
                           </span>
-                          <h3 className="text-base font-extrabold text-[#1C1C1C] mt-0.5">{tank.name}</h3>
                         </div>
+                        <h3 className="text-sm font-extrabold text-slate-900 mt-1">{chamber.grade}</h3>
                       </div>
 
-                      <div className="text-right tabular-nums">
-                        <span className={`text-sm font-extrabold ${pct < 25 ? 'text-rose-600' : pct < 45 ? 'text-amber-600' : 'text-emerald-600'}`}>
-                          {pct}% Full
+                      <div className="text-right">
+                        <span className={`text-xs font-black tabular-nums ${isLow ? 'text-rose-600' : pct < 50 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                          {pct}%
                         </span>
+                        <span className="text-[10px] text-gray-400 block font-medium">Capacity</span>
                       </div>
                     </div>
 
-                    {/* Progress Level Bar */}
+                    {/* Visual Level Meter */}
                     <div className="space-y-1.5">
-                      <div className="w-full bg-gray-100 h-2.5 rounded-full overflow-hidden">
+                      <div className="w-full bg-gray-100 h-3 rounded-full overflow-hidden p-0.5 border border-gray-200/50">
                         <div 
                           className={`h-full rounded-full transition-all duration-500 ${
-                            pct < 25 ? 'bg-rose-500' : pct < 45 ? 'bg-amber-500' : 'bg-emerald-500'
+                            isLow ? 'bg-rose-500' : pct < 50 ? 'bg-amber-500' : 'bg-emerald-500'
                           }`}
                           style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
                         />
                       </div>
-                      <div className="flex justify-between text-xs text-gray-500 font-medium">
-                        <span>Current: <strong className="text-slate-900 tabular-nums">{tank.currentLevel.toLocaleString()} L</strong></span>
-                        <span>Capacity: <strong className="text-slate-900 tabular-nums">{tank.capacity.toLocaleString()} L</strong></span>
+                      <div className="flex justify-between text-[11px] text-gray-600 font-semibold">
+                        <span>Level: <strong className="text-slate-900 tabular-nums">{chamber.currentLevel} L</strong></span>
+                        <span>Max: <strong className="text-slate-700 tabular-nums">{capacity} L</strong></span>
                       </div>
                     </div>
 
-                    {/* Footer Metrics */}
-                    <div className="grid grid-cols-2 gap-2 pt-3 border-t border-gray-100 text-xs">
-                      <div className="bg-gray-50/70 p-2.5 rounded-xl border border-gray-100">
-                        <span className="text-[10px] text-gray-400 uppercase tracking-wider block font-bold">Rate / Liter</span>
-                        <span className="font-bold text-slate-900 tabular-nums">
-                          {formatCurrency(tank.pricePerLiter || 0)}
-                        </span>
+                    {/* Price & Value Details */}
+                    <div className="bg-gray-50/80 p-2.5 rounded-xl border border-gray-100 text-xs space-y-1">
+                      <div className="flex justify-between items-center text-[11px]">
+                        <span className="text-gray-500 font-medium">Rate / L:</span>
+                        <span className="font-bold text-slate-900 tabular-nums">{formatCurrency(chamber.pricePerLiter)}</span>
                       </div>
-                      <div className="bg-gray-50/70 p-2.5 rounded-xl border border-gray-100 text-right">
-                        <span className="text-[10px] text-gray-400 uppercase tracking-wider block font-bold">Total Stock Value</span>
-                        <span className="font-bold text-emerald-700 tabular-nums">
-                          {formatCurrency(totalStockVal)}
-                        </span>
+                      <div className="flex justify-between items-center text-[11px] pt-1 border-t border-gray-200/50">
+                        <span className="text-gray-500 font-medium">Stock Value:</span>
+                        <span className="font-extrabold text-emerald-700 tabular-nums">{formatCurrency(stockVal)}</span>
                       </div>
                     </div>
                   </div>
                 );
               })}
             </div>
-          )}
+          </div>
+
+          {/* 2. BACK STORE DRUM / BARREL STORAGE (210L) */}
+          <div className="space-y-3 pt-4">
+            <div className="flex items-center justify-between pb-1 border-b border-gray-100">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-sm font-extrabold text-[#1C1C1C] uppercase tracking-wide">
+                    Back Store Drum / Barrel Storage (210L)
+                  </h2>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-50 text-blue-800 border border-blue-200">
+                    Wholesale Stock
+                  </span>
+                </div>
+                <p className="text-xs text-gray-500 mt-0.5 font-medium">
+                  Bulk 210L wholesale drums received via supplier purchases for forecourt dispenser replenishment
+                </p>
+              </div>
+            </div>
+
+            {backStoreDrums.length === 0 ? (
+              <div className="bg-white p-8 text-center rounded-2xl border border-gray-100 space-y-2">
+                <Droplets className="w-8 h-8 text-gray-400 mx-auto" />
+                <h4 className="text-xs font-bold text-slate-700">No Back Store Drums Configured</h4>
+                <p className="text-[11px] text-gray-500">Receive new wholesale barrels via the Receive Stock (GRN) tab.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {backStoreDrums.map((drum) => {
+                  const capacity = drum.capacity || 210;
+                  const pct = capacity > 0 ? Math.round((drum.currentLevel / capacity) * 100) : 0;
+                  const totalStockVal = (drum.currentLevel || 0) * (drum.pricePerLiter || 0);
+
+                  return (
+                    <div key={drum.id} className="bg-white rounded-2xl border border-gray-100 p-4 space-y-3 shadow-xs hover:border-gray-200 transition-all">
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-9 h-9 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center font-bold">
+                            <Layers className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-slate-100 text-slate-800 border border-slate-200">
+                              {drum.grade}
+                            </span>
+                            <h4 className="text-xs font-extrabold text-[#1C1C1C] mt-0.5">{drum.name}</h4>
+                          </div>
+                        </div>
+
+                        <div className="text-right tabular-nums">
+                          <span className={`text-xs font-extrabold ${pct < 25 ? 'text-rose-600' : pct < 50 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                            {pct}%
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Drum Level Bar */}
+                      <div className="space-y-1">
+                        <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden">
+                          <div 
+                            className={`h-full rounded-full transition-all duration-500 ${
+                              pct < 25 ? 'bg-rose-500' : pct < 50 ? 'bg-amber-500' : 'bg-blue-600'
+                            }`}
+                            style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
+                          />
+                        </div>
+                        <div className="flex justify-between text-[11px] text-gray-500 font-medium">
+                          <span>Stock: <strong className="text-slate-900 tabular-nums">{drum.currentLevel} L</strong></span>
+                          <span>Drum: <strong className="text-slate-700 tabular-nums">{capacity} L</strong></span>
+                        </div>
+                      </div>
+
+                      {/* Metrics */}
+                      <div className="grid grid-cols-2 gap-2 pt-2 border-t border-gray-100 text-[11px]">
+                        <div>
+                          <span className="text-[10px] text-gray-400 font-bold block">Rate / L</span>
+                          <span className="font-bold text-slate-800 tabular-nums">{formatCurrency(drum.pricePerLiter)}</span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[10px] text-gray-400 font-bold block">Total Stock</span>
+                          <span className="font-extrabold text-emerald-700 tabular-nums">{formatCurrency(totalStockVal)}</span>
+                        </div>
+                      </div>
+
+                      {/* Transfer to Dispenser */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const matchingChamber = forecourtChambers.find(c => c.grade === drum.grade) || forecourtChambers[0];
+                          handleOpenRefillModal(matchingChamber?.id);
+                        }}
+                        className="w-full py-1.5 px-2 bg-gray-50 hover:bg-gray-100 text-gray-700 font-bold rounded-xl text-xs transition-colors border border-gray-200 flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        <Droplets className="w-3.5 h-3.5 text-blue-500" />
+                        <span>Transfer to Dispenser</span>
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -1099,113 +1013,6 @@ export default function OilStorageTab({
                         </td>
                         <td className="py-3 px-4 text-gray-600 font-medium">
                           {grn.receivedBy}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* VIEW 4: PUMPER SHIFT ALLOCATIONS */}
-      {/* ========================================================================= */}
-      {activeSubTab === 'allocation' && (
-        <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3.5 rounded-2xl border border-gray-100 shadow-sm">
-            <div>
-              <h2 className="text-sm font-bold text-slate-800">Pumper Lubricant Allocation & Shift Reconcile</h2>
-              <p className="text-xs text-gray-500">Track 2T pouches, 1L bottles, and coolants issued to pumpers per shift</p>
-            </div>
-
-            <button
-              onClick={() => {
-                if (packagedItems.length > 0) setAllocItemId(packagedItems[0].id);
-                setIsAllocModalOpen(true);
-              }}
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer self-start sm:self-auto"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Issue Oil to Pumper</span>
-            </button>
-          </div>
-
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="bg-gray-50/80 border-b border-gray-100 text-[11px] font-extrabold text-gray-500 uppercase tracking-wider">
-                    <th className="py-3 px-4">Date & Shift</th>
-                    <th className="py-3 px-4">Pumper</th>
-                    <th className="py-3 px-4">Product Issued</th>
-                    <th className="py-3 px-4 text-center">Issued Qty</th>
-                    <th className="py-3 px-4 text-center">Returned</th>
-                    <th className="py-3 px-4 text-center">Sold Qty</th>
-                    <th className="py-3 px-4 text-right">Cash Expected</th>
-                    <th className="py-3 px-4 text-center">Status</th>
-                    <th className="py-3 px-4 text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {allocations.length === 0 ? (
-                    <tr>
-                      <td colSpan={9} className="py-8 text-center text-gray-400 font-medium">
-                        No pumper allocations recorded yet.
-                      </td>
-                    </tr>
-                  ) : (
-                    allocations.map((alloc) => (
-                      <tr key={alloc.id} className="hover:bg-gray-50/50 transition-colors">
-                        <td className="py-3 px-4 font-bold text-slate-900">
-                          <div>{alloc.shiftName || 'Standard Shift'}</div>
-                          <div className="text-[10px] text-gray-400 mt-0.5">{alloc.date}</div>
-                        </td>
-                        <td className="py-3 px-4 font-semibold text-slate-800">
-                          {alloc.pumperName}
-                        </td>
-                        <td className="py-3 px-4 text-slate-900 font-medium">
-                          <div>{alloc.itemName}</div>
-                          <div className="text-[10px] text-gray-400">Rate: {formatCurrency(alloc.unitPrice)}</div>
-                        </td>
-                        <td className="py-3 px-4 text-center font-bold tabular-nums text-slate-900">
-                          {alloc.issuedQty}
-                        </td>
-                        <td className="py-3 px-4 text-center tabular-nums text-gray-500">
-                          {alloc.returnedQty}
-                        </td>
-                        <td className="py-3 px-4 text-center font-bold tabular-nums text-emerald-600">
-                          {alloc.status === 'Reconciled' ? alloc.soldQty : '-'}
-                        </td>
-                        <td className="py-3 px-4 text-right font-bold tabular-nums text-slate-900">
-                          {alloc.status === 'Reconciled' ? formatCurrency(alloc.totalAmount) : '-'}
-                        </td>
-                        <td className="py-3 px-4 text-center">
-                          <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
-                            alloc.status === 'Reconciled'
-                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                              : 'bg-amber-50 text-amber-700 border border-amber-200'
-                          }`}>
-                            {alloc.status}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4 text-right">
-                          {alloc.status === 'Issued' ? (
-                            <button
-                              onClick={() => {
-                                setReconcilingAlloc(alloc);
-                                setReconcileReturnedQty(0);
-                                setIsReconcileModalOpen(true);
-                              }}
-                              className="px-2.5 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-lg text-xs font-bold transition-colors cursor-pointer"
-                            >
-                              Reconcile
-                            </button>
-                          ) : (
-                            <span className="text-[10px] text-gray-400 font-medium">Settled</span>
-                          )}
                         </td>
                       </tr>
                     ))
@@ -1676,18 +1483,18 @@ export default function OilStorageTab({
       )}
 
       {/* ========================================================================= */}
-      {/* MODAL 4: ISSUE OIL TO PUMPER */}
+      {/* MODAL 4: REFILL FORECOURT DISPENSER CHAMBER */}
       {/* ========================================================================= */}
-      {isAllocModalOpen && (
+      {isRefillModalOpen && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl animate-scale-up">
             <div className="flex items-center justify-between border-b border-gray-100 pb-3">
               <h3 className="text-base font-extrabold text-[#1C1C1C] flex items-center gap-2">
-                <Users className="w-5 h-5 text-purple-600" />
-                <span>Issue Lubricants to Pumper</span>
+                <Droplets className="w-5 h-5 text-amber-500" />
+                <span>Refill Dispenser Chamber</span>
               </h3>
               <button 
-                onClick={() => setIsAllocModalOpen(false)}
+                onClick={() => setIsRefillModalOpen(false)}
                 className="p-1 text-gray-400 hover:text-gray-600 rounded-lg cursor-pointer"
               >
                 <X className="w-5 h-5" />
@@ -1696,171 +1503,118 @@ export default function OilStorageTab({
 
             <div className="space-y-3.5 text-xs">
               <div>
-                <label className="font-bold text-gray-600 block mb-1">Select Pumper</label>
+                <label className="font-bold text-gray-700 block mb-1">Target Forecourt Chamber</label>
                 <select
-                  value={allocPumperId}
-                  onChange={(e) => setAllocPumperId(e.target.value)}
+                  value={refillTargetChamberId}
+                  onChange={(e) => {
+                    const targetId = e.target.value;
+                    setRefillTargetChamberId(targetId);
+                    const targetChamber = forecourtChambers.find(c => c.id === targetId);
+                    if (targetChamber) {
+                      const matchingDrum = backStoreDrums.find(d => d.grade === targetChamber.grade);
+                      if (matchingDrum) setRefillSourceDrumId(matchingDrum.id);
+                      const availableSpace = Math.max(0, targetChamber.capacity - targetChamber.currentLevel);
+                      setRefillLiters(Math.min(20, Math.max(1, availableSpace)));
+                    }
+                  }}
                   className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-semibold"
                 >
-                  {employees.length > 0 ? (
-                    employees.map(emp => (
-                      <option key={emp.id} value={emp.id}>{emp.name} ({emp.role})</option>
-                    ))
-                  ) : (
-                    <option value="emp-01">Station Pumper 01</option>
-                  )}
-                </select>
-              </div>
-
-              <div>
-                <label className="font-bold text-gray-600 block mb-1">Shift</label>
-                <select
-                  value={allocShiftName}
-                  onChange={(e) => setAllocShiftName(e.target.value)}
-                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-medium"
-                >
-                  <option value="Morning Shift (06:00 - 14:00)">Morning Shift (06:00 - 14:00)</option>
-                  <option value="Evening Shift (14:00 - 22:00)">Evening Shift (14:00 - 22:00)</option>
-                  <option value="Night Shift (22:00 - 06:00)">Night Shift (22:00 - 06:00)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="font-bold text-gray-600 block mb-1">Product</label>
-                <select
-                  value={allocItemId}
-                  onChange={(e) => setAllocItemId(e.target.value)}
-                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-semibold"
-                >
-                  {packagedItems.map(item => (
-                    <option key={item.id} value={item.id}>
-                      {item.name} ({item.packageSize}) - Available: {item.currentStock}
+                  {forecourtChambers.map(ch => (
+                    <option key={ch.id} value={ch.id}>
+                      {ch.name} (Current: {ch.currentLevel} / {ch.capacity} L)
                     </option>
                   ))}
                 </select>
               </div>
 
               <div>
-                <label className="font-bold text-gray-600 block mb-1">Quantity to Issue</label>
+                <label className="font-bold text-gray-700 block mb-1">Source Back Store Drum (210L)</label>
+                <select
+                  value={refillSourceDrumId}
+                  onChange={(e) => setRefillSourceDrumId(e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-semibold"
+                >
+                  {backStoreDrums.map(drum => (
+                    <option key={drum.id} value={drum.id}>
+                      {drum.name} ({drum.grade}) - Avail: {drum.currentLevel} L
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="font-bold text-gray-700">Refill Volume (Liters)</label>
+                  <span className="text-[10px] text-gray-400 font-medium">
+                    Available Space: {selectedTargetChamber ? Math.max(0, selectedTargetChamber.capacity - selectedTargetChamber.currentLevel) : 0} L
+                  </span>
+                </div>
                 <input
                   type="number"
                   min="1"
-                  value={allocIssuedQty}
-                  onChange={(e) => setAllocIssuedQty(Number(e.target.value))}
+                  max={selectedTargetChamber ? selectedTargetChamber.capacity - selectedTargetChamber.currentLevel : 100}
+                  value={refillLiters}
+                  onChange={(e) => setRefillLiters(Math.max(1, Number(e.target.value) || 0))}
                   className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-bold tabular-nums"
                 />
               </div>
 
-              <div>
-                <label className="font-bold text-gray-600 block mb-1">Notes (Optional)</label>
-                <input
-                  type="text"
-                  value={allocNotes}
-                  onChange={(e) => setAllocNotes(e.target.value)}
-                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-medium"
-                  placeholder="e.g. Island 1 dispenser tray"
-                />
-              </div>
-            </div>
-
-            <div className="flex gap-3 pt-2">
-              <button
-                onClick={() => setIsAllocModalOpen(false)}
-                className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSaveAllocSubmit}
-                className="flex-1 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm cursor-pointer"
-              >
-                Issue to Pumper
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* MODAL 5: RECONCILE PUMPER ALLOCATION */}
-      {/* ========================================================================= */}
-      {isReconcileModalOpen && reconcilingAlloc && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl animate-scale-up">
-            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
-              <h3 className="text-base font-extrabold text-[#1C1C1C] flex items-center gap-2">
-                <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                <span>Reconcile Shift Lubricants</span>
-              </h3>
-              <button 
-                onClick={() => setIsReconcileModalOpen(false)}
-                className="p-1 text-gray-400 hover:text-gray-600 rounded-lg cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-3 text-xs">
-              <div className="p-3 bg-gray-50 rounded-xl space-y-1">
-                <div className="flex justify-between font-bold">
-                  <span className="text-gray-500">Pumper:</span>
-                  <span className="text-slate-900">{reconcilingAlloc.pumperName}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Product:</span>
-                  <span className="font-semibold text-slate-900">{reconcilingAlloc.itemName}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Issued Quantity:</span>
-                  <strong className="tabular-nums text-slate-900">{reconcilingAlloc.issuedQty} Units</strong>
-                </div>
+              {/* Quick fill buttons */}
+              <div className="flex gap-1.5 pt-0.5">
+                {[10, 20, 30].map(amt => (
+                  <button
+                    key={amt}
+                    type="button"
+                    onClick={() => setRefillLiters(amt)}
+                    className="flex-1 py-1 px-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-lg text-[11px] transition-colors cursor-pointer"
+                  >
+                    +{amt}L
+                  </button>
+                ))}
+                {selectedTargetChamber && (
+                  <button
+                    type="button"
+                    onClick={() => setRefillLiters(Math.max(1, selectedTargetChamber.capacity - selectedTargetChamber.currentLevel))}
+                    className="flex-1 py-1 px-2 bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold rounded-lg text-[11px] transition-colors border border-amber-200 cursor-pointer"
+                  >
+                    Fill to {selectedTargetChamber.capacity}L
+                  </button>
+                )}
               </div>
 
-              <div>
-                <label className="font-bold text-gray-600 block mb-1">Returned Unsold Count</label>
-                <input
-                  type="number"
-                  min="0"
-                  max={reconcilingAlloc.issuedQty}
-                  value={reconcileReturnedQty}
-                  onChange={(e) => setReconcileReturnedQty(Number(e.target.value))}
-                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-bold tabular-nums"
-                />
-              </div>
-
-              {/* Settlement Summary */}
-              {(() => {
-                const sold = Math.max(0, reconcilingAlloc.issuedQty - reconcileReturnedQty);
-                const cashDue = sold * reconcilingAlloc.unitPrice;
-                return (
-                  <div className="p-3 bg-emerald-50 rounded-xl space-y-1.5 text-xs">
-                    <div className="flex justify-between">
-                      <span className="text-emerald-800 font-medium">Sold Quantity:</span>
-                      <strong className="tabular-nums text-emerald-900">{sold} Units</strong>
-                    </div>
-                    <div className="flex justify-between border-t border-emerald-200/60 pt-1">
-                      <span className="text-emerald-900 font-extrabold">Cash to Collect:</span>
-                      <strong className="tabular-nums text-sm text-emerald-900">
-                        {formatCurrency(cashDue)}
-                      </strong>
-                    </div>
+              {/* Live Preview Summary */}
+              {selectedTargetChamber && selectedSourceDrum && (
+                <div className="p-3 bg-amber-50/70 border border-amber-200/80 rounded-xl space-y-1.5 text-xs text-amber-950">
+                  <div className="flex justify-between font-medium">
+                    <span>Target Chamber ({selectedTargetChamber.name.split(':')[0]}):</span>
+                    <span className="font-bold tabular-nums">
+                      {selectedTargetChamber.currentLevel} L &rarr; <span className="text-emerald-700 font-extrabold">{Math.min(selectedTargetChamber.capacity, selectedTargetChamber.currentLevel + refillLiters)} L</span> / {selectedTargetChamber.capacity} L
+                    </span>
                   </div>
-                );
-              })()}
+                  <div className="flex justify-between font-medium">
+                    <span>Source Drum Stock:</span>
+                    <span className="font-bold tabular-nums">
+                      {selectedSourceDrum.currentLevel} L &rarr; <span className="text-rose-700 font-extrabold">{Math.max(0, selectedSourceDrum.currentLevel - refillLiters)} L</span>
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex gap-3 pt-2">
               <button
-                onClick={() => setIsReconcileModalOpen(false)}
+                type="button"
+                onClick={() => setIsRefillModalOpen(false)}
                 className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
               >
                 Cancel
               </button>
               <button
-                onClick={handleReconcileSubmit}
-                className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm cursor-pointer"
+                type="button"
+                onClick={handleSaveRefillSubmit}
+                className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm cursor-pointer"
               >
-                Confirm Reconciliation
+                Confirm Refill
               </button>
             </div>
           </div>

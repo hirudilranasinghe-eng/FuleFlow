@@ -43,13 +43,28 @@ export interface FuelTank {
   pricePerLiter: number; // e.g. Rs. or USD
 }
 
+export interface ChamberReading {
+  chamberId: string;
+  chamberNumber: number;
+  grade: string;
+  openingLiters: number;
+  closingLiters: number;
+  openingLevel?: number;
+  closingLevel?: number;
+  soldLiters: number;
+  ratePerLiter: number;
+  totalAmount: number;
+}
+
 export interface OilTank {
   id: string;
-  name: string; // e.g. "Oil Tank 01", "Barrel Storage 02"
-  grade: string; // e.g. "Caltex 20W-50", "Lanka 2T", "Hydraulic 68", "Coolant 50/50"
+  name: string; // e.g. "Chamber 01: Caltex 20W-50", "Back Store Drum: Caltex 20W-50"
+  grade: string; // e.g. "Caltex 20W-50", "Lanka 2T Super", "Hydraulic 68", "Radiator Coolant 50/50"
   capacity: number; // in liters
   currentLevel: number; // in liters
   pricePerLiter: number; // in Rs. per liter
+  type?: 'chamber' | 'drum'; // 'chamber' for Forecourt 4-Chamber Unit, 'drum' for Back Store 210L Drums
+  chamberNumber?: number; // 1, 2, 3, 4
 }
 
 export interface PackagedOilItem {
@@ -144,12 +159,15 @@ export interface PumpReading {
   testingQty: number; // in liters (testing deduction)
   status: 'Active' | 'Idle' | 'Completed';
   isLocked?: boolean;
+  isStartSaved?: boolean; // Persisted start meter saved and locked flag
+  isCardFinalized?: boolean; // Persisted complete card finalized and reconciled flag
   unitPrice?: number;
   actualCash?: number; // Physical cash handed over by pumper
   cashVariance?: number; // (actualCash - netExpectedCash)
   creditSalesAmount?: number; // Credit / Chitty sales amount
   cardSalesAmount?: number; // Card / POS sales amount
   oilSalesAmount?: number; // Engine oil / lubricant sales amount
+  chamberReadings?: ChamberReading[]; // Forecourt 4-Chamber dispenser readings
 }
 
 export interface Shift {

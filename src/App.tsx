@@ -29,7 +29,7 @@ import SettingsTab from './components/SettingsTab';
 import LoginPage from './components/LoginPage';
 import { AuthUser, Employee, FuelTank, OilTank, Pump, PumpMachine, Shift, StockDelivery, PriceSchedule, Customer, CreditTransaction, CreditPayment, resolveUserRole } from './types';
 import { supabase, getTanksTableName, setTanksTableName } from './lib/supabase';
-import { upsertPumpReadings, syncCreditAndCardSales, updateNozzleMeterCarryover } from './lib/supabaseClient';
+import { upsertPumpReadings, syncCreditAndCardSales, updateNozzleMeterCarryover, saveOilTank } from './lib/supabaseClient';
 
 export const defaultPumpMachines: PumpMachine[] = [];
 export const defaultPumps: Pump[] = [];
@@ -46,12 +46,14 @@ export default function App() {
 
   // Navigation active tab
   const [activeTab, setActiveTab] = useState<string>('dashboard');
-  const [reportSubTab, setReportSubTab] = useState<string>('shift-meter');
+  const [reportSubTab, setReportSubTab] = useState<string>('daily-sales');
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
 
   const handleSetActiveTab = (tab: string, subTab?: string) => {
     setActiveTab(tab);
-    if (subTab) {
+    if (tab === 'reports') {
+      setReportSubTab(subTab || 'daily-sales');
+    } else if (subTab) {
       setReportSubTab(subTab);
     }
   };
@@ -226,10 +228,16 @@ export default function App() {
       }
     } catch (_) {}
     return [
-      { id: 'oil-tank-01', name: 'Oil Tank 01', grade: 'Caltex 20W-50', capacity: 1000, currentLevel: 680, pricePerLiter: 2450 },
-      { id: 'oil-tank-02', name: 'Oil Tank 02', grade: 'Lanka 2T Super', capacity: 500, currentLevel: 340, pricePerLiter: 1850 },
-      { id: 'oil-tank-03', name: 'Barrel Storage 01', grade: 'Hydraulic 68', capacity: 210, currentLevel: 145, pricePerLiter: 1950 },
-      { id: 'oil-tank-04', name: 'Coolant Bay 01', grade: 'Radiator Coolant 50/50', capacity: 500, currentLevel: 290, pricePerLiter: 1200 },
+      // 4-Chamber Forecourt Dispenser Station
+      { id: 'forecourt-chamber-01', name: 'Chamber 01: Caltex 20W-50', grade: 'Caltex 20W-50', capacity: 100, currentLevel: 75, pricePerLiter: 2450, type: 'chamber', chamberNumber: 1 },
+      { id: 'forecourt-chamber-02', name: 'Chamber 02: Lanka 2T Super', grade: 'Lanka 2T Super', capacity: 100, currentLevel: 60, pricePerLiter: 1850, type: 'chamber', chamberNumber: 2 },
+      { id: 'forecourt-chamber-03', name: 'Chamber 03: Hydraulic 68', grade: 'Hydraulic 68', capacity: 100, currentLevel: 80, pricePerLiter: 1950, type: 'chamber', chamberNumber: 3 },
+      { id: 'forecourt-chamber-04', name: 'Chamber 04: Radiator Coolant 50/50', grade: 'Radiator Coolant 50/50', capacity: 100, currentLevel: 65, pricePerLiter: 1200, type: 'chamber', chamberNumber: 4 },
+      // Back Store 210L Wholesale Drums
+      { id: 'drum-store-01', name: 'Back Store Drum - Caltex 20W-50', grade: 'Caltex 20W-50', capacity: 210, currentLevel: 190, pricePerLiter: 2450, type: 'drum' },
+      { id: 'drum-store-02', name: 'Back Store Drum - Lanka 2T Super', grade: 'Lanka 2T Super', capacity: 210, currentLevel: 210, pricePerLiter: 1850, type: 'drum' },
+      { id: 'drum-store-03', name: 'Back Store Drum - Hydraulic 68', grade: 'Hydraulic 68', capacity: 210, currentLevel: 155, pricePerLiter: 1950, type: 'drum' },
+      { id: 'drum-store-04', name: 'Back Store Drum - Radiator Coolant 50/50', grade: 'Radiator Coolant 50/50', capacity: 210, currentLevel: 170, pricePerLiter: 1200, type: 'drum' },
     ];
   });
   const [pumpMachines, setPumpMachines] = useState<PumpMachine[]>(() => {
@@ -955,6 +963,39 @@ export default function App() {
       }
     }
 
+    // Deduct bulk oil dispenser chamber levels in real-time if chamberReadings are recorded
+    if (closedShift.pumpReadings && closedShift.pumpReadings.length > 0) {
+      const chamberSalesMap = new Map<string, number>();
+      closedShift.pumpReadings.forEach(r => {
+        if (r.chamberReadings && r.chamberReadings.length > 0) {
+          r.chamberReadings.forEach(cr => {
+            if (cr.soldLiters > 0) {
+              const current = chamberSalesMap.get(cr.chamberId) || 0;
+              chamberSalesMap.set(cr.chamberId, current + cr.soldLiters);
+            }
+          });
+        }
+      });
+
+      if (chamberSalesMap.size > 0) {
+        setOilTanks(prev => {
+          const updated = prev.map(ot => {
+            const sold = chamberSalesMap.get(ot.id) || 0;
+            if (sold > 0) {
+              const newLevel = Math.max(0, Number((ot.currentLevel - sold).toFixed(2)));
+              saveOilTank({ ...ot, currentLevel: newLevel });
+              return { ...ot, currentLevel: newLevel };
+            }
+            return ot;
+          });
+          try {
+            localStorage.setItem('fms_oil_tanks', JSON.stringify(updated));
+          } catch (_) {}
+          return updated;
+        });
+      }
+    }
+
     // 2. Add shift to completed history list
     const updatedHistory = [closedShift, ...shiftHistory];
     setShiftHistory(updatedHistory);
@@ -1280,6 +1321,8 @@ export default function App() {
                 employees={employees}
                 tanks={tanks}
                 setTanks={setTanks}
+                oilTanks={oilTanks}
+                setOilTanks={setOilTanks}
                 pumps={pumps}
                 setPumps={setPumps}
                 pumpMachines={pumpMachines}

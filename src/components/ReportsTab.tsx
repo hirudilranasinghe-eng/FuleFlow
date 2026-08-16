@@ -65,10 +65,18 @@ export default function ReportsTab({
   employees = [],
   tanks = [],
   activeSubTab: propActiveSubTab,
+  onSubTabChange,
 }: ReportsTabProps) {
-  // Navigation Sub-tab state
-  const [internalSubTab] = useState<SubTab>('shift-meter');
+  // Navigation Sub-tab state - Default to 'daily-sales'
+  const [internalSubTab, setInternalSubTab] = useState<SubTab>('daily-sales');
   const activeSubTab = propActiveSubTab || internalSubTab;
+
+  const handleSubTabChange = (tab: SubTab) => {
+    setInternalSubTab(tab);
+    if (onSubTabChange) {
+      onSubTabChange(tab);
+    }
+  };
 
   // Real-time Supabase state
   const [supabaseShifts, setSupabaseShifts] = useState<Shift[]>([]);

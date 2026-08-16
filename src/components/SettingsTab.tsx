@@ -1649,13 +1649,22 @@ export default function SettingsTab({
 
               <div className="sm:col-span-2">
                 <label className="font-bold text-gray-700 block mb-1.5">
-                  Owner / Manager Alert Mobile Numbers <span className="text-gray-400 font-normal">(Comma separated)</span>
+                  Owner / Manager Alert Mobile Numbers <span className="text-gray-400 font-normal">(Comma separated, used for SMS & WhatsApp digests)</span>
                 </label>
                 <input
                   type="text"
                   value={smsConfig.ownerPhones}
-                  onChange={(e) => setSmsConfig({ ...smsConfig, ownerPhones: e.target.value })}
-                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 focus:outline-none focus:border-blue-500"
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setSmsConfig({ ...smsConfig, ownerPhones: val });
+                    const first = val.split(',')[0].trim();
+                    if (first) {
+                      try {
+                        localStorage.setItem('fuelflow_whatsapp_owner_phone', first);
+                      } catch (_) {}
+                    }
+                  }}
+                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 focus:outline-none focus:border-blue-500 font-medium"
                   placeholder="0771234567, 0719876543"
                 />
               </div>

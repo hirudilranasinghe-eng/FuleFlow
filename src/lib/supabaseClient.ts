@@ -604,7 +604,9 @@ export async function deleteFuelTank(client: any, tankId: string) {
 /**
  * Syncs an Oil (Lubricant) Storage Tank to Supabase 'oil_tanks' table.
  */
-export async function saveOilTank(client: any, tank: OilTank) {
+export async function saveOilTank(clientOrTank: any, maybeTank?: OilTank) {
+  const client = maybeTank ? clientOrTank : supabase;
+  const tank = maybeTank || clientOrTank;
   if (!tank || !tank.id) return { data: null, error: null };
   const snakePayload = {
     id: tank.id,

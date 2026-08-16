@@ -171,16 +171,14 @@ export default function DashboardTab({
 
   return (
     <div id="dashboard-tab-root" className="space-y-4">
-      {/* Welcome Banner */}
-      <div id="db-welcome-banner" className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-lg font-bold text-slate-900 tracking-tight font-sans">
-            FuelFlow Station Dashboard
-          </h1>
-          <p className="text-gray-500 text-xs mt-0.5">
-            Real-time visual summary of current sales, stocks, and team operations
-          </p>
-        </div>
+      {/* Page Header */}
+      <div id="db-header-section" className="mb-2">
+        <h1 className="text-xl font-bold text-slate-900 tracking-tight font-sans">
+          FuelFlow Station Dashboard
+        </h1>
+        <p className="text-slate-500 text-xs mt-0.5 font-normal">
+          Real-time visual summary of current sales, stocks, and team operations
+        </p>
       </div>
 
       {/* Main Stats Row */}

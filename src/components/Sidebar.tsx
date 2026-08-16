@@ -118,7 +118,7 @@ export default function Sidebar({
                 <div key={item.id} className="relative group">
                   <button
                     id={`tab-btn-${item.id}`}
-                    onClick={() => setActiveTab('reports', activeReportSubTab || 'shift-meter')}
+                    onClick={() => setActiveTab('reports', activeReportSubTab || 'daily-sales')}
                     className={`w-full flex items-center justify-center px-0 py-3 rounded-2xl text-sm font-medium transition-all duration-200 border border-transparent cursor-pointer ${
                       isActive
                         ? 'bg-gray-100/80 text-[#1C1C1C] font-semibold shadow-2xs'
@@ -143,7 +143,7 @@ export default function Sidebar({
                     <div className="space-y-1 mt-1">
                       {reportSubItems.map((sub) => {
                         const SubIcon = sub.icon;
-                        const isSubActive = activeTab === 'reports' && (activeReportSubTab === sub.id || (!activeReportSubTab && sub.id === 'shift-meter'));
+                        const isSubActive = activeTab === 'reports' && (activeReportSubTab === sub.id || (!activeReportSubTab && sub.id === 'daily-sales'));
                         return (
                           <button
                             key={sub.id}
@@ -175,7 +175,7 @@ export default function Sidebar({
                   id={`tab-btn-${item.id}`}
                   onClick={() => {
                     if (activeTab !== 'reports') {
-                      setActiveTab('reports', activeReportSubTab || 'shift-meter');
+                      setActiveTab('reports', activeReportSubTab || 'daily-sales');
                       setIsReportsExpanded(true);
                     } else {
                       setIsReportsExpanded(!isReportsExpanded);
@@ -203,7 +203,7 @@ export default function Sidebar({
                   <div className="ml-5 pl-3 border-l-2 border-gray-100 space-y-1 py-1 transition-all duration-200">
                     {reportSubItems.map((sub) => {
                       const SubIcon = sub.icon;
-                      const isSubActive = activeTab === 'reports' && (activeReportSubTab === sub.id || (!activeReportSubTab && sub.id === 'shift-meter'));
+                      const isSubActive = activeTab === 'reports' && (activeReportSubTab === sub.id || (!activeReportSubTab && sub.id === 'daily-sales'));
                       return (
                         <button
                           key={sub.id}
