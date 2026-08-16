@@ -22,6 +22,13 @@ import {
 import { supabase } from '../lib/supabase';
 import { SUPABASE_SQL } from '../lib/sqlSchema';
 import { formatSriLankanPhoneNumber, dispatchTextLKSMS, SMSDispatchResult } from '../lib/smsService';
+import { 
+  getEmailDigestConfig, 
+  saveEmailDigestConfig, 
+  EmailDigestConfig, 
+  DEFAULT_EMAIL_DIGEST_CONFIG, 
+  sendShiftEmailWebhook 
+} from '../lib/emailWebhookService';
 
 interface SettingsTabProps {
   tanks: FuelTank[];
@@ -48,8 +55,8 @@ export default function SettingsTab({
   payments = [],
   onResetAllData
 }: SettingsTabProps) {
-  // Sub-navigation: 'profile' | 'designer' | 'sms' | 'rules' | 'data'
-  const [activeSubTab, setActiveSubTab] = useState<'profile' | 'designer' | 'sms' | 'rules' | 'data'>('profile');
+  // Sub-navigation: 'profile' | 'designer' | 'sms' | 'email' | 'rules' | 'data'
+  const [activeSubTab, setActiveSubTab] = useState<'profile' | 'designer' | 'sms' | 'email' | 'rules' | 'data'>('profile');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
@@ -269,6 +276,82 @@ export default function SettingsTab({
       showToast(`Failed to send test SMS.`);
     } finally {
       setIsSendingTest(false);
+    }
+  };
+
+  // =========================================================================
+  // AUTOMATED EMAIL DIGEST CONFIG STATE
+  // =========================================================================
+  const [emailConfig, setEmailConfig] = useState<EmailDigestConfig>(() => getEmailDigestConfig());
+  const [isSendingTestEmail, setIsSendingTestEmail] = useState(false);
+  const [emailTestResult, setEmailTestResult] = useState<{ success: boolean; message: string; timestamp: string } | null>(null);
+
+  const handleSaveEmailConfig = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    saveEmailDigestConfig(emailConfig);
+    showToast('✓ Automated Email Digest settings saved successfully.');
+  };
+
+  const handleTestEmailWebhook = async () => {
+    setIsSendingTestEmail(true);
+    setEmailTestResult(null);
+
+    // Create a representative shift payload for test transmission
+    const sampleShift: Shift = shiftHistory[0] || {
+      id: 'SHIFT-DEMO-001',
+      name: 'Morning Shift (Test Transmission)',
+      supervisorId: employees[0]?.id || 'emp-sup-01',
+      startTime: new Date(Date.now() - 8 * 3600 * 1000).toISOString(),
+      endTime: new Date().toISOString(),
+      isActive: false,
+      pumpReadings: tanks.map((t, idx) => ({
+        pumpId: `pump-${idx + 1}`,
+        pumpName: `Pump #${idx + 1} - ${t.name}`,
+        fuelType: t.fuelType,
+        assignedPumperId: employees[0]?.id || 'emp-pumper-1',
+        status: 'Completed' as const,
+        startMeter: 12500,
+        endMeter: 13020.5,
+        testingQty: 5.0,
+        unitPrice: t.pricePerLiter,
+        creditSalesAmount: 18500,
+        cardSalesAmount: 32000,
+        actualCash: 145000,
+        oilSalesAmount: 3500,
+      })),
+      totalFuelSold: 520.5,
+      totalNetSold: 515.5,
+      totalNetSales: 195500,
+      totalPhysicalCash: 145000,
+      cashVariance: 0,
+    };
+
+    try {
+      const result = await sendShiftEmailWebhook(sampleShift, employees, tanks, oilTanks, {
+        webhookUrl: emailConfig.webhookUrl,
+        ownerEmail: emailConfig.ownerEmail,
+      });
+
+      setEmailTestResult({
+        success: result.success,
+        message: result.message,
+        timestamp: new Date().toLocaleTimeString(),
+      });
+
+      if (result.success) {
+        showToast('✓ Test shift digest successfully dispatched to webhook!');
+      } else {
+        showToast(`Webhook dispatch notice: ${result.message}`);
+      }
+    } catch (err: any) {
+      setEmailTestResult({
+        success: false,
+        message: err.message || 'Network exception while connecting to webhook',
+        timestamp: new Date().toLocaleTimeString(),
+      });
+      showToast('Failed to connect to email webhook endpoint.');
+    } finally {
+      setIsSendingTestEmail(false);
     }
   };
 
@@ -520,6 +603,18 @@ export default function SettingsTab({
         >
           <MessageSquare className="w-4 h-4 text-emerald-500" />
           <span>SMS Notification Gateway</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('email')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+            activeSubTab === 'email'
+              ? 'bg-[#1C1C1C] text-white shadow-sm'
+              : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200/60'
+          }`}
+        >
+          <Mail className="w-4 h-4 text-sky-500" />
+          <span>Automated Email Digest</span>
         </button>
 
         <button
@@ -1900,6 +1995,196 @@ export default function SettingsTab({
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* VIEW: AUTOMATED EMAIL DIGEST (n8n WEBHOOK) */}
+      {/* ========================================================================= */}
+      {activeSubTab === 'email' && (
+        <div className="space-y-5">
+          <form onSubmit={handleSaveEmailConfig} className="bg-white rounded-2xl border border-gray-100 p-6 space-y-6 shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-gray-100 pb-4 gap-3">
+              <div>
+                <h3 className="font-bold text-[#1C1C1C] text-sm flex items-center gap-2">
+                  <Mail className="w-4 h-4 text-sky-600" />
+                  <span>Automated Email Digest (n8n Webhook)</span>
+                </h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Automatically dispatch a structured Sri Lankan fuel station shift closure report to owner/management upon finalizing a shift
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold ${
+                  emailConfig.enabled ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-gray-100 text-gray-600 border border-gray-200'
+                }`}>
+                  <span className={`w-2 h-2 rounded-full ${emailConfig.enabled ? 'bg-emerald-500 animate-pulse' : 'bg-gray-400'}`} />
+                  <span>{emailConfig.enabled ? 'Automation Active' : 'Automation Paused'}</span>
+                </span>
+              </div>
+            </div>
+
+            {/* Main Configuration Controls */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              
+              {/* Toggle Switch */}
+              <div className="md:col-span-2 p-4 bg-gray-50/80 rounded-2xl border border-gray-200/80 flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <label htmlFor="email-auto-send-toggle" className="text-xs font-bold text-[#1C1C1C] block cursor-pointer">
+                    Auto-send Email Digest on Shift Closure
+                  </label>
+                  <p className="text-[11px] text-gray-500">
+                    When enabled, closing any shift immediately triggers a background JSON POST request to the webhook URL.
+                  </p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer select-none">
+                  <input
+                    id="email-auto-send-toggle"
+                    type="checkbox"
+                    checked={emailConfig.enabled}
+                    onChange={(e) => setEmailConfig(prev => ({ ...prev, enabled: e.target.checked }))}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-sky-600"></div>
+                </label>
+              </div>
+
+              {/* Target Owner / Management Email Address */}
+              <div className="space-y-1.5">
+                <label htmlFor="email-owner-address" className="text-xs font-bold text-gray-700 flex items-center gap-1.5">
+                  <Mail className="w-3.5 h-3.5 text-sky-600" />
+                  <span>Target Owner / Management Email Address</span>
+                </label>
+                <input
+                  id="email-owner-address"
+                  type="email"
+                  value={emailConfig.ownerEmail}
+                  onChange={(e) => setEmailConfig(prev => ({ ...prev, ownerEmail: e.target.value }))}
+                  placeholder="contact@samseautomart.lk"
+                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs font-medium text-[#1C1C1C] focus:bg-white focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 outline-none transition-all"
+                />
+                <p className="text-[10px] text-gray-400">
+                  Primary recipient address supplied in the webhook payload (<code className="text-gray-600 font-mono">targetEmail</code>)
+                </p>
+              </div>
+
+              {/* Custom Webhook URL */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label htmlFor="email-webhook-url" className="text-xs font-bold text-gray-700 flex items-center gap-1.5">
+                    <Radio className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Custom Webhook URL (n8n / Relay Endpoint)</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setEmailConfig(prev => ({ ...prev, webhookUrl: DEFAULT_EMAIL_DIGEST_CONFIG.webhookUrl }))}
+                    className="text-[10px] text-sky-600 hover:text-sky-700 font-semibold cursor-pointer"
+                  >
+                    Reset to Default
+                  </button>
+                </div>
+                <input
+                  id="email-webhook-url"
+                  type="url"
+                  value={emailConfig.webhookUrl}
+                  onChange={(e) => setEmailConfig(prev => ({ ...prev, webhookUrl: e.target.value }))}
+                  placeholder="http://178.128.112.106:5678/webhook/..."
+                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs font-mono text-[#1C1C1C] focus:bg-white focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 outline-none transition-all"
+                />
+                <p className="text-[10px] text-gray-400">
+                  HTTP POST endpoint configured in n8n or custom webhook workflow
+                </p>
+              </div>
+
+            </div>
+
+            {/* Payload Schema & Formatted Preview Guide */}
+            <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  <Info className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Dispatched Payload Data Structure</span>
+                </span>
+                <span className="text-[10px] font-mono bg-white px-2 py-0.5 rounded border border-slate-200 text-slate-600 font-semibold">
+                  application/json
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-[11px]">
+                <div className="p-2.5 bg-white rounded-xl border border-slate-200/60 shadow-2xs">
+                  <div className="font-bold text-slate-900 flex items-center gap-1">⛽ Fuel Sales Volumes</div>
+                  <div className="text-gray-500 text-[10px] mt-0.5">Petrol 92, Petrol 95, Auto Diesel, Super Diesel with rate &amp; revenue</div>
+                </div>
+                <div className="p-2.5 bg-white rounded-xl border border-slate-200/60 shadow-2xs">
+                  <div className="font-bold text-slate-900 flex items-center gap-1">🛢️ Forecourt Bulk Oil</div>
+                  <div className="text-gray-500 text-[10px] mt-0.5">Total lubricants &amp; engine oil sales revenue in Rs.</div>
+                </div>
+                <div className="p-2.5 bg-white rounded-xl border border-slate-200/60 shadow-2xs">
+                  <div className="font-bold text-slate-900 flex items-center gap-1">💰 Cash Reconciliation</div>
+                  <div className="text-gray-500 text-[10px] mt-0.5">Gross, Non-Cash (Card/Credit), Expected vs Handed Over, Variance</div>
+                </div>
+                <div className="p-2.5 bg-white rounded-xl border border-slate-200/60 shadow-2xs">
+                  <div className="font-bold text-slate-900 flex items-center gap-1">📊 Underground Tanks</div>
+                  <div className="text-gray-500 text-[10px] mt-0.5">Closing dip liters, capacity percentage &amp; level readings</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+              <button
+                type="button"
+                id="btn-test-email-webhook"
+                disabled={isSendingTestEmail}
+                onClick={handleTestEmailWebhook}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold bg-gray-100 hover:bg-gray-200 text-gray-700 transition-all cursor-pointer disabled:opacity-60"
+              >
+                {isSendingTestEmail ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-gray-500" />
+                    <span>Dispatching Test Webhook...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-3.5 h-3.5 text-sky-600" />
+                    <span>Send Test Email Digest Webhook</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="submit"
+                id="btn-save-email-config"
+                className="flex items-center gap-2 px-5 py-2.5 bg-[#1C1C1C] hover:bg-black text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer"
+              >
+                <Save className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Save Email Digest Settings</span>
+              </button>
+            </div>
+          </form>
+
+          {/* Test Result Inspection Box */}
+          {emailTestResult && (
+            <div className={`p-4 rounded-2xl border transition-all text-xs ${
+              emailTestResult.success 
+                ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900' 
+                : 'bg-amber-50/70 border-amber-200 text-amber-900'
+            }`}>
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-2 font-bold">
+                  {emailTestResult.success ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                  )}
+                  <span>{emailTestResult.success ? 'Webhook Dispatch Successful' : 'Webhook Dispatch Notice'}</span>
+                </div>
+                <span className="text-[10px] text-gray-500 font-mono">{emailTestResult.timestamp}</span>
+              </div>
+              <p className="text-[11px] text-gray-600 mt-1 pl-6 font-mono">
+                {emailTestResult.message}
+              </p>
+            </div>
+          )}
         </div>
       )}
 

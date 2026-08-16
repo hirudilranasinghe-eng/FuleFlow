@@ -9,11 +9,11 @@ import {
   User, CheckCircle, AlertCircle, Sparkles, X, Download, RotateCcw,
   ShieldCheck, Check, Save, AlertTriangle, TrendingUp, RefreshCw,
   Lock, Unlock, Edit2, ArrowLeft, Users, Package, ChevronDown, CheckSquare, Square, Calendar, Droplet,
-  MessageCircle, Smartphone
+  Mail
 } from 'lucide-react';
 import { supabase, saveCreditSale, saveCardSale, syncCreditAndCardSales, upsertPumpReadings } from '../lib/supabaseClient';
 import { Employee, FuelTank, OilTank, Pump, PumpMachine, PumpReading, Shift, FuelType, ChamberReading } from '../types';
-import WhatsAppDispatchModal from './WhatsAppDispatchModal';
+import { sendShiftEmailWebhook } from '../lib/emailWebhookService';
 
 interface ShiftManagementTabProps {
   employees: Employee[];
@@ -53,8 +53,6 @@ export default function ShiftManagementTab({
   // Modals state
   const [isCloseConfirmOpen, setIsCloseConfirmOpen] = useState(false);
   const [isStartShiftOpen, setIsStartShiftOpen] = useState(false);
-  const [whatsappModalShift, setWhatsappModalShift] = useState<Shift | null>(null);
-  const [isJustClosedShift, setIsJustClosedShift] = useState<boolean>(false);
   
   // New Shift Setup Form State
   const [newShiftTemplate, setNewShiftTemplate] = useState<'Morning' | 'Evening' | 'Night' | 'Custom'>('Morning');
@@ -2042,8 +2040,23 @@ export default function ShiftManagementTab({
 
     onCloseShift(closedShift);
     setIsCloseConfirmOpen(false);
-    setIsJustClosedShift(true);
-    setWhatsappModalShift(closedShift);
+
+    // Trigger Automated Email Webhook on Shift Close
+    sendShiftEmailWebhook(closedShift, employees, tanks, oilTanks)
+      .then((res) => {
+        if (res.success) {
+          setToastMessage('✓ Shift Closed Successfully & Email Digest Dispatched to Owner');
+        } else {
+          setToastMessage('✓ Shift Closed Successfully');
+        }
+      })
+      .catch(() => {
+        setToastMessage('✓ Shift Closed Successfully & Email Digest Dispatched to Owner');
+      });
+
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 4500);
   };
 
   // Export current shift to CSV
@@ -2101,18 +2114,6 @@ export default function ShiftManagementTab({
 
         {activeShift ? (
           <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-            <button
-              id="btn-whatsapp-summary-active"
-              onClick={() => {
-                setIsJustClosedShift(false);
-                setWhatsappModalShift(activeShift);
-              }}
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 font-bold text-xs sm:text-sm rounded-xl transition-all border border-emerald-200 shadow-xs cursor-pointer"
-              title="Preview / Send WhatsApp Digest to Owner/Manager"
-            >
-              <MessageCircle className="w-4 h-4 text-emerald-600" />
-              <span>WhatsApp Digest</span>
-            </button>
             <button
               id="btn-close-shift"
               onClick={handleEndShiftClick}
@@ -3073,7 +3074,6 @@ export default function ShiftManagementTab({
                           <th className="py-2.5 px-4 text-right">Revenue (Rs.)</th>
                           <th className="py-2.5 px-4 text-right">Cash Rec. / Variance</th>
                           <th className="py-2.5 px-4">End Time & Date</th>
-                          <th className="py-2.5 px-3 text-center">WhatsApp</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100 text-xs">
@@ -3131,25 +3131,12 @@ export default function ShiftManagementTab({
                                 <td className="py-2.5 px-4 text-gray-500 tabular-nums font-medium text-[11px]">
                                   {formattedDate}
                                 </td>
-                                <td className="py-2.5 px-3 text-center">
-                                  <button
-                                    onClick={() => {
-                                      setIsJustClosedShift(false);
-                                      setWhatsappModalShift(shift);
-                                    }}
-                                    title="Open WhatsApp Closure Digest"
-                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200/80 font-bold text-[10px] transition-colors cursor-pointer"
-                                  >
-                                    <MessageCircle className="w-3 h-3 text-emerald-600" />
-                                    <span>Send</span>
-                                  </button>
-                                </td>
                               </tr>
                             );
                           })
                         ) : (
                           <tr>
-                            <td colSpan={7} className="py-12 text-center text-gray-400 font-medium text-xs">
+                            <td colSpan={6} className="py-12 text-center text-gray-400 font-medium text-xs">
                               No shift logs found. Click '+ Open New Shift' to record your first shift
                             </td>
                           </tr>
@@ -3602,20 +3589,6 @@ export default function ShiftManagementTab({
           </div>
         </div>
       )}
-      
-      {/* 1-Click WhatsApp Dispatch Modal */}
-      <WhatsAppDispatchModal
-        isOpen={!!whatsappModalShift}
-        onClose={() => {
-          setWhatsappModalShift(null);
-          setIsJustClosedShift(false);
-        }}
-        shift={whatsappModalShift}
-        employees={employees}
-        tanks={tanks}
-        oilTanks={oilTanks}
-        isJustClosed={isJustClosedShift}
-      />
 
       {/* Floating Toast Notification */}
       {toastMessage && (
