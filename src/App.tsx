@@ -25,7 +25,6 @@ import CustomersTab from './components/CustomersTab';
 import EmployeesTab from './components/EmployeesTab';
 import AdminControlTab from './components/AdminControlTab';
 import PriceManagementTab from './components/PriceManagementTab';
-import SettingsTab from './components/SettingsTab';
 import LoginPage from './components/LoginPage';
 import { AuthUser, Employee, FuelTank, OilTank, Pump, PumpMachine, Shift, StockDelivery, PriceSchedule, Customer, CreditTransaction, CreditPayment, resolveUserRole } from './types';
 import { supabase, getTanksTableName, setTanksTableName } from './lib/supabase';
@@ -47,12 +46,15 @@ export default function App() {
   // Navigation active tab
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [reportSubTab, setReportSubTab] = useState<string>('daily-sales');
+  const [adminSubTab, setAdminSubTab] = useState<'tanks' | 'oils' | 'mapping' | 'employees' | 'price' | 'system'>('tanks');
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
 
   const handleSetActiveTab = (tab: string, subTab?: string) => {
     setActiveTab(tab);
     if (tab === 'reports') {
       setReportSubTab(subTab || 'daily-sales');
+    } else if (tab === 'admin') {
+      setAdminSubTab((subTab as any) || 'tanks');
     } else if (subTab) {
       setReportSubTab(subTab);
     }
@@ -227,18 +229,7 @@ export default function App() {
         }
       }
     } catch (_) {}
-    return [
-      // 4-Chamber Forecourt Dispenser Station
-      { id: 'forecourt-chamber-01', name: 'Chamber 01: Caltex 20W-50', grade: 'Caltex 20W-50', capacity: 100, currentLevel: 75, pricePerLiter: 2450, type: 'chamber', chamberNumber: 1 },
-      { id: 'forecourt-chamber-02', name: 'Chamber 02: Lanka 2T Super', grade: 'Lanka 2T Super', capacity: 100, currentLevel: 60, pricePerLiter: 1850, type: 'chamber', chamberNumber: 2 },
-      { id: 'forecourt-chamber-03', name: 'Chamber 03: Hydraulic 68', grade: 'Hydraulic 68', capacity: 100, currentLevel: 80, pricePerLiter: 1950, type: 'chamber', chamberNumber: 3 },
-      { id: 'forecourt-chamber-04', name: 'Chamber 04: Radiator Coolant 50/50', grade: 'Radiator Coolant 50/50', capacity: 100, currentLevel: 65, pricePerLiter: 1200, type: 'chamber', chamberNumber: 4 },
-      // Back Store 210L Wholesale Drums
-      { id: 'drum-store-01', name: 'Back Store Drum - Caltex 20W-50', grade: 'Caltex 20W-50', capacity: 210, currentLevel: 190, pricePerLiter: 2450, type: 'drum' },
-      { id: 'drum-store-02', name: 'Back Store Drum - Lanka 2T Super', grade: 'Lanka 2T Super', capacity: 210, currentLevel: 210, pricePerLiter: 1850, type: 'drum' },
-      { id: 'drum-store-03', name: 'Back Store Drum - Hydraulic 68', grade: 'Hydraulic 68', capacity: 210, currentLevel: 155, pricePerLiter: 1950, type: 'drum' },
-      { id: 'drum-store-04', name: 'Back Store Drum - Radiator Coolant 50/50', grade: 'Radiator Coolant 50/50', capacity: 210, currentLevel: 170, pricePerLiter: 1200, type: 'drum' },
-    ];
+    return [];
   });
   const [pumpMachines, setPumpMachines] = useState<PumpMachine[]>(() => {
     try {
@@ -343,8 +334,9 @@ export default function App() {
 
   // Initialize data on component mount
   useEffect(() => {
+    const isConfigured = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
+
     const fetchAllData = async () => {
-      const isConfigured = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
 
       const loadLocalStorageFallback = () => {
         try {
@@ -478,15 +470,21 @@ export default function App() {
 
         // Fetch oil tanks if table exists
         try {
-          const { data: oilTanksData } = await supabase.from('oil_tanks').select('*');
+          let { data: oilTanksData } = await supabase.from('bulk_lubricants').select('*');
+          if (!oilTanksData || oilTanksData.length === 0) {
+            const { data: altOilData } = await supabase.from('oil_tanks').select('*');
+            oilTanksData = altOilData;
+          }
           if (oilTanksData && oilTanksData.length > 0) {
             const mappedOilTanks: OilTank[] = oilTanksData.map((ot: any) => ({
               id: ot.id,
               name: ot.name,
               grade: ot.grade || ot.oil_grade || 'Caltex 20W-50',
-              capacity: Number(ot.capacity) || 1000,
+              capacity: Number(ot.capacity) || 100,
               currentLevel: Number(ot.current_level ?? ot.currentlevel) || 0,
-              pricePerLiter: Number(ot.price_per_liter ?? ot.priceperliter) || 0
+              pricePerLiter: Number(ot.price_per_liter ?? ot.priceperliter) || 0,
+              type: ot.type || (ot.name?.toLowerCase().includes('chamber') ? 'chamber' : 'drum'),
+              chamberNumber: ot.chamber_number ?? ot.chambernumber ?? undefined
             }));
             setOilTanks([...mappedOilTanks].sort((a, b) => (a.name || a.id || '').localeCompare(b.name || b.id || '', undefined, { numeric: true, sensitivity: 'base' })));
           }
@@ -657,6 +655,65 @@ export default function App() {
     };
 
     fetchAllData();
+
+    // Set up Real-time Supabase subscription for underground fuel tanks
+    let realtimeChannel: any = null;
+    if (isConfigured) {
+      try {
+        const targetTable = getTanksTableName();
+        realtimeChannel = supabase
+          .channel('public:fuel_tanks_realtime')
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: targetTable },
+            (payload) => {
+              if (payload.eventType === 'INSERT') {
+                const row = payload.new;
+                const insertedTank: FuelTank = {
+                  id: row.id,
+                  name: row.name,
+                  fuelType: row.fueltype || row.fuel_type || 'Petrol 92',
+                  capacity: Number(row.capacity) || 0,
+                  currentLevel: Number(row.currentlevel ?? row.current_level) || 0,
+                  pricePerLiter: Number(row.priceperliter ?? row.price_per_liter) || 0,
+                };
+                setTanks((prev) => {
+                  if (prev.some((t) => t.id === insertedTank.id)) {
+                    return prev.map((t) => (t.id === insertedTank.id ? insertedTank : t));
+                  }
+                  return sortTanksNaturally([...prev, insertedTank]);
+                });
+              } else if (payload.eventType === 'UPDATE') {
+                const row = payload.new;
+                const updatedTank: FuelTank = {
+                  id: row.id,
+                  name: row.name,
+                  fuelType: row.fueltype || row.fuel_type || 'Petrol 92',
+                  capacity: Number(row.capacity) || 0,
+                  currentLevel: Number(row.currentlevel ?? row.current_level) || 0,
+                  pricePerLiter: Number(row.priceperliter ?? row.price_per_liter) || 0,
+                };
+                setTanks((prev) =>
+                  sortTanksNaturally(prev.map((t) => (t.id === updatedTank.id ? updatedTank : t)))
+                );
+              } else if (payload.eventType === 'DELETE') {
+                if (payload.old?.id) {
+                  setTanks((prev) => prev.filter((t) => t.id !== payload.old.id));
+                }
+              }
+            }
+          )
+          .subscribe();
+      } catch (err) {
+        console.warn("Realtime subscription setup notice:", err);
+      }
+    }
+
+    return () => {
+      if (realtimeChannel) {
+        supabase.removeChannel(realtimeChannel);
+      }
+    };
   }, []);
 
 
@@ -1198,6 +1255,7 @@ export default function App() {
         activeTab={activeTab} 
         setActiveTab={handleSetActiveTab} 
         activeReportSubTab={reportSubTab}
+        activeAdminSubTab={adminSubTab}
         user={user} 
         onLogout={handleLogout} 
         isCollapsed={sidebarCollapsed}
@@ -1265,12 +1323,6 @@ export default function App() {
                   className="px-3 py-1.5 bg-amber-200/60 hover:bg-amber-200 text-amber-950 font-bold text-[11px] rounded-lg transition-all cursor-pointer"
                 >
                   Dismiss Warning
-                </button>
-                <button 
-                  onClick={() => setActiveTab('settings')}
-                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-[#1C1C1C] font-bold text-[11px] rounded-lg transition-all cursor-pointer"
-                >
-                  Go to Settings
                 </button>
               </div>
             </div>
@@ -1342,6 +1394,14 @@ export default function App() {
                 setPumps={setPumps}
                 deliveries={deliveries}
                 setDeliveries={setDeliveries}
+                onNavigateToAdminTanks={() => {
+                  setActiveTab('admin');
+                  setAdminSubTab('tanks');
+                }}
+                setActiveTab={(tab, subTab) => {
+                  setActiveTab(tab);
+                  if (subTab) setAdminSubTab(subTab as any);
+                }}
               />
             )}
 
@@ -1372,6 +1432,7 @@ export default function App() {
                 onDeleteShift={handleDeleteShift}
                 employees={employees}
                 tanks={tanks}
+                oilTanks={oilTanks}
               />
             )}
 
@@ -1388,6 +1449,7 @@ export default function App() {
                 shiftHistory={shiftHistory}
                 deliveries={deliveries}
                 tanks={tanks}
+                oilTanks={oilTanks}
                 pumps={pumps}
                 employees={employees}
                 customers={customers}
@@ -1410,6 +1472,11 @@ export default function App() {
 
             {activeTab === 'price' && (
               <AdminControlTab
+                activeSubTab="price"
+                onSubTabChange={(sub) => {
+                  setActiveTab('admin');
+                  setAdminSubTab(sub);
+                }}
                 tanks={tanks}
                 setTanks={setTanks}
                 oilTanks={oilTanks}
@@ -1428,6 +1495,8 @@ export default function App() {
 
             {activeTab === 'admin' && (
               <AdminControlTab
+                activeSubTab={adminSubTab}
+                onSubTabChange={setAdminSubTab}
                 tanks={tanks}
                 setTanks={setTanks}
                 oilTanks={oilTanks}
@@ -1444,23 +1513,13 @@ export default function App() {
               />
             )}
 
-            {activeTab === 'settings' && (
-              <SettingsTab
-                tanks={tanks}
-                setTanks={setTanks}
-                oilTanks={oilTanks}
-                employees={employees}
-                shiftHistory={shiftHistory}
-                deliveries={deliveries}
-                customers={customers}
-                creditTransactions={creditTransactions}
-                payments={payments}
-                onResetAllData={handleResetAllData}
-              />
-            )}
-
             {activeTab === 'employees' && (
               <AdminControlTab
+                activeSubTab="employees"
+                onSubTabChange={(sub) => {
+                  setActiveTab('admin');
+                  setAdminSubTab(sub);
+                }}
                 tanks={tanks}
                 setTanks={setTanks}
                 oilTanks={oilTanks}

@@ -9,7 +9,7 @@ import {
   Search, RefreshCw, Eye, Database, CheckCircle2, AlertTriangle, 
   Fuel, User, Receipt, Filter, Calendar, Download, X, Plus, BarChart3
 } from 'lucide-react';
-import { Shift, StockDelivery, FuelTank, Pump, Employee, Customer, CreditTransaction, CreditPayment } from '../types';
+import { Shift, StockDelivery, FuelTank, OilTank, Pump, Employee, Customer, CreditTransaction, CreditPayment } from '../types';
 import { supabase } from '../lib/supabase';
 import DailySalesTab from './DailySalesTab';
 
@@ -49,6 +49,7 @@ interface ReportsTabProps {
   shiftHistory?: Shift[];
   deliveries?: StockDelivery[];
   tanks?: FuelTank[];
+  oilTanks?: OilTank[];
   pumps?: Pump[];
   employees?: Employee[];
   customers?: Customer[];
@@ -64,6 +65,7 @@ export default function ReportsTab({
   shiftHistory = [],
   employees = [],
   tanks = [],
+  oilTanks = [],
   activeSubTab: propActiveSubTab,
   onSubTabChange,
 }: ReportsTabProps) {
@@ -540,9 +542,10 @@ export default function ReportsTab({
       {/* RENDER DAILY SALES TAB */}
       {activeSubTab === 'daily-sales' && (
         <DailySalesTab
-          shiftHistory={shiftHistory}
+          shiftHistory={supabaseShifts.length > 0 ? supabaseShifts : shiftHistory}
           employees={employees}
           tanks={tanks}
+          oilTanks={oilTanks}
         />
       )}
 
@@ -563,48 +566,7 @@ export default function ReportsTab({
                 </button>
               </div>
 
-              {/* 1. KPI Summary Cards Grid */}
-              {(() => {
-                const m = calculateShiftMetrics(selectedShift);
-                const isShortage = m.variance < 0;
-                return (
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    <div className="bg-white p-4 rounded-2xl border border-gray-200/80 shadow-2xs">
-                      <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block">Total Gross Sales</span>
-                      <span className="text-base font-bold text-gray-900 mt-1 block">
-                        {formatRs(m.totalGrossSales)}
-                      </span>
-                    </div>
-
-                    <div className="bg-white p-4 rounded-2xl border border-gray-200/80 shadow-2xs">
-                      <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block">Non-Cash (Credit + POS)</span>
-                      <span className="text-base font-bold text-blue-600 mt-1 block">
-                        {formatRs(m.totalNonCash)}
-                      </span>
-                    </div>
-
-                    <div className="bg-white p-4 rounded-2xl border border-gray-200/80 shadow-2xs">
-                      <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block">Expected Physical Cash</span>
-                      <span className="text-base font-bold text-gray-900 mt-1 block">
-                        {formatRs(m.totalExpectedCash)}
-                      </span>
-                    </div>
-
-                    <div className={`p-4 rounded-2xl border shadow-2xs ${
-                      isShortage ? 'bg-rose-50 border-rose-200 text-rose-900' : 'bg-emerald-50 border-emerald-200 text-emerald-900'
-                    }`}>
-                      <span className="text-[11px] font-extrabold uppercase tracking-wider block opacity-80">
-                        {isShortage ? 'Pumper Shortage' : m.variance === 0 ? 'Cash Reconciliation' : 'Excess Cash'}
-                      </span>
-                      <span className="text-base font-bold mt-1 block">
-                        {formatRs(m.variance)}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* 2. Pump / Meter Readings Section */}
+              {/* 1. Pump / Meter Readings Section */}
               <div className="bg-white rounded-2xl border border-gray-200/80 p-5 shadow-2xs space-y-3">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wider flex items-center gap-2">

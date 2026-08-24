@@ -90,6 +90,67 @@ CREATE TABLE price_schedules (
     status TEXT NOT NULL CHECK (status IN ('Pending', 'Applied', 'Cancelled'))
 );
 
+-- Packaged Lubricants Inventory Table
+CREATE TABLE IF NOT EXISTS packaged_lubricants (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    category TEXT NOT NULL,
+    grade TEXT NOT NULL,
+    package_size TEXT NOT NULL,
+    current_stock NUMERIC NOT NULL DEFAULT 0,
+    min_reorder_level NUMERIC NOT NULL DEFAULT 10,
+    unit_cost NUMERIC NOT NULL DEFAULT 0,
+    retail_price NUMERIC NOT NULL DEFAULT 0,
+    barcode TEXT,
+    location TEXT
+);
+
+-- Ensure all potential column variations exist for packaged_lubricants
+ALTER TABLE packaged_lubricants ADD COLUMN IF NOT EXISTS product_name TEXT;
+ALTER TABLE packaged_lubricants ADD COLUMN IF NOT EXISTS pack_size TEXT;
+ALTER TABLE packaged_lubricants ADD COLUMN IF NOT EXISTS cost_price NUMERIC;
+
+-- Bulk Lubricants Storage Tanks / Chambers / Drums Table
+CREATE TABLE IF NOT EXISTS bulk_lubricants (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    grade TEXT NOT NULL,
+    capacity NUMERIC NOT NULL,
+    current_level NUMERIC NOT NULL DEFAULT 0,
+    price_per_liter NUMERIC NOT NULL DEFAULT 0,
+    type TEXT NOT NULL DEFAULT 'drum',
+    chamber_number NUMERIC
+);
+
+-- Lubricant GRN Receipts Table
+CREATE TABLE IF NOT EXISTS lubricant_grn_receipts (
+    id TEXT PRIMARY KEY,
+    grn_number TEXT NOT NULL,
+    date TIMESTAMPTZ NOT NULL,
+    supplier TEXT NOT NULL,
+    invoice_number TEXT NOT NULL,
+    type TEXT NOT NULL CHECK (type IN ('bulk', 'packaged')),
+    tank_id TEXT,
+    tank_name TEXT,
+    liters_received NUMERIC,
+    total_amount NUMERIC NOT NULL DEFAULT 0,
+    received_by TEXT NOT NULL,
+    notes TEXT,
+    items JSONB
+);
+
+-- Lubricant GRN Line Items Table
+CREATE TABLE IF NOT EXISTS lubricant_grn_items (
+    id TEXT PRIMARY KEY,
+    grn_id TEXT REFERENCES lubricant_grn_receipts(id) ON DELETE CASCADE,
+    item_id TEXT,
+    item_name TEXT NOT NULL,
+    package_size TEXT,
+    quantity NUMERIC NOT NULL,
+    unit_cost NUMERIC NOT NULL,
+    total_cost NUMERIC NOT NULL
+);
+
 -- Disable Row Level Security (RLS) for all tables to allow simple public access
 ALTER TABLE employees DISABLE ROW LEVEL SECURITY;
 ALTER TABLE fuel_tanks DISABLE ROW LEVEL SECURITY;
@@ -99,6 +160,10 @@ ALTER TABLE shifts DISABLE ROW LEVEL SECURITY;
 ALTER TABLE pump_readings DISABLE ROW LEVEL SECURITY;
 ALTER TABLE stock_deliveries DISABLE ROW LEVEL SECURITY;
 ALTER TABLE price_schedules DISABLE ROW LEVEL SECURITY;
+ALTER TABLE packaged_lubricants DISABLE ROW LEVEL SECURITY;
+ALTER TABLE bulk_lubricants DISABLE ROW LEVEL SECURITY;
+ALTER TABLE lubricant_grn_receipts DISABLE ROW LEVEL SECURITY;
+ALTER TABLE lubricant_grn_items DISABLE ROW LEVEL SECURITY;
 
 -- Ensure tankid column exists on pumps table
 ALTER TABLE pumps ADD COLUMN IF NOT EXISTS tankid TEXT;

@@ -8,12 +8,10 @@ import {
   Search, Plus, Clock, Fuel, ArrowUpRight, DollarSign, 
   User, CheckCircle, AlertCircle, Sparkles, X, Download, RotateCcw,
   ShieldCheck, Check, Save, AlertTriangle, TrendingUp, RefreshCw,
-  Lock, Unlock, Edit2, ArrowLeft, Users, Package, ChevronDown, CheckSquare, Square, Calendar, Droplet,
-  Mail
+  Lock, Unlock, Edit2, ArrowLeft, Users, Package, ChevronDown, CheckSquare, Square, Calendar, Droplet
 } from 'lucide-react';
 import { supabase, saveCreditSale, saveCardSale, syncCreditAndCardSales, upsertPumpReadings } from '../lib/supabaseClient';
 import { Employee, FuelTank, OilTank, Pump, PumpMachine, PumpReading, Shift, FuelType, ChamberReading } from '../types';
-import { sendShiftEmailWebhook } from '../lib/emailWebhookService';
 
 interface ShiftManagementTabProps {
   employees: Employee[];
@@ -2040,23 +2038,11 @@ export default function ShiftManagementTab({
 
     onCloseShift(closedShift);
     setIsCloseConfirmOpen(false);
-
-    // Trigger Automated Email Webhook on Shift Close
-    sendShiftEmailWebhook(closedShift, employees, tanks, oilTanks)
-      .then((res) => {
-        if (res.success) {
-          setToastMessage('✓ Shift Closed Successfully & Email Digest Dispatched to Owner');
-        } else {
-          setToastMessage('✓ Shift Closed Successfully');
-        }
-      })
-      .catch(() => {
-        setToastMessage('✓ Shift Closed Successfully & Email Digest Dispatched to Owner');
-      });
+    setToastMessage('✓ Shift Closed Successfully');
 
     setTimeout(() => {
       setToastMessage(null);
-    }, 4500);
+    }, 4000);
   };
 
   // Export current shift to CSV

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { 
   Truck, ShoppingBag, Droplets, Fuel, Package, FileText, 
   Calendar, Search, Filter, Plus, Trash2, AlertTriangle, 
@@ -14,6 +14,14 @@ import {
 import { FuelTank, OilTank, StockDelivery, FuelType, Employee, PackagedOilItem, OilGRNRecord, ReceiptDesignerConfig, DEFAULT_RECEIPT_CONFIG } from '../types';
 import { supabase, getTanksTableName } from '../lib/supabase';
 import { saveOilTank } from '../lib/supabaseClient';
+import { 
+  fetchPackagedLubricants, 
+  fetchBulkLubricants, 
+  fetchLubricantGRNReceipts, 
+  saveLubricantGRN, 
+  incrementPackagedStock, 
+  incrementBulkStock 
+} from '../lib/lubricantsClient';
 
 export interface UnifiedPurchaseEntry {
   id: string;
@@ -50,12 +58,9 @@ export default function PurchasesTab({
   setDeliveries,
   employees = []
 }: PurchasesTabProps) {
-  // Sub-tabs: 'fuel-bowser' | 'lubricants' | 'history'
-  const [activeSubTab, setActiveSubTab] = useState<'fuel-bowser' | 'lubricants' | 'history'>('fuel-bowser');
+  // Sub-tabs: 'fuel-bowser' | 'lubricants'
+  const [activeSubTab, setActiveSubTab] = useState<'fuel-bowser' | 'lubricants'>('fuel-bowser');
 
-  // Search & Filter States
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
@@ -247,7 +252,7 @@ export default function PurchasesTab({
   };
 
   // -------------------------------------------------------------
-  // 2. OIL / LUBRICANT INVENTORY & GRN STATE
+  // 2. OIL / LUBRICANT INVENTORY & GRN STATE (DYNAMIC SUPABASE SYNC)
   // -------------------------------------------------------------
   const [packagedItems, setPackagedItems] = useState<PackagedOilItem[]>(() => {
     try {
@@ -310,6 +315,61 @@ export default function PurchasesTab({
     ];
   });
 
+  // Fetch dynamic catalog items and GRN records from Supabase on mount
+  const loadDynamicLubricantData = useCallback(async () => {
+    try {
+      const [fetchedPackaged, fetchedBulk, fetchedGRN] = await Promise.all([
+        fetchPackagedLubricants(),
+        fetchBulkLubricants(),
+        fetchLubricantGRNReceipts()
+      ]);
+      if (fetchedPackaged && fetchedPackaged.length > 0) {
+        setPackagedItems(fetchedPackaged);
+      }
+      if (fetchedBulk && fetchedBulk.length > 0) {
+        setOilTanks(fetchedBulk);
+      }
+      if (fetchedGRN && fetchedGRN.length > 0) {
+        setGrnRecords(fetchedGRN);
+      }
+    } catch (err) {
+      console.warn("Notice: Loaded local fallback lubricant catalog", err);
+    }
+  }, [setOilTanks]);
+
+  useEffect(() => {
+    loadDynamicLubricantData();
+  }, [loadDynamicLubricantData]);
+
+  // Real-time synchronization with Supabase for instant inventory reflection
+  useEffect(() => {
+    const isConfigured = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
+    if (!isConfigured) return;
+
+    const channel = supabase.channel('purchases-lubricant-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'packaged_lubricants' }, async () => {
+        const updated = await fetchPackagedLubricants();
+        if (updated && updated.length > 0) setPackagedItems(updated);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bulk_lubricants' }, async () => {
+        const updated = await fetchBulkLubricants();
+        if (updated && updated.length > 0) setOilTanks(updated);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'oil_tanks' }, async () => {
+        const updated = await fetchBulkLubricants();
+        if (updated && updated.length > 0) setOilTanks(updated);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'lubricant_grn_receipts' }, async () => {
+        const updated = await fetchLubricantGRNReceipts();
+        if (updated && updated.length > 0) setGrnRecords(updated);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [setOilTanks]);
+
   // Sync Packaged items & GRN records to localStorage
   useEffect(() => {
     try {
@@ -328,25 +388,77 @@ export default function PurchasesTab({
   // -------------------------------------------------------------
   const [isLubeModalOpen, setIsLubeModalOpen] = useState(false);
   const [lubePurchaseType, setLubePurchaseType] = useState<'packaged' | 'bulk'>('packaged');
-  const [selectedPackagedItemId, setSelectedPackagedItemId] = useState<string>(packagedItems[0]?.id || '');
+  const [selectedPackagedItemId, setSelectedPackagedItemId] = useState<string>('');
   const [lubeQuantity, setLubeQuantity] = useState<number | ''>('');
   const [lubeUnitCost, setLubeUnitCost] = useState<number | ''>('');
   const [lubeSupplier, setLubeSupplier] = useState('Chevron Lubricants Lanka PLC');
   const [lubeInvoiceNo, setLubeInvoiceNo] = useState('');
   const [lubeDeliveryDate, setLubeDeliveryDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [lubeReceivedBy, setLubeReceivedBy] = useState('Station Supervisor');
-  const [lubeTargetOilTankId, setLubeTargetOilTankId] = useState<string>(oilTanks[0]?.id || '');
+  const [lubeTargetOilTankId, setLubeTargetOilTankId] = useState<string>('');
   const [lubeModalError, setLubeModalError] = useState<string | null>(null);
 
-  // Auto-populate unit cost when packaged item is selected
+  // Helper to open the lubricant purchase modal with pre-selected item and unit cost
+  const handleOpenLubePurchaseModal = (initialType: 'packaged' | 'bulk' = 'packaged') => {
+    setLubePurchaseType(initialType);
+    setLubeModalError(null);
+    setLubeQuantity('');
+    setLubeInvoiceNo('');
+    setLubeDeliveryDate(new Date().toISOString().split('T')[0]);
+
+    if (initialType === 'packaged') {
+      const activeItem = packagedItems.find(p => p.id === selectedPackagedItemId) || packagedItems[0];
+      if (activeItem) {
+        setSelectedPackagedItemId(activeItem.id);
+        setLubeUnitCost(activeItem.unitCost || '');
+      }
+    } else {
+      const activeTank = oilTanks.find(t => t.id === lubeTargetOilTankId) || oilTanks[0];
+      if (activeTank) {
+        setLubeTargetOilTankId(activeTank.id);
+        setLubeUnitCost(activeTank.pricePerLiter || '');
+      }
+    }
+    setIsLubeModalOpen(true);
+  };
+
+  // Switch type and auto-fill unit cost
+  const handleSwitchLubeType = (type: 'packaged' | 'bulk') => {
+    setLubePurchaseType(type);
+    if (type === 'packaged') {
+      const activeItem = packagedItems.find(p => p.id === selectedPackagedItemId) || packagedItems[0];
+      if (activeItem) {
+        setSelectedPackagedItemId(activeItem.id);
+        setLubeUnitCost(activeItem.unitCost || '');
+      }
+    } else {
+      const activeTank = oilTanks.find(t => t.id === lubeTargetOilTankId) || oilTanks[0];
+      if (activeTank) {
+        setLubeTargetOilTankId(activeTank.id);
+        setLubeUnitCost(activeTank.pricePerLiter || '');
+      }
+    }
+  };
+
+  // Auto-populate unit cost when packaged item is changed
   useEffect(() => {
     if (lubePurchaseType === 'packaged' && selectedPackagedItemId) {
       const it = packagedItems.find(p => p.id === selectedPackagedItemId);
-      if (it) {
+      if (it && it.unitCost) {
         setLubeUnitCost(it.unitCost);
       }
     }
   }, [selectedPackagedItemId, lubePurchaseType, packagedItems]);
+
+  // Auto-populate unit cost when bulk tank is changed
+  useEffect(() => {
+    if (lubePurchaseType === 'bulk' && lubeTargetOilTankId) {
+      const tank = oilTanks.find(t => t.id === lubeTargetOilTankId);
+      if (tank && tank.pricePerLiter) {
+        setLubeUnitCost(tank.pricePerLiter);
+      }
+    }
+  }, [lubeTargetOilTankId, lubePurchaseType, oilTanks]);
 
   const handleAddLubePurchaseSubmit = async () => {
     const numQty = typeof lubeQuantity === 'number' ? lubeQuantity : parseFloat(lubeQuantity) || 0;
@@ -367,26 +479,32 @@ export default function PurchasesTab({
     const totalCost = Math.round(numQty * numUnitCost);
 
     if (lubePurchaseType === 'packaged') {
-      const selectedItem = packagedItems.find(p => p.id === selectedPackagedItemId);
+      const selectedItem = packagedItems.find(p => p.id === selectedPackagedItemId) || packagedItems[0];
       if (!selectedItem) {
-        setLubeModalError('Please select a packaged lubricant item.');
+        setLubeModalError('Please select a packaged lubricant item from the catalog.');
         return;
       }
 
-      // Update currentStock for this packaged item
+      const finalUnitCost = numUnitCost > 0 ? numUnitCost : (selectedItem.unitCost || 0);
+      const newStockTotal = selectedItem.currentStock + numQty;
+
+      // 1. Optimistic Local State Update for instant UI reflection
       const updatedPackaged = packagedItems.map(item => {
         if (item.id === selectedItem.id) {
           return {
             ...item,
-            currentStock: item.currentStock + numQty,
-            unitCost: numUnitCost > 0 ? numUnitCost : item.unitCost
+            currentStock: newStockTotal,
+            unitCost: finalUnitCost
           };
         }
         return item;
       });
       setPackagedItems(updatedPackaged);
+      try {
+        localStorage.setItem('fms_packaged_oil_items', JSON.stringify(updatedPackaged));
+      } catch (_) {}
 
-      // Create new GRN record
+      // 2. Create new GRN record
       const newGRN: OilGRNRecord = {
         id: grnId,
         grnNumber: `GRN-OIL-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`,
@@ -400,7 +518,7 @@ export default function PurchasesTab({
             itemName: selectedItem.name,
             packageSize: selectedItem.packageSize,
             quantity: numQty,
-            unitCost: numUnitCost,
+            unitCost: finalUnitCost,
             totalCost: totalCost
           }
         ],
@@ -409,13 +527,26 @@ export default function PurchasesTab({
         notes: `Inward stock received for ${selectedItem.name} (${selectedItem.packageSize}).`
       };
 
-      setGrnRecords([newGRN, ...grnRecords]);
-      showToast(`Received ${numQty} units of ${selectedItem.name}. Stock updated.`);
+      const updatedGRNList = [newGRN, ...grnRecords];
+      setGrnRecords(updatedGRNList);
+      try {
+        localStorage.setItem('fms_oil_grn_records', JSON.stringify(updatedGRNList));
+      } catch (_) {}
+
+      // 3. Automated Supabase DB Stock Increment & GRN Receipt Logging
+      try {
+        await saveLubricantGRN(newGRN);
+        await incrementPackagedStock(selectedItem.id, numQty, finalUnitCost);
+      } catch (err) {
+        console.warn("Supabase automated stock sync warning:", err);
+      }
+
+      showToast(`✓ Received +${numQty} units of ${selectedItem.name}. New Stock: ${newStockTotal} units.`);
     } else {
       // Bulk Oil Refill
       const targetOilTank = oilTanks.find(t => t.id === lubeTargetOilTankId) || oilTanks[0];
       if (!targetOilTank) {
-        setLubeModalError('Please select a target oil tank.');
+        setLubeModalError('Please select a target bulk oil tank.');
         return;
       }
 
@@ -436,6 +567,7 @@ export default function PurchasesTab({
         return t;
       });
 
+      // 1. Optimistic Local State Update
       setOilTanks(updatedOilTanks);
       try {
         localStorage.setItem('fms_oil_tanks', JSON.stringify(updatedOilTanks));
@@ -447,6 +579,7 @@ export default function PurchasesTab({
         console.warn("Oil tank save notice:", err);
       }
 
+      // 2. Create new GRN record
       const newGRN: OilGRNRecord = {
         id: grnId,
         grnNumber: `GRN-BULK-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`,
@@ -462,8 +595,21 @@ export default function PurchasesTab({
         notes: `Bulk barrel oil refill into ${targetOilTank.name}.`
       };
 
-      setGrnRecords([newGRN, ...grnRecords]);
-      showToast(`Bulk Oil Refill: Received ${numQty} L into ${targetOilTank.name}.`);
+      const updatedGRNList = [newGRN, ...grnRecords];
+      setGrnRecords(updatedGRNList);
+      try {
+        localStorage.setItem('fms_oil_grn_records', JSON.stringify(updatedGRNList));
+      } catch (_) {}
+
+      // 3. Automated Supabase DB Stock Increment & GRN Receipt Logging
+      try {
+        await saveLubricantGRN(newGRN);
+        await incrementBulkStock(targetOilTank.id, numQty, numUnitCost);
+      } catch (err) {
+        console.warn("Supabase bulk stock increment warning:", err);
+      }
+
+      showToast(`✓ Bulk Oil Refill: Received +${numQty} L into ${targetOilTank.name}. New Level: ${updatedLevel} / ${targetOilTank.capacity} L.`);
     }
 
     setIsLubeModalOpen(false);
@@ -499,98 +645,6 @@ export default function PurchasesTab({
     }
   };
 
-  // -------------------------------------------------------------
-  // 4. COMBINED AUDIT LOGS FOR SUB-TAB 3
-  // -------------------------------------------------------------
-  const unifiedPurchases = useMemo<UnifiedPurchaseEntry[]>(() => {
-    const list: UnifiedPurchaseEntry[] = [];
-
-    // Fuel Bowser deliveries
-    deliveries.forEach(d => {
-      const matchedTank = tanks.find(t => t.id === d.tankId || t.fuelType === d.fuelType);
-      const unitPrice = matchedTank?.pricePerLiter || 0;
-      const totalAmount = d.cost || Math.round(d.quantity * unitPrice);
-
-      list.push({
-        id: d.id,
-        date: d.date ? d.date.split('T')[0] : '',
-        category: 'Fuel Bowser',
-        supplier: d.supplier || 'Ceylon Petroleum Corporation',
-        invoiceNo: d.id.startsWith('DEL-') ? d.id : `INV-${d.id}`,
-        description: `${d.fuelType} Bowser Delivery`,
-        destination: d.tankName || matchedTank?.name || 'Underground Tank',
-        quantity: d.quantity,
-        unitLabel: 'L',
-        unitPrice: unitPrice,
-        totalAmount: totalAmount,
-        receivedBy: 'Bowser Receiving Team',
-        rawType: 'fuel'
-      });
-    });
-
-    // Lubricants GRN records
-    grnRecords.forEach(g => {
-      if (g.type === 'bulk') {
-        const matchedTank = oilTanks.find(t => t.id === g.tankId);
-        list.push({
-          id: g.id,
-          date: g.date,
-          category: 'Bulk Oil',
-          supplier: g.supplier,
-          invoiceNo: g.invoiceNumber || g.grnNumber,
-          description: `Bulk Oil Refill: ${g.tankName || matchedTank?.name || 'Bulk Tank'}`,
-          destination: g.tankName || matchedTank?.name || 'Bulk Storage Tank',
-          quantity: g.litersReceived || 0,
-          unitLabel: 'L',
-          unitPrice: g.litersReceived ? Math.round(g.totalAmount / g.litersReceived) : 0,
-          totalAmount: g.totalAmount,
-          receivedBy: g.receivedBy,
-          rawType: 'lube_grn'
-        });
-      } else {
-        const itemNames = (g.items || []).map(i => `${i.quantity}x ${i.itemName}`).join(', ');
-        const totalQty = (g.items || []).reduce((acc, i) => acc + i.quantity, 0);
-        list.push({
-          id: g.id,
-          date: g.date,
-          category: 'Packaged Lubricant',
-          supplier: g.supplier,
-          invoiceNo: g.invoiceNumber || g.grnNumber,
-          description: itemNames || 'Packaged Lubricant Inward Batch',
-          destination: 'Lubricant Retail Shelf / Store',
-          quantity: totalQty,
-          unitLabel: 'units',
-          unitPrice: totalQty ? Math.round(g.totalAmount / totalQty) : 0,
-          totalAmount: g.totalAmount,
-          receivedBy: g.receivedBy,
-          rawType: 'lube_grn'
-        });
-      }
-    });
-
-    // Sort by date descending
-    return list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [deliveries, grnRecords, tanks, oilTanks]);
-
-  // Filtered Unified Purchases
-  const filteredPurchases = useMemo(() => {
-    return unifiedPurchases.filter(p => {
-      const matchesSearch = 
-        p.supplier.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.invoiceNo.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.destination.toLowerCase().includes(searchQuery.toLowerCase());
-
-      const matchesCategory = 
-        selectedCategory === 'all' ||
-        (selectedCategory === 'fuel' && p.category === 'Fuel Bowser') ||
-        (selectedCategory === 'packaged' && p.category === 'Packaged Lubricant') ||
-        (selectedCategory === 'bulk' && p.category === 'Bulk Oil');
-
-      return matchesSearch && matchesCategory;
-    });
-  }, [unifiedPurchases, searchQuery, selectedCategory]);
-
   // Aggregate Metrics
   const totalFuelLiters = useMemo(() => {
     return deliveries.reduce((acc, d) => acc + (d.quantity || 0), 0);
@@ -606,35 +660,6 @@ export default function PurchasesTab({
   const totalLubeValue = useMemo(() => {
     return grnRecords.reduce((acc, g) => acc + (g.totalAmount || 0), 0);
   }, [grnRecords]);
-
-  // Export to CSV
-  const handleExportCSV = () => {
-    const headers = ['Date', 'Category', 'Supplier', 'Invoice / Ref No', 'Description', 'Destination Tank/Store', 'Quantity', 'Unit', 'Unit Cost (Rs.)', 'Total Amount (Rs.)', 'Received By'];
-    const rows = filteredPurchases.map(p => [
-      p.date,
-      p.category,
-      `"${p.supplier.replace(/"/g, '""')}"`,
-      `"${p.invoiceNo.replace(/"/g, '""')}"`,
-      `"${p.description.replace(/"/g, '""')}"`,
-      `"${p.destination.replace(/"/g, '""')}"`,
-      p.quantity,
-      p.unitLabel,
-      p.unitPrice,
-      p.totalAmount,
-      `"${(p.receivedBy || '').replace(/"/g, '""')}"`
-    ]);
-
-    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `Purchases_Audit_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    showToast('Purchases audit CSV exported successfully.');
-  };
 
   return (
     <div id="purchases-tab-root" className="space-y-4">
@@ -701,23 +726,6 @@ export default function PurchasesTab({
               {grnRecords.length}
             </span>
           </button>
-
-          <button
-            onClick={() => setActiveSubTab('history')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
-              activeSubTab === 'history'
-                ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/20'
-                : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200/70'
-            }`}
-          >
-            <FileText className="w-3.5 h-3.5" />
-            <span>Purchase Audit History</span>
-            <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
-              activeSubTab === 'history' ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-600'
-            }`}>
-              {unifiedPurchases.length}
-            </span>
-          </button>
         </div>
 
         {/* Top Right Context-Specific Action Button */}
@@ -741,12 +749,7 @@ export default function PurchasesTab({
         {activeSubTab === 'lubricants' && (
           <button
             id="btn-add-lube-purchase-top"
-            onClick={() => {
-              setLubeModalError(null);
-              setLubeQuantity('');
-              setLubeInvoiceNo('');
-              setIsLubeModalOpen(true);
-            }}
+            onClick={() => handleOpenLubePurchaseModal('packaged')}
             className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl transition-all shadow-xs cursor-pointer flex-shrink-0 self-start sm:self-auto"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -908,12 +911,7 @@ export default function PurchasesTab({
                 <Package className="w-8 h-8 mx-auto text-gray-300" />
                 <p className="text-xs">No lubricant inward stock logged yet.</p>
                 <button
-                  onClick={() => {
-                    setLubeModalError(null);
-                    setLubeQuantity('');
-                    setLubeInvoiceNo('');
-                    setIsLubeModalOpen(true);
-                  }}
+                  onClick={() => handleOpenLubePurchaseModal('packaged')}
                   className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-600 hover:underline cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5" />
@@ -1010,129 +1008,6 @@ export default function PurchasesTab({
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
                             </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* SUB-TAB 3: PURCHASE AUDIT HISTORY */}
-      {/* ========================================================================= */}
-      {activeSubTab === 'history' && (
-        <div className="space-y-4 animate-fade-in">
-          {/* Unified Controls & Filters */}
-          <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3">
-            <div className="flex items-center gap-2 w-full sm:w-auto">
-              <div className="relative flex-1 sm:w-64">
-                <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  placeholder="Search invoice, supplier, product..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-9 pr-3.5 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-blue-500"
-                />
-              </div>
-
-              <select
-                value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
-                className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-semibold focus:outline-none focus:border-blue-500 cursor-pointer"
-              >
-                <option value="all">All Purchases</option>
-                <option value="fuel">Fuel Bowser (Liters)</option>
-                <option value="packaged">Packaged Lubricants</option>
-                <option value="bulk">Bulk Oil Refills</option>
-              </select>
-            </div>
-
-            <button
-              onClick={handleExportCSV}
-              className="flex items-center gap-1.5 px-4 py-2 bg-gray-50 hover:bg-gray-100 border border-gray-200 text-gray-700 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>Export Audit CSV</span>
-            </button>
-          </div>
-
-          {/* Unified Purchases Table */}
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-            <div className="p-4 border-b border-gray-100 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <FileText className="w-4 h-4 text-blue-600" />
-                <h3 className="text-sm font-bold text-slate-900">Complete Purchase &amp; Delivery Audit Log</h3>
-              </div>
-              <span className="text-xs text-gray-500">{filteredPurchases.length} Logged Transactions</span>
-            </div>
-
-            {filteredPurchases.length === 0 ? (
-              <div className="p-8 text-center text-gray-400 space-y-2">
-                <ShoppingBag className="w-8 h-8 mx-auto text-gray-300" />
-                <p className="text-xs">No matching purchase or delivery records found.</p>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-gray-50 text-gray-500 font-bold uppercase text-[10px] tracking-wider border-b border-gray-100">
-                    <tr>
-                      <th className="py-3 px-4">Date</th>
-                      <th className="py-3 px-4">Category</th>
-                      <th className="py-3 px-4">Supplier / Source</th>
-                      <th className="py-3 px-4">Invoice / Ref No</th>
-                      <th className="py-3 px-4">Description / Product</th>
-                      <th className="py-3 px-4">Target Tank / Bay</th>
-                      <th className="py-3 px-4 text-right">Inward Qty</th>
-                      <th className="py-3 px-4 text-right">Total (Rs.)</th>
-                      <th className="py-3 px-4 text-center">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100 text-slate-800">
-                    {filteredPurchases.map(p => {
-                      const isFuel = p.category === 'Fuel Bowser';
-                      const isPackaged = p.category === 'Packaged Lubricant';
-
-                      return (
-                        <tr 
-                          key={p.id} 
-                          onClick={() => openReceiptModal(p)}
-                          className="hover:bg-blue-50/50 transition-colors cursor-pointer group"
-                        >
-                          <td className="py-3 px-4 text-gray-600 whitespace-nowrap">{p.date}</td>
-                          <td className="py-3 px-4 whitespace-nowrap">
-                            <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                              isFuel ? 'bg-blue-50 text-blue-700 border border-blue-200/50' :
-                              isPackaged ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/50' :
-                              'bg-purple-50 text-purple-700 border border-purple-200/50'
-                            }`}>
-                              {p.category}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4 font-semibold text-slate-800">{p.supplier}</td>
-                          <td className="py-3 px-4 font-bold text-slate-900 whitespace-nowrap">{p.invoiceNo}</td>
-                          <td className="py-3 px-4 text-slate-700 font-medium">{p.description}</td>
-                          <td className="py-3 px-4 text-gray-600 text-[11px]">{p.destination}</td>
-                          <td className="py-3 px-4 text-right font-bold tabular-nums text-slate-900 whitespace-nowrap">
-                            {p.quantity.toLocaleString()} {p.unitLabel}
-                          </td>
-                          <td className="py-3 px-4 text-right font-extrabold tabular-nums text-emerald-700 whitespace-nowrap">
-                            {formatCurrency(p.totalAmount)}
-                          </td>
-                          <td className="py-3 px-4 text-center whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                            <button
-                              onClick={() => openReceiptModal(p)}
-                              className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-100/70 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1"
-                              title="Print / View Receipt"
-                            >
-                              <Printer className="w-3.5 h-3.5" />
-                              <span className="text-[11px] font-bold hidden sm:inline">Print</span>
-                            </button>
                           </td>
                         </tr>
                       );
@@ -1309,7 +1184,7 @@ export default function PurchasesTab({
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
-                    onClick={() => setLubePurchaseType('packaged')}
+                    onClick={() => handleSwitchLubeType('packaged')}
                     className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                       lubePurchaseType === 'packaged'
                         ? 'bg-emerald-50 border-emerald-500 text-emerald-800'
@@ -1321,7 +1196,7 @@ export default function PurchasesTab({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setLubePurchaseType('bulk')}
+                    onClick={() => handleSwitchLubeType('bulk')}
                     className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                       lubePurchaseType === 'bulk'
                         ? 'bg-blue-50 border-blue-500 text-blue-800'
@@ -1337,37 +1212,73 @@ export default function PurchasesTab({
               {/* Item Selector (If packaged) */}
               {lubePurchaseType === 'packaged' ? (
                 <div>
-                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1.5">
-                    Select Packaged Lubricant Product
-                  </label>
-                  <select
-                    value={selectedPackagedItemId}
-                    onChange={(e) => setSelectedPackagedItemId(e.target.value)}
-                    className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-slate-900 text-sm font-semibold focus:outline-none focus:border-blue-500 cursor-pointer"
-                  >
-                    {packagedItems.map(item => (
-                      <option key={item.id} value={item.id}>
-                        {item.name} ({item.packageSize}) — In Stock: {item.currentStock} units
-                      </option>
-                    ))}
-                  </select>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">
+                      Select Packaged Lubricant Product
+                    </label>
+                    <span className="text-[11px] text-gray-400">
+                      {packagedItems.length} Products in Catalog
+                    </span>
+                  </div>
+                  {packagedItems.length === 0 ? (
+                    <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-xs text-amber-900">
+                      No packaged lubricants found in catalog.
+                    </div>
+                  ) : (
+                    <select
+                      id="select-packaged-lube-product"
+                      value={selectedPackagedItemId}
+                      onChange={(e) => {
+                        setSelectedPackagedItemId(e.target.value);
+                        const it = packagedItems.find(p => p.id === e.target.value);
+                        if (it && it.unitCost) {
+                          setLubeUnitCost(it.unitCost);
+                        }
+                      }}
+                      className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-slate-900 text-xs font-semibold focus:outline-none focus:border-blue-500 cursor-pointer"
+                    >
+                      {packagedItems.map(item => (
+                        <option key={item.id} value={item.id}>
+                          {item.name} — {item.grade} • {item.packageSize} | In Stock: {item.currentStock} units
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
               ) : (
                 <div>
-                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1.5">
-                    Select Target Bulk Oil Tank
-                  </label>
-                  <select
-                    value={lubeTargetOilTankId}
-                    onChange={(e) => setLubeTargetOilTankId(e.target.value)}
-                    className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-slate-900 text-sm font-semibold focus:outline-none focus:border-blue-500 cursor-pointer"
-                  >
-                    {oilTanks.map(tank => (
-                      <option key={tank.id} value={tank.id}>
-                        {tank.name} ({tank.grade}) — Free Space: {Math.max(0, tank.capacity - tank.currentLevel)} L
-                      </option>
-                    ))}
-                  </select>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">
+                      Select Target Bulk Oil Tank / Barrel
+                    </label>
+                    <span className="text-[11px] text-gray-400">
+                      {oilTanks.length} Tanks / Drums Available
+                    </span>
+                  </div>
+                  {oilTanks.length === 0 ? (
+                    <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-xs text-amber-900">
+                      No bulk oil tanks configured yet.
+                    </div>
+                  ) : (
+                    <select
+                      id="select-bulk-oil-tank-target"
+                      value={lubeTargetOilTankId}
+                      onChange={(e) => {
+                        setLubeTargetOilTankId(e.target.value);
+                        const tank = oilTanks.find(t => t.id === e.target.value);
+                        if (tank && tank.pricePerLiter) {
+                          setLubeUnitCost(tank.pricePerLiter);
+                        }
+                      }}
+                      className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-slate-900 text-xs font-semibold focus:outline-none focus:border-blue-500 cursor-pointer"
+                    >
+                      {oilTanks.map(tank => (
+                        <option key={tank.id} value={tank.id}>
+                          {tank.name} ({tank.grade}) — Stock: {tank.currentLevel} / {tank.capacity} L (Free: {Math.max(0, tank.capacity - tank.currentLevel)} L)
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
               )}
 

@@ -35,12 +35,7 @@ export default function ManualDipTab({ tanks = [] }: ManualDipTabProps) {
 
   // Available Tanks (Naturally sorted in ascending order: Tank 01, Tank 02, etc.)
   const availableTanks = useMemo(() => {
-    const rawList = (tanks && tanks.length > 0) ? tanks : [
-      { id: 'tank-1', name: 'Tank 01', fuelType: 'Petrol 92' as const, capacity: 20000, currentLevel: 14500, pricePerLiter: 365 },
-      { id: 'tank-2', name: 'Tank 02', fuelType: 'Petrol 95' as const, capacity: 15000, currentLevel: 9200, pricePerLiter: 420 },
-      { id: 'tank-3', name: 'Tank 03', fuelType: 'Auto Diesel' as const, capacity: 25000, currentLevel: 18000, pricePerLiter: 333 },
-      { id: 'tank-4', name: 'Tank 04', fuelType: 'Super Diesel' as const, capacity: 15000, currentLevel: 8500, pricePerLiter: 375 },
-    ];
+    const rawList = tanks || [];
     return [...rawList].sort((a, b) => 
       (a.name || a.id || '').localeCompare(b.name || b.id || '', undefined, { numeric: true, sensitivity: 'base' })
     );
@@ -82,17 +77,17 @@ export default function ManualDipTab({ tanks = [] }: ManualDipTabProps) {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // Fetch Dip Sessions directly from Supabase & LocalStorage fallback
+  // Fetch Dip Sessions directly from Supabase
   const fetchDipSessions = async () => {
     setIsLoading(true);
     setErrorMsg(null);
 
-    // 1. Try local storage first for instant cached rendering
+    // 1. Try local storage first for cached rendering if valid
     try {
       const stored = localStorage.getItem(STORAGE_KEY_SESSIONS);
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        if (Array.isArray(parsed)) {
           setSessions(parsed);
         }
       }
@@ -106,35 +101,55 @@ export default function ManualDipTab({ tanks = [] }: ManualDipTabProps) {
         return;
       }
 
+      let dipData: any[] | null = null;
       const { data, error } = await supabase
         .from('daily_dip_sessions')
         .select('*')
         .order('date', { ascending: false });
 
-      if (error) {
-        console.warn("Supabase daily_dip_sessions notice:", error.message);
-      } else if (data && data.length > 0) {
-        const mappedSessions: DailyDipSession[] = data.map((d: any) => ({
-          id: d.id,
-          date: d.date,
-          time: d.time || '08:00',
-          shift: d.shift || 'Morning',
-          supervisor: d.supervisor || d.recorded_by || 'Supervisor',
-          remarks: d.remarks || d.notes || '',
-          entries: Array.isArray(d.entries) ? d.entries : (typeof d.entries === 'string' ? JSON.parse(d.entries) : []),
-          totalSystemVolume: Number(d.total_system_volume ?? d.totalSystemVolume) || 0,
-          totalPhysicalDip: Number(d.total_physical_dip ?? d.totalPhysicalDip) || 0,
-          totalVarianceLiters: Number(d.total_variance_liters ?? d.totalVarianceLiters) || 0,
-          tanksCount: Number(d.tanks_count ?? d.tanksCount) || 0,
-          createdAt: d.created_at || d.createdAt
-        }));
-        setSessions(mappedSessions);
-        try {
-          localStorage.setItem(STORAGE_KEY_SESSIONS, JSON.stringify(mappedSessions));
-        } catch (_) {}
+      if (!error && data) {
+        dipData = data;
+      } else {
+        // Fallback check on daily_dip_records if daily_dip_sessions table is named differently
+        const { data: recData } = await supabase
+          .from('daily_dip_records')
+          .select('*')
+          .order('date', { ascending: false });
+        if (recData) {
+          dipData = recData;
+        }
+      }
+
+      if (dipData) {
+        if (dipData.length > 0) {
+          const mappedSessions: DailyDipSession[] = dipData.map((d: any) => ({
+            id: d.id,
+            date: d.date || new Date().toISOString().slice(0, 10),
+            time: d.time || '08:00',
+            shift: d.shift || 'Morning (06:00 - 14:00)',
+            supervisor: d.supervisor || d.recorded_by || 'Supervisor',
+            remarks: d.remarks || d.notes || '',
+            entries: Array.isArray(d.entries) ? d.entries : (typeof d.entries === 'string' ? JSON.parse(d.entries) : []),
+            totalSystemVolume: Number(d.total_system_volume ?? d.totalSystemVolume) || 0,
+            totalPhysicalDip: Number(d.total_physical_dip ?? d.totalPhysicalDip) || 0,
+            totalVarianceLiters: Number(d.total_variance_liters ?? d.totalVarianceLiters) || 0,
+            tanksCount: Number(d.tanks_count ?? d.tanksCount) || 0,
+            createdAt: d.created_at || d.createdAt
+          }));
+          setSessions(mappedSessions);
+          try {
+            localStorage.setItem(STORAGE_KEY_SESSIONS, JSON.stringify(mappedSessions));
+          } catch (_) {}
+        } else {
+          // Zero rows in Supabase: keep state strictly empty, do NOT inject mock data
+          setSessions([]);
+          try {
+            localStorage.setItem(STORAGE_KEY_SESSIONS, JSON.stringify([]));
+          } catch (_) {}
+        }
       }
     } catch (err) {
-      console.warn("Error fetching daily_dip_sessions:", err);
+      console.warn("Error fetching daily dip sessions:", err);
     } finally {
       setIsLoading(false);
     }
@@ -142,6 +157,75 @@ export default function ManualDipTab({ tanks = [] }: ManualDipTabProps) {
 
   useEffect(() => {
     fetchDipSessions();
+
+    // Subscribe to real-time changes on daily_dip_sessions
+    let realtimeChannel: any = null;
+    try {
+      const isConfigured = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
+      if (isConfigured) {
+        realtimeChannel = supabase
+          .channel('public:daily_dip_sessions_realtime')
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'daily_dip_sessions' },
+            (payload) => {
+              if (payload.eventType === 'INSERT') {
+                const d = payload.new;
+                const newSession: DailyDipSession = {
+                  id: d.id,
+                  date: d.date || new Date().toISOString().slice(0, 10),
+                  time: d.time || '08:00',
+                  shift: d.shift || 'Morning (06:00 - 14:00)',
+                  supervisor: d.supervisor || d.recorded_by || 'Supervisor',
+                  remarks: d.remarks || d.notes || '',
+                  entries: Array.isArray(d.entries) ? d.entries : (typeof d.entries === 'string' ? JSON.parse(d.entries) : []),
+                  totalSystemVolume: Number(d.total_system_volume ?? d.totalSystemVolume) || 0,
+                  totalPhysicalDip: Number(d.total_physical_dip ?? d.totalPhysicalDip) || 0,
+                  totalVarianceLiters: Number(d.total_variance_liters ?? d.totalVarianceLiters) || 0,
+                  tanksCount: Number(d.tanks_count ?? d.tanksCount) || 0,
+                  createdAt: d.created_at || d.createdAt
+                };
+                setSessions(prev => {
+                  if (prev.some(s => s.id === newSession.id)) {
+                    return prev.map(s => s.id === newSession.id ? newSession : s);
+                  }
+                  return [newSession, ...prev];
+                });
+              } else if (payload.eventType === 'UPDATE') {
+                const d = payload.new;
+                const updatedSession: DailyDipSession = {
+                  id: d.id,
+                  date: d.date,
+                  time: d.time || '08:00',
+                  shift: d.shift || 'Morning (06:00 - 14:00)',
+                  supervisor: d.supervisor || d.recorded_by || 'Supervisor',
+                  remarks: d.remarks || d.notes || '',
+                  entries: Array.isArray(d.entries) ? d.entries : (typeof d.entries === 'string' ? JSON.parse(d.entries) : []),
+                  totalSystemVolume: Number(d.total_system_volume ?? d.totalSystemVolume) || 0,
+                  totalPhysicalDip: Number(d.total_physical_dip ?? d.totalPhysicalDip) || 0,
+                  totalVarianceLiters: Number(d.total_variance_liters ?? d.totalVarianceLiters) || 0,
+                  tanksCount: Number(d.tanks_count ?? d.tanksCount) || 0,
+                  createdAt: d.created_at || d.createdAt
+                };
+                setSessions(prev => prev.map(s => s.id === updatedSession.id ? updatedSession : s));
+              } else if (payload.eventType === 'DELETE') {
+                if (payload.old?.id) {
+                  setSessions(prev => prev.filter(s => s.id !== payload.old.id));
+                }
+              }
+            }
+          )
+          .subscribe();
+      }
+    } catch (err) {
+      console.warn("Realtime subscription setup notice:", err);
+    }
+
+    return () => {
+      if (realtimeChannel) {
+        supabase.removeChannel(realtimeChannel);
+      }
+    };
   }, []);
 
   // Compute live multi-tank calculations for entry modal
@@ -240,7 +324,7 @@ export default function ManualDipTab({ tanks = [] }: ManualDipTabProps) {
 
     // Sync to Supabase
     try {
-      const { error } = await supabase.from('daily_dip_sessions').insert([{
+      const payload = {
         id: newSession.id,
         date: newSession.date,
         time: newSession.time,
@@ -253,10 +337,16 @@ export default function ManualDipTab({ tanks = [] }: ManualDipTabProps) {
         total_variance_liters: newSession.totalVarianceLiters,
         tanks_count: newSession.tanksCount,
         created_at: newSession.createdAt
-      }]);
+      };
+
+      const { error } = await supabase.from('daily_dip_sessions').insert([payload]);
 
       if (error) {
-        console.warn("Supabase insert notice for daily_dip_sessions:", error.message);
+        // Fallback to daily_dip_records table if daily_dip_sessions is named differently
+        const { error: err2 } = await supabase.from('daily_dip_records').insert([payload]);
+        if (err2) {
+          console.warn("Supabase insert notice for dip records:", err2.message);
+        }
       }
     } catch (err) {
       console.warn("Supabase dip insert error:", err);
@@ -554,15 +644,46 @@ export default function ManualDipTab({ tanks = [] }: ManualDipTabProps) {
               </tbody>
             </table>
           </div>
-        ) : (
-          <div className="bg-gray-50/70 rounded-2xl border border-dashed border-gray-200 p-10 text-center space-y-3">
+        ) : sessions.length === 0 ? (
+          <div id="no-dip-records-empty-card" className="bg-gray-50/70 rounded-2xl border border-dashed border-gray-200 p-10 text-center space-y-3">
             <div className="w-12 h-12 bg-blue-50 border border-blue-100 rounded-2xl flex items-center justify-center mx-auto text-blue-600">
               <Droplet className="w-6 h-6" />
             </div>
-            <h4 className="text-sm font-bold text-gray-900">No Daily Dip Sessions Found</h4>
-            <p className="text-xs text-gray-500 max-w-md mx-auto font-medium">
-              No daily dip reconciliation entries match your criteria. Click the <strong className="text-blue-600">Add New Dip</strong> button above to record your first multi-tank dip measurement.
+            <h4 className="text-sm font-bold text-gray-900 font-sans">No Dip Records Found</h4>
+            <p className="text-xs text-gray-500 max-w-md mx-auto font-medium leading-relaxed font-sans">
+              No dip records found. Click &apos;+ Add New Dip&apos; to record your first physical tank measurement.
             </p>
+            <div className="pt-2">
+              <button
+                onClick={handleOpenNewDipModal}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-sm active:scale-95"
+              >
+                <Plus className="w-4 h-4" />
+                <span>+ Add New Dip</span>
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div id="no-filtered-dips-card" className="bg-gray-50/70 rounded-2xl border border-dashed border-gray-200 p-10 text-center space-y-3">
+            <div className="w-12 h-12 bg-gray-100 border border-gray-200 rounded-2xl flex items-center justify-center mx-auto text-gray-500">
+              <Search className="w-6 h-6" />
+            </div>
+            <h4 className="text-sm font-bold text-gray-900 font-sans">No Matching Dip Records</h4>
+            <p className="text-xs text-gray-500 max-w-md mx-auto font-medium font-sans">
+              No daily dip records match your current search or shift filter.
+            </p>
+            <div className="pt-2">
+              <button
+                onClick={() => {
+                  setSearchQuery('');
+                  setSelectedShiftFilter('all');
+                }}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+              >
+                <RefreshCw className="w-3 h-3" />
+                <span>Clear Filters</span>
+              </button>
+            </div>
           </div>
         )}
       </div>

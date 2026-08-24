@@ -16,6 +16,8 @@ import { savePumpMachine, deletePumpMachine, saveNozzle, deleteNozzle, saveFuelT
 import { SUPABASE_SQL } from '../lib/sqlSchema';
 
 interface AdminControlTabProps {
+  activeSubTab?: 'tanks' | 'oils' | 'mapping' | 'employees' | 'price' | 'system';
+  onSubTabChange?: (tab: 'tanks' | 'oils' | 'mapping' | 'employees' | 'price' | 'system') => void;
   tanks: FuelTank[];
   setTanks: React.Dispatch<React.SetStateAction<FuelTank[]>>;
   oilTanks?: OilTank[];
@@ -32,6 +34,8 @@ interface AdminControlTabProps {
 }
 
 export default function AdminControlTab({
+  activeSubTab,
+  onSubTabChange,
   tanks,
   setTanks,
   oilTanks,
@@ -47,7 +51,15 @@ export default function AdminControlTab({
   onResetAllData
 }: AdminControlTabProps) {
   // Active sub-tab inside Admin Control: 'tanks' | 'oils' | 'mapping' | 'employees' | 'price' | 'system'
-  const [adminSection, setAdminSection] = useState<'tanks' | 'oils' | 'mapping' | 'employees' | 'price' | 'system'>('tanks');
+  const [internalAdminSection, setInternalAdminSection] = useState<'tanks' | 'oils' | 'mapping' | 'employees' | 'price' | 'system'>('tanks');
+  
+  const adminSection = activeSubTab || internalAdminSection;
+  const setAdminSection = (tab: 'tanks' | 'oils' | 'mapping' | 'employees' | 'price' | 'system') => {
+    if (onSubTabChange) {
+      onSubTabChange(tab);
+    }
+    setInternalAdminSection(tab);
+  };
 
   // Global Toast Notification
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -755,6 +767,52 @@ export default function AdminControlTab({
     showToast('Station metadata saved.');
   };
 
+  // Dynamic Sub-Page Headers
+  const getSubPageHeader = () => {
+    switch (adminSection) {
+      case 'tanks':
+        return {
+          icon: Fuel,
+          title: 'Underground Tanks',
+          subtitle: `Underground fuel storage tanks & volumetric inventories (${tanks.length} Tanks Configured)`
+        };
+      case 'mapping':
+        return {
+          icon: Gauge,
+          title: 'Dispenser Nozzles & Pumps',
+          subtitle: `Dispenser pump machines, meters, and nozzle-to-tank routing (${pumps.length} Nozzles Mapped)`
+        };
+      case 'oils':
+        return {
+          icon: Droplets,
+          title: 'Bulk Oil & Lubricant Storage',
+          subtitle: `Bulk lubricant chambers, oil drums, and storage bay setup (${effectiveOilTanks.length} Units)`
+        };
+      case 'employees':
+        return {
+          icon: Users,
+          title: 'Staff Directory & Roles',
+          subtitle: `Pump operators, shift supervisors, contact details, and access control (${employees.length} Staff)`
+        };
+      case 'price':
+        return {
+          icon: Tag,
+          title: 'Fuel Tariff & Price Management',
+          subtitle: 'Active retail rates per liter and scheduled price revisions'
+        };
+      case 'system':
+      default:
+        return {
+          icon: ShieldCheck,
+          title: 'Admin Control Panel',
+          subtitle: 'Centralized station configuration, database diagnostics, and system setup'
+        };
+    }
+  };
+
+  const headerInfo = getSubPageHeader();
+  const HeaderIcon = headerInfo.icon;
+
   return (
     <div id="admin-control-root" className="space-y-4 max-w-7xl mx-auto pb-12 animate-fade-in">
       {/* Page Header */}
@@ -762,14 +820,14 @@ export default function AdminControlTab({
         <div>
           <div className="flex items-center gap-2.5">
             <div className="p-1.5 bg-blue-600/10 text-blue-600 rounded-xl">
-              <ShieldCheck className="w-5 h-5" />
+              <HeaderIcon className="w-5 h-5" />
             </div>
             <div>
               <h1 className="text-lg font-bold text-slate-900 tracking-tight font-sans">
-                Admin Control Panel
+                {headerInfo.title}
               </h1>
               <p className="text-gray-500 text-xs mt-0.5">
-                Centralized management for underground storage tanks, dispenser nozzles, staff directory, and tariff rates
+                {headerInfo.subtitle}
               </p>
             </div>
           </div>
@@ -788,69 +846,6 @@ export default function AdminControlTab({
           </button>
         </div>
       )}
-
-      {/* Primary Sub-Navigation Tabs */}
-      <div className="flex items-center gap-2 border-b border-gray-200/80 pb-3 overflow-x-auto">
-        <button
-          onClick={() => setAdminSection('tanks')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-            adminSection === 'tanks'
-              ? 'bg-[#1C1C1C] text-white shadow-sm'
-              : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200/60'
-          }`}
-        >
-          <Fuel className="w-4 h-4" />
-          <span>Underground Storage Tanks ({tanks.length})</span>
-        </button>
-
-        <button
-          onClick={() => setAdminSection('oils')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-            adminSection === 'oils'
-              ? 'bg-[#1C1C1C] text-white shadow-sm'
-              : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200/60'
-          }`}
-        >
-          <Droplets className="w-4 h-4 text-amber-500" />
-          <span>Oil (Lubricant) Storage ({effectiveOilTanks.length})</span>
-        </button>
-
-        <button
-          onClick={() => setAdminSection('mapping')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-            adminSection === 'mapping'
-              ? 'bg-[#1C1C1C] text-white shadow-sm'
-              : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200/60'
-          }`}
-        >
-          <Gauge className="w-4 h-4" />
-          <span>Storage Tanks & Fuel Nozzles ({pumps.length} Nozzles)</span>
-        </button>
-
-        <button
-          onClick={() => setAdminSection('employees')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-            adminSection === 'employees'
-              ? 'bg-[#1C1C1C] text-white shadow-sm'
-              : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200/60'
-          }`}
-        >
-          <Users className="w-4 h-4" />
-          <span>Staff Directory ({employees.length})</span>
-        </button>
-
-        <button
-          onClick={() => setAdminSection('price')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-            adminSection === 'price'
-              ? 'bg-[#1C1C1C] text-white shadow-sm'
-              : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200/60'
-          }`}
-        >
-          <Tag className="w-4 h-4" />
-          <span>Price Management</span>
-        </button>
-      </div>
 
       {/* ========================================================================= */}
       {/* SECTION A: UNDERGROUND FUEL TANKS MANAGEMENT */}

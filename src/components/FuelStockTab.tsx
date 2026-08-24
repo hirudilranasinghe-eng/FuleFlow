@@ -19,6 +19,8 @@ interface FuelStockTabProps {
   setPumps?: React.Dispatch<React.SetStateAction<Pump[]>>;
   deliveries: StockDelivery[];
   setDeliveries: React.Dispatch<React.SetStateAction<StockDelivery[]>>;
+  onNavigateToAdminTanks?: () => void;
+  setActiveTab?: (tab: string, subTab?: string) => void;
 }
 
 export default function FuelStockTab({
@@ -28,6 +30,8 @@ export default function FuelStockTab({
   setPumps,
   deliveries,
   setDeliveries,
+  onNavigateToAdminTanks,
+  setActiveTab,
 }: FuelStockTabProps) {
 
   // Delivery Modal State
@@ -293,132 +297,161 @@ export default function FuelStockTab({
         </div>
       </div>
 
-      {/* Tank Gauges Grid (Beautiful visual representations of tanks!) */}
-      <div id="tanks-visual-grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {sortedTanks.map((tank) => {
-          const fillPercent = Math.round((tank.currentLevel / tank.capacity) * 100);
-          const isLowStock = fillPercent < 40;
-          const isCritical = fillPercent < 15;
-
-          const getFuelTypeBadgeStyle = (fuelType: string) => {
-            if (fuelType.includes('92')) return 'bg-amber-500/10 text-amber-700 border-amber-500/20';
-            if (fuelType.includes('95')) return 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20';
-            if (fuelType.includes('Super Diesel')) return 'bg-purple-500/10 text-purple-700 border-purple-500/20';
-            if (fuelType.includes('Auto Diesel')) return 'bg-blue-500/10 text-blue-700 border-blue-500/20';
-            if (fuelType.includes('Ordinary') || fuelType.includes('LAD')) return 'bg-teal-500/10 text-teal-700 border-teal-500/20';
-            return 'bg-slate-500/10 text-slate-700 border-slate-500/20';
-          };
-
-          // Determine color profiles based on fuel level state
-          let progressColor = 'bg-[#00BFFF]';
-          let borderHoverColor = 'hover:border-blue-500/30 hover:shadow-[0_0_15px_rgba(0,123,255,0.15)]';
-          let liquidWaveColor = 'from-blue-600/80 to-cyan-500/90';
-
-          if (tank.fuelType.includes('Diesel')) {
-            progressColor = 'bg-amber-500';
-            borderHoverColor = 'hover:border-amber-500/30 hover:shadow-[0_0_15px_rgba(245,158,11,0.15)]';
-            liquidWaveColor = 'from-amber-600/80 to-amber-500/90';
-          }
-          if (isLowStock) {
-            progressColor = 'bg-orange-500';
-            liquidWaveColor = 'from-orange-500/80 to-orange-400/90';
-          }
-          if (isCritical) {
-            progressColor = 'bg-red-500';
-            liquidWaveColor = 'from-red-600/80 to-red-500/90';
-          }
-
-          return (
-            <div 
-              key={tank.id} 
-              className={`glass-panel rounded-2xl p-4 shadow-sm transition-all duration-300 ${borderHoverColor} flex flex-col justify-between`}
+      {/* Tank Gauges Grid (Beautiful visual representations of tanks or clean empty state) */}
+      {sortedTanks.length === 0 ? (
+        <div id="no-tanks-empty-card" className="p-8 sm:p-12 text-center rounded-2xl bg-white border border-gray-200/90 shadow-2xs">
+          <div className="w-14 h-14 bg-blue-50 text-blue-600 rounded-2xl mx-auto flex items-center justify-center mb-4">
+            <Database className="w-7 h-7" />
+          </div>
+          <h3 className="text-base sm:text-lg font-bold text-[#1C1C1C] mb-1.5 font-sans">
+            No Underground Fuel Tanks Found
+          </h3>
+          <p className="text-gray-500 text-xs sm:text-sm max-w-md mx-auto mb-6 leading-relaxed font-sans">
+            No underground fuel tanks found. Go to Admin Control → Underground Tanks to configure station tanks.
+          </p>
+          {(onNavigateToAdminTanks || setActiveTab) && (
+            <button
+              onClick={() => {
+                if (onNavigateToAdminTanks) {
+                  onNavigateToAdminTanks();
+                } else if (setActiveTab) {
+                  setActiveTab('admin', 'tanks');
+                }
+              }}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#1C1C1C] hover:bg-black text-white text-xs font-bold rounded-xl transition-all shadow-sm cursor-pointer"
             >
-              <div>
-                {/* Tank Metadata */}
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
-                      <Database className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${getFuelTypeBadgeStyle(tank.fuelType)} mb-0.5`}>
-                        {tank.fuelType}
-                      </span>
-                      <h3 className="font-bold text-[#1C1C1C] text-sm leading-tight">{tank.name}</h3>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    {isCritical ? (
-                      <span className="inline-flex px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30 text-[9px] font-extrabold uppercase animate-pulse">Critical</span>
-                    ) : isLowStock ? (
-                      <span className="inline-flex px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[9px] font-bold uppercase">Low Stock</span>
-                    ) : (
-                      <span className="inline-flex px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[9px] font-bold uppercase">Secure</span>
-                    )}
-                  </div>
-                </div>
+              <Database className="w-4 h-4" />
+              <span>Go to Admin Control → Underground Tanks</span>
+            </button>
+          )}
+        </div>
+      ) : (
+        <div id="tanks-visual-grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {sortedTanks.map((tank) => {
+            const fillPercent = Math.round((tank.currentLevel / tank.capacity) * 100);
+            const isLowStock = fillPercent < 40;
+            const isCritical = fillPercent < 15;
 
-                {/* VISUAL LIQUID GAUGE (Simulated underground tank cylindrical view) */}
-                <div className="my-3 relative w-full h-24 bg-gray-100 border border-gray-100 rounded-xl overflow-hidden flex items-end justify-center group shadow-inner">
-                  {/* Grid Lines inside tank */}
-                  <div className="absolute inset-x-0 top-1/4 border-t border-gray-100 pointer-events-none" />
-                  <div className="absolute inset-x-0 top-2/4 border-t border-gray-100 pointer-events-none" />
-                  <div className="absolute inset-x-0 top-3/4 border-t border-gray-100 pointer-events-none" />
-                  
-                  {/* Liquid Fill Level with animation */}
-                  <div 
-                    className={`absolute inset-x-0 bottom-0 bg-gradient-to-t ${liquidWaveColor} transition-all duration-1000 ease-out overflow-hidden`}
-                    style={{ height: `${fillPercent}%` }}
-                  >
-                    <div className="absolute top-0 left-0 right-0 h-3 bg-white/20 animate-pulse"></div>
-                    <svg className="absolute -top-1 w-full h-3 opacity-50" preserveAspectRatio="none" viewBox="0 0 100 10">
-                       <path d="M0,5 Q25,0 50,5 T100,5 L100,10 L0,10 Z" fill="currentColor" className="text-white">
-                         <animate attributeName="d" dur="3s" repeatCount="indefinite" values="M0,5 Q25,0 50,5 T100,5 L100,10 L0,10 Z; M0,5 Q25,10 50,5 T100,5 L100,10 L0,10 Z; M0,5 Q25,0 50,5 T100,5 L100,10 L0,10 Z"/>
-                       </path>
-                    </svg>
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/10 to-transparent"></div>
-                  </div>
+            const getFuelTypeBadgeStyle = (fuelType: string) => {
+              if (fuelType.includes('92')) return 'bg-amber-500/10 text-amber-700 border-amber-500/20';
+              if (fuelType.includes('95')) return 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20';
+              if (fuelType.includes('Super Diesel')) return 'bg-purple-500/10 text-purple-700 border-purple-500/20';
+              if (fuelType.includes('Auto Diesel')) return 'bg-blue-500/10 text-blue-700 border-blue-500/20';
+              if (fuelType.includes('Ordinary') || fuelType.includes('LAD')) return 'bg-teal-500/10 text-teal-700 border-teal-500/20';
+              return 'bg-slate-500/10 text-slate-700 border-slate-500/20';
+            };
 
-                  {/* Centered Volume Overlay */}
-                  <div className="z-10 text-center select-none px-3 py-1.5 bg-gray-50/95 backdrop-blur-md rounded-lg shadow-sm border border-gray-200 mb-2 transition-transform duration-300 group-hover:scale-105">
-                    <span className="text-base tabular-nums font-extrabold text-[#1C1C1C] block leading-tight">{fillPercent}%</span>
-                    <span className="text-[10px] text-gray-500 font-medium">{formatLiters(tank.currentLevel)}</span>
-                  </div>
-                </div>
+            // Determine color profiles based on fuel level state
+            let progressColor = 'bg-[#00BFFF]';
+            let borderHoverColor = 'hover:border-blue-500/30 hover:shadow-[0_0_15px_rgba(0,123,255,0.15)]';
+            let liquidWaveColor = 'from-blue-600/80 to-cyan-500/90';
 
-                {/* Connected Pumps list */}
-                {(() => {
-                  const linkedPumps = (pumps || []).filter(p => p.tankId === tank.id || (!p.tankId && p.fuelType === tank.fuelType));
-                  return (
-                    <div className="flex justify-between items-center text-xs text-gray-500 border-b border-gray-100 py-1.5">
-                      <span>Mapped Pumps:</span>
-                      <span className="font-bold text-blue-600 text-right truncate max-w-[160px]" title={linkedPumps.map(p => `${p.name} (${p.fuelType})`).join(', ')}>
-                        {linkedPumps.length > 0 ? linkedPumps.map(p => p.name).join(', ') : 'None'}
-                      </span>
-                    </div>
-                  );
-                })()}
+            if (tank.fuelType.includes('Diesel')) {
+              progressColor = 'bg-amber-500';
+              borderHoverColor = 'hover:border-amber-500/30 hover:shadow-[0_0_15px_rgba(245,158,11,0.15)]';
+              liquidWaveColor = 'from-amber-600/80 to-amber-500/90';
+            }
+            if (isLowStock) {
+              progressColor = 'bg-orange-500';
+              liquidWaveColor = 'from-orange-500/80 to-orange-400/90';
+            }
+            if (isCritical) {
+              progressColor = 'bg-red-500';
+              liquidWaveColor = 'from-red-600/80 to-red-500/90';
+            }
 
-                {/* Capacity stats */}
-                <div className="flex justify-between items-center text-xs text-gray-500 border-b border-gray-100 py-1.5">
-                  <span>Tank Capacity:</span>
-                  <span className="tabular-nums font-semibold text-[#1C1C1C]">{formatLiters(tank.capacity)}</span>
-                </div>
-              </div>
-
-              {/* Dynamic Price Controller Section */}
-              <div className="mt-2 pt-2 flex items-center justify-between border-t border-gray-100">
+            return (
+              <div 
+                key={tank.id} 
+                className={`glass-panel rounded-2xl p-4 shadow-sm transition-all duration-300 ${borderHoverColor} flex flex-col justify-between`}
+              >
                 <div>
-                  <span className="text-[9px] text-gray-400 block font-bold uppercase tracking-wider">Unit Price</span>
-                  <span className="tabular-nums font-extrabold text-base text-[#1C1C1C] block leading-tight">
-                    {formatCurrency(tank.pricePerLiter)} <span className="text-[10px] text-gray-500 font-sans font-medium">/ L</span>
-                  </span>
+                  {/* Tank Metadata */}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
+                        <Database className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${getFuelTypeBadgeStyle(tank.fuelType)} mb-0.5`}>
+                          {tank.fuelType}
+                        </span>
+                        <h3 className="font-bold text-[#1C1C1C] text-sm leading-tight">{tank.name}</h3>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {isCritical ? (
+                        <span className="inline-flex px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30 text-[9px] font-extrabold uppercase animate-pulse">Critical</span>
+                      ) : isLowStock ? (
+                        <span className="inline-flex px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[9px] font-bold uppercase">Low Stock</span>
+                      ) : (
+                        <span className="inline-flex px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[9px] font-bold uppercase">Secure</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* VISUAL LIQUID GAUGE (Simulated underground tank cylindrical view) */}
+                  <div className="my-3 relative w-full h-24 bg-gray-100 border border-gray-100 rounded-xl overflow-hidden flex items-end justify-center group shadow-inner">
+                    {/* Grid Lines inside tank */}
+                    <div className="absolute inset-x-0 top-1/4 border-t border-gray-100 pointer-events-none" />
+                    <div className="absolute inset-x-0 top-2/4 border-t border-gray-100 pointer-events-none" />
+                    <div className="absolute inset-x-0 top-3/4 border-t border-gray-100 pointer-events-none" />
+                    
+                    {/* Liquid Fill Level with animation */}
+                    <div 
+                      className={`absolute inset-x-0 bottom-0 bg-gradient-to-t ${liquidWaveColor} transition-all duration-1000 ease-out overflow-hidden`}
+                      style={{ height: `${fillPercent}%` }}
+                    >
+                      <div className="absolute top-0 left-0 right-0 h-3 bg-white/20 animate-pulse"></div>
+                      <svg className="absolute -top-1 w-full h-3 opacity-50" preserveAspectRatio="none" viewBox="0 0 100 10">
+                         <path d="M0,5 Q25,0 50,5 T100,5 L100,10 L0,10 Z" fill="currentColor" className="text-white">
+                           <animate attributeName="d" dur="3s" repeatCount="indefinite" values="M0,5 Q25,0 50,5 T100,5 L100,10 L0,10 Z; M0,5 Q25,10 50,5 T100,5 L100,10 L0,10 Z; M0,5 Q25,0 50,5 T100,5 L100,10 L0,10 Z"/>
+                         </path>
+                      </svg>
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/10 to-transparent"></div>
+                    </div>
+
+                    {/* Centered Volume Overlay */}
+                    <div className="z-10 text-center select-none px-3 py-1.5 bg-gray-50/95 backdrop-blur-md rounded-lg shadow-sm border border-gray-200 mb-2 transition-transform duration-300 group-hover:scale-105">
+                      <span className="text-base tabular-nums font-extrabold text-[#1C1C1C] block leading-tight">{fillPercent}%</span>
+                      <span className="text-[10px] text-gray-500 font-medium">{formatLiters(tank.currentLevel)}</span>
+                    </div>
+                  </div>
+
+                  {/* Connected Pumps list */}
+                  {(() => {
+                    const linkedPumps = (pumps || []).filter(p => p.tankId === tank.id || (!p.tankId && p.fuelType === tank.fuelType));
+                    return (
+                      <div className="flex justify-between items-center text-xs text-gray-500 border-b border-gray-100 py-1.5">
+                        <span>Mapped Pumps:</span>
+                        <span className="font-bold text-blue-600 text-right truncate max-w-[160px]" title={linkedPumps.map(p => `${p.name} (${p.fuelType})`).join(', ')}>
+                          {linkedPumps.length > 0 ? linkedPumps.map(p => p.name).join(', ') : 'None'}
+                        </span>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Capacity stats */}
+                  <div className="flex justify-between items-center text-xs text-gray-500 border-b border-gray-100 py-1.5">
+                    <span>Tank Capacity:</span>
+                    <span className="tabular-nums font-semibold text-[#1C1C1C]">{formatLiters(tank.capacity)}</span>
+                  </div>
+                </div>
+
+                {/* Dynamic Price Controller Section */}
+                <div className="mt-2 pt-2 flex items-center justify-between border-t border-gray-100">
+                  <div>
+                    <span className="text-[9px] text-gray-400 block font-bold uppercase tracking-wider">Unit Price</span>
+                    <span className="tabular-nums font-extrabold text-base text-[#1C1C1C] block leading-tight">
+                      {formatCurrency(tank.pricePerLiter)} <span className="text-[10px] text-gray-500 font-sans font-medium">/ L</span>
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Deliveries History moved to Reports Tab */}
 
