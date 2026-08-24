@@ -259,19 +259,10 @@ export default function PurchasesTab({
       const stored = localStorage.getItem('fms_packaged_oil_items');
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && !parsed.some((p: any) => p.id === 'pkg-01' || p.id === 'pkg-02')) return parsed;
       }
     } catch (_) {}
-    return [
-      { id: 'pkg-01', name: 'Caltex Havoline Super 4T 20W-40', category: 'Engine Oil', grade: '20W-40', packageSize: '1L Bottle', currentStock: 48, minReorderLevel: 15, unitCost: 1950, retailPrice: 2350, location: 'Bay A1' },
-      { id: 'pkg-02', name: 'Lanka 2T Super Two Stroke Oil', category: '2T/4T Oil', grade: '2T Super', packageSize: '500ml Bottle', currentStock: 82, minReorderLevel: 25, unitCost: 780, retailPrice: 950, location: 'Bay A2' },
-      { id: 'pkg-03', name: 'Castrol GTX 20W-50 Engine Oil', category: 'Engine Oil', grade: '20W-50', packageSize: '4L Can', currentStock: 14, minReorderLevel: 8, unitCost: 7600, retailPrice: 8900, location: 'Shelf B1' },
-      { id: 'pkg-04', name: 'Mobil 1 Fully Synthetic 5W-30', category: 'Engine Oil', grade: '5W-30', packageSize: '4L Can', currentStock: 6, minReorderLevel: 10, unitCost: 14200, retailPrice: 16800, location: 'Shelf B2' },
-      { id: 'pkg-05', name: 'Caltex Brake Fluid Heavy Duty DOT 4', category: 'Brake Fluid', grade: 'DOT 4', packageSize: '500ml Can', currentStock: 28, minReorderLevel: 12, unitCost: 850, retailPrice: 1100, location: 'Bay C1' },
-      { id: 'pkg-06', name: 'Prestone Radiator Coolant 50/50 Premix', category: 'Coolant', grade: 'Premix 50/50', packageSize: '1L Bottle', currentStock: 34, minReorderLevel: 15, unitCost: 1100, retailPrice: 1450, location: 'Bay C2' },
-      { id: 'pkg-07', name: 'Lanka Auto Gear EP 90', category: 'Gear Oil', grade: 'EP 90', packageSize: '1L Bottle', currentStock: 19, minReorderLevel: 10, unitCost: 1650, retailPrice: 2050, location: 'Shelf D1' },
-      { id: 'pkg-08', name: 'Lanka 2T Pouch Mini Pack', category: '2T/4T Oil', grade: '2T Super', packageSize: '200ml Pouch', currentStock: 110, minReorderLevel: 40, unitCost: 320, retailPrice: 420, location: 'Front Counter' },
-    ];
+    return [];
   });
 
   const [grnRecords, setGrnRecords] = useState<OilGRNRecord[]>(() => {
@@ -279,41 +270,47 @@ export default function PurchasesTab({
       const stored = localStorage.getItem('fms_oil_grn_records');
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed)) {
+          const clean = parsed.filter((g: any) => 
+            g.id !== 'grn-01' && 
+            g.id !== 'grn-02' && 
+            g.invoiceNumber !== 'INV-164639' && 
+            g.invoiceNumber !== 'INV-CHEV-8891' && 
+            g.invoiceNumber !== 'CPC-BULK-3419' &&
+            g.grnNumber !== 'GRN-OIL-2026-042' && 
+            g.grnNumber !== 'GRN-OIL-2026-041'
+          );
+          return clean;
+        }
       }
     } catch (_) {}
-    return [
-      {
-        id: 'grn-01',
-        grnNumber: 'GRN-OIL-2026-042',
-        date: new Date(Date.now() - 2 * 86400000).toISOString().split('T')[0],
-        supplier: 'Chevron Lubricants Lanka PLC',
-        invoiceNumber: 'INV-CHEV-8891',
-        type: 'packaged',
-        items: [
-          { itemId: 'pkg-01', itemName: 'Caltex Havoline Super 4T 20W-40', packageSize: '1L Bottle', quantity: 36, unitCost: 1950, totalCost: 70200 },
-          { itemId: 'pkg-05', itemName: 'Caltex Brake Fluid Heavy Duty DOT 4', packageSize: '500ml Can', quantity: 24, unitCost: 850, totalCost: 20400 }
-        ],
-        totalAmount: 90600,
-        receivedBy: 'Supervisor S. Perera',
-        notes: 'Monthly standard retail batch received in intact condition.'
-      },
-      {
-        id: 'grn-02',
-        grnNumber: 'GRN-OIL-2026-041',
-        date: new Date(Date.now() - 5 * 86400000).toISOString().split('T')[0],
-        supplier: 'Ceylon Petroleum Corporation (Lanka IOC/CPC)',
-        invoiceNumber: 'CPC-BULK-3419',
-        type: 'bulk',
-        tankId: 'oil-tank-01',
-        tankName: 'Oil Tank 01 (Caltex 20W-50)',
-        litersReceived: 500,
-        totalAmount: 1100000,
-        receivedBy: 'Manager R. Anjana',
-        notes: 'Bulk oil barrel refill into Main Underground Oil Tank 01.'
-      }
-    ];
+    return [];
   });
+
+  // Purge legacy mock data from localStorage on mount
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('fms_oil_grn_records');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          const clean = parsed.filter((g: any) => 
+            g.id !== 'grn-01' && 
+            g.id !== 'grn-02' && 
+            g.invoiceNumber !== 'INV-164639' && 
+            g.invoiceNumber !== 'INV-CHEV-8891' && 
+            g.invoiceNumber !== 'CPC-BULK-3419' &&
+            g.grnNumber !== 'GRN-OIL-2026-042' && 
+            g.grnNumber !== 'GRN-OIL-2026-041'
+          );
+          if (clean.length !== parsed.length) {
+            localStorage.setItem('fms_oil_grn_records', JSON.stringify(clean));
+            setGrnRecords(clean);
+          }
+        }
+      }
+    } catch (_) {}
+  }, []);
 
   // Fetch dynamic catalog items and GRN records from Supabase on mount
   const loadDynamicLubricantData = useCallback(async () => {
@@ -323,17 +320,17 @@ export default function PurchasesTab({
         fetchBulkLubricants(),
         fetchLubricantGRNReceipts()
       ]);
-      if (fetchedPackaged && fetchedPackaged.length > 0) {
+      if (Array.isArray(fetchedPackaged)) {
         setPackagedItems(fetchedPackaged);
       }
-      if (fetchedBulk && fetchedBulk.length > 0) {
+      if (Array.isArray(fetchedBulk) && fetchedBulk.length > 0) {
         setOilTanks(fetchedBulk);
       }
-      if (fetchedGRN && fetchedGRN.length > 0) {
+      if (Array.isArray(fetchedGRN)) {
         setGrnRecords(fetchedGRN);
       }
     } catch (err) {
-      console.warn("Notice: Loaded local fallback lubricant catalog", err);
+      console.warn("Notice: Lubricant dynamic load error", err);
     }
   }, [setOilTanks]);
 
@@ -349,19 +346,19 @@ export default function PurchasesTab({
     const channel = supabase.channel('purchases-lubricant-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'packaged_lubricants' }, async () => {
         const updated = await fetchPackagedLubricants();
-        if (updated && updated.length > 0) setPackagedItems(updated);
+        if (Array.isArray(updated)) setPackagedItems(updated);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'bulk_lubricants' }, async () => {
         const updated = await fetchBulkLubricants();
-        if (updated && updated.length > 0) setOilTanks(updated);
+        if (Array.isArray(updated) && updated.length > 0) setOilTanks(updated);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'oil_tanks' }, async () => {
         const updated = await fetchBulkLubricants();
-        if (updated && updated.length > 0) setOilTanks(updated);
+        if (Array.isArray(updated) && updated.length > 0) setOilTanks(updated);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'lubricant_grn_receipts' }, async () => {
         const updated = await fetchLubricantGRNReceipts();
-        if (updated && updated.length > 0) setGrnRecords(updated);
+        if (Array.isArray(updated)) setGrnRecords(updated);
       })
       .subscribe();
 

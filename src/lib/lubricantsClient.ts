@@ -69,7 +69,7 @@ export function mapGRNReceipt(raw: any, items: any[] = []): OilGRNRecord {
     id: raw.id || `grn-${Date.now()}`,
     grnNumber: raw.grn_number || raw.grnnumber || raw.grn_no || `GRN-${raw.id}`,
     date: raw.date || raw.created_at ? new Date(raw.date || raw.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-    supplier: raw.supplier || raw.supplier_name || 'Chevron Lubricants',
+    supplier: raw.supplier || raw.supplier_name || '',
     invoiceNumber: raw.invoice_number || raw.invoicenumber || raw.invoice_no || '',
     type: (raw.type as any) || (raw.tank_id || raw.tankid ? 'bulk' : 'packaged'),
     tankId: raw.tank_id || raw.tankid || undefined,
