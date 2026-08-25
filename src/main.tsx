@@ -25,6 +25,15 @@ if (typeof window !== 'undefined') {
   };
 }
 
+// Register lightweight Service Worker for Android/Tablet PWA installation
+if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((err) => {
+      console.log('SW registration skipped:', err?.message || err);
+    });
+  });
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />

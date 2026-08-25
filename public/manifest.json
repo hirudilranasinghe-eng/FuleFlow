@@ -1,0 +1,18 @@
+{
+  "short_name": "FuelFlow",
+  "name": "FuelFlow ERP - Fuel Management System",
+  "description": "SAMSE AUTO MART (PVT) LTD Fuel & Lubricant Management System",
+  "icons": [
+    {
+      "src": "/vite.svg",
+      "type": "image/svg+xml",
+      "sizes": "192x192 512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#ffffff",
+  "theme_color": "#16a34a",
+  "display": "standalone",
+  "orientation": "any"
+}
