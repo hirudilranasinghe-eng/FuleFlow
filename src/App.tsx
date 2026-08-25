@@ -704,7 +704,7 @@ export default function App() {
           )
           .subscribe();
 
-        bulkOilChannel = supabase
+          bulkOilChannel = supabase
           .channel('public:bulk_lubricants_app_realtime')
           .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'bulk_lubricants' }, (payload: any) => {
             if (payload?.old?.id) {
@@ -738,6 +738,74 @@ export default function App() {
                   return [...prev, tank].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id, undefined, { numeric: true, sensitivity: 'base' }));
                 });
               }
+            }
+          })
+          .subscribe();
+
+        // Shifts real-time channel
+        const shiftsChannel = supabase
+          .channel('public:shifts_app_realtime')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'shifts' }, async () => {
+            try {
+              const { data: updatedShifts } = await supabase.from('shifts').select(`
+                *,
+                pumpReadings:pump_readings(*)
+              `).order('starttime', { ascending: false });
+
+              if (updatedShifts) {
+                const mappedShifts = updatedShifts.map(s => ({
+                  id: s.id,
+                  name: s.name,
+                  supervisorId: s.supervisorid,
+                  startTime: s.starttime,
+                  endTime: s.endtime,
+                  isActive: s.isactive,
+                  totalFuelSold: Number(s.totalfuelsold) || 0,
+                  totalNetSold: Number(s.totalnetsold) || 0,
+                  totalNetSales: Number(s.totalnetsales) || 0,
+                  initialPumperCash: Number(s.initialpumpercash || s.initialPumperCash) || 0,
+                  replacementPumperCash: Number(s.replacementpumpercash || s.replacementPumperCash) || 0,
+                  totalPhysicalCash: Number(s.totalphysicalcash || s.totalPhysicalCash) || 0,
+                  cashVariance: s.cashvariance,
+                  handoverNotes: s.handovernotes || '',
+                  replacementPumperId: s.replacementpumperid || '',
+                  pumpReadings: (s.pumpReadings || []).map((r: any) => ({
+                    pumpId: r.pump_id || r.pumpid || r.pumpId,
+                    pumpName: r.pump_name || r.pumpname || r.pumpName,
+                    fuelType: r.fuel_type || r.fueltype || r.fuelType,
+                    tankId: r.tank_id || r.tankid || r.tankId || (r.fueltype === 'Petrol 92' ? 'tank-petrol92' : r.fueltype === 'Petrol 95' ? 'tank-petrol95' : r.fueltype === 'Auto Diesel' ? 'tank-autodiesel' : 'tank-superdiesel'),
+                    assignedPumperId: r.assigned_pumper_id || r.assignedpumperid || r.assignedPumperId || null,
+                    replacementPumperId: r.replacement_pumper_id || r.replacementpumperid || r.replacementPumperId || null,
+                    initialPumperCash: Number(r.initial_pumper_cash || r.initialpumpercash || r.initialPumperCash) || 0,
+                    handoverMeter: Number(r.handover_meter !== undefined ? r.handover_meter : r.handovermeter !== undefined ? r.handovermeter : r.handoverMeter) || 0,
+                    handoverNotes: r.handover_notes || r.handovernotes || r.handoverNotes || '',
+                    startMeter: Number(r.start_meter !== undefined ? r.start_meter : r.startmeter !== undefined ? r.startmeter : r.startMeter) || 0,
+                    endMeter: Number(r.end_meter !== undefined ? r.end_meter : r.endmeter !== undefined ? r.endmeter : r.endMeter) || 0,
+                    testingQty: Number(r.testing_qty !== undefined ? r.testing_qty : r.testingqty !== undefined ? r.testingqty : r.testingQty) || 0,
+                    status: r.status || 'Idle',
+                    isLocked: r.is_locked !== undefined ? r.is_locked : r.islocked !== undefined ? r.islocked : r.isLocked,
+                    unitPrice: Number(r.unit_price || r.unitprice || r.unitPrice) || 0,
+                    actualCash: Number(r.actual_cash ?? r.actualcash ?? r.actualCash) || 0,
+                    cashVariance: Number(r.cash_variance ?? r.cashvariance ?? r.cashVariance) || 0,
+                    creditSalesAmount: Number(r.credit_sales_amount ?? r.creditsalesamount ?? r.creditSalesAmount) || 0,
+                    cardSalesAmount: Number(r.card_sales_amount ?? r.cardsalesamount ?? r.cardSalesAmount) || 0,
+                    oilSalesAmount: Number(r.oil_sales_amount ?? r.oilsalesamount ?? r.oilSalesAmount) || 0
+                  }))
+                }));
+
+                const dbActive = mappedShifts.find(s => s.isActive);
+                const history = mappedShifts.filter(s => !s.isActive);
+
+                if (dbActive) {
+                  setActiveShift(dbActive as unknown as Shift);
+                } else {
+                  setActiveShift(null);
+                }
+
+                setShiftHistory(history as unknown as Shift[]);
+              }
+            } catch (err) {
+              console.warn("Realtime shifts sync notice:", err);
             }
           })
           .subscribe();

@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { 
   Database, TrendingUp, AlertTriangle, Users, ArrowUpRight, 
-  Calendar, CheckCircle2, ShoppingBag, Droplet, Clock, Info, Fuel
+  ShoppingBag, Droplet, Clock, Info, Fuel
 } from 'lucide-react';
 import { 
   ResponsiveContainer, 
@@ -18,6 +18,7 @@ import {
   Tooltip
 } from 'recharts';
 import { Employee, FuelTank, Pump, Shift } from '../types';
+import { supabase } from '../lib/supabase';
 
 interface DashboardTabProps {
   employees: Employee[];
@@ -35,6 +36,50 @@ export default function DashboardTab({
   shiftHistory,
   setActiveTab,
 }: DashboardTabProps) {
+
+  // Live shifts state for direct real-time aggregation
+  const [liveShifts, setLiveShifts] = useState<any[]>([]);
+
+  // Fetch live shifts from Supabase and subscribe to changes
+  useEffect(() => {
+    const isConfigured = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
+    if (!isConfigured) return;
+
+    let isMounted = true;
+
+    const fetchLiveShifts = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('shifts')
+          .select('id, name, starttime, endtime, isactive, totalnetsales, totalnetsold, totalfuelsold')
+          .order('starttime', { ascending: false })
+          .limit(6);
+
+        if (!error && data && isMounted) {
+          setLiveShifts(data);
+        }
+      } catch (err) {
+        console.warn("Notice querying live shifts for dashboard:", err);
+      }
+    };
+
+    fetchLiveShifts();
+
+    const channel = supabase
+      .channel('public:dashboard_shifts_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'shifts' }, () => {
+        fetchLiveShifts();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'daily_sales' }, () => {
+        fetchLiveShifts();
+      })
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   // Computations
   const totalStockLitres = useMemo(() => tanks.reduce((acc, t) => acc + t.currentLevel, 0), [tanks]);
@@ -56,7 +101,7 @@ export default function DashboardTab({
     // Add shifts from today in history
     const todayStr = new Date().toISOString().slice(0, 10);
     shiftHistory.forEach(s => {
-      if (s.startTime.startsWith(todayStr)) {
+      if (s.startTime && s.startTime.startsWith(todayStr)) {
         rev += s.totalNetSales;
       }
     });
@@ -67,20 +112,45 @@ export default function DashboardTab({
     let sold = activeShift ? activeShift.totalNetSold : 0;
     const todayStr = new Date().toISOString().slice(0, 10);
     shiftHistory.forEach(s => {
-      if (s.startTime.startsWith(todayStr)) {
+      if (s.startTime && s.startTime.startsWith(todayStr)) {
         sold += s.totalNetSold;
       }
     });
     return sold;
   }, [activeShift, shiftHistory]);
 
-  // Recharts Chart Data Computations (Last 6 completed shifts)
+  // Recharts Chart Data Computations (Last 6 completed/recent shifts)
   const chartData = useMemo(() => {
-    // Generate past 6 shifts sales for comparison
-    const list = [...shiftHistory].slice(0, 6).reverse();
-    if (activeShift && list.length < 6 && !list.some(s => s.id === activeShift.id)) {
-      list.push(activeShift);
+    let list: Array<{ id: string; name: string; startTime: string; totalNetSales: number; totalNetSold: number }> = [];
+
+    if (liveShifts && liveShifts.length > 0) {
+      list = liveShifts.map(s => ({
+        id: s.id,
+        name: s.name || `Shift ${s.id}`,
+        startTime: s.starttime || s.startTime || '',
+        totalNetSales: Number(s.totalnetsales ?? s.totalNetSales ?? 0),
+        totalNetSold: Number(s.totalnetsold ?? s.totalNetSold ?? 0),
+      })).slice(0, 6).reverse();
+    } else {
+      list = [...shiftHistory].slice(0, 6).reverse().map(s => ({
+        id: s.id,
+        name: s.name,
+        startTime: s.startTime,
+        totalNetSales: Number(s.totalNetSales || 0),
+        totalNetSold: Number(s.totalNetSold || 0),
+      }));
+
+      if (activeShift && list.length < 6 && !list.some(s => s.id === activeShift.id)) {
+        list.push({
+          id: activeShift.id,
+          name: activeShift.name,
+          startTime: activeShift.startTime,
+          totalNetSales: Number(activeShift.totalNetSales || 0),
+          totalNetSold: Number(activeShift.totalNetSold || 0),
+        });
+      }
     }
+
     return list.map(s => {
       const dateStr = s.startTime 
         ? new Date(s.startTime).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
@@ -95,11 +165,18 @@ export default function DashboardTab({
         shortName: s.name,
         date: dateStr,
         fullDate: fullDateStr,
-        sales: s.totalNetSales || 0,
-        liters: s.totalNetSold || 0,
+        sales: Number(s.totalNetSales) || 0,
+        liters: Number(s.totalNetSold) || 0,
       };
     });
-  }, [activeShift, shiftHistory]);
+  }, [liveShifts, activeShift, shiftHistory]);
+
+  // Aggregate total sales to check if any revenue was recorded
+  const totalRevenueInHistory = useMemo(() => {
+    return chartData.reduce((acc, d) => acc + (d.sales || 0), 0);
+  }, [chartData]);
+
+  const hasRecordedRevenue = chartData.length > 0 && totalRevenueInHistory > 0;
 
   const maxSaleValue = useMemo(() => {
     const vals = chartData.map(d => d.sales);
@@ -311,7 +388,7 @@ export default function DashboardTab({
 
           {/* Recharts Bar Chart Container with Explicit Height */}
           <div className="w-full h-[300px] min-h-[300px] pt-2">
-            {chartData.length > 0 ? (
+            {hasRecordedRevenue ? (
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={chartData} margin={{ top: 15, right: 10, left: 15, bottom: 25 }}>
                   <defs>
@@ -329,10 +406,23 @@ export default function DashboardTab({
                     dy={8}
                   />
                   <YAxis 
+                    domain={[0, 'auto']}
+                    allowDecimals={false}
                     tick={{ fontSize: 10, fill: '#6B7280', fontWeight: 600 }}
                     tickLine={false}
                     axisLine={false}
-                    tickFormatter={(val) => val >= 1000 ? `Rs. ${(val / 1000).toFixed(0)}k` : `Rs. ${val}`}
+                    tickFormatter={(val: number) => {
+                      if (val === 0) return 'Rs. 0';
+                      if (val >= 1_000_000) {
+                        const formatted = (val / 1_000_000).toFixed(val % 1_000_000 === 0 ? 0 : 1);
+                        return `Rs. ${formatted}M`;
+                      }
+                      if (val >= 1_000) {
+                        const formatted = (val / 1_000).toFixed(val % 1_000 === 0 ? 0 : 1);
+                        return `Rs. ${formatted}k`;
+                      }
+                      return `Rs. ${Math.round(val).toLocaleString('en-LK')}`;
+                    }}
                   />
                   <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(59, 130, 246, 0.05)' }} />
                   <Bar 
@@ -345,8 +435,16 @@ export default function DashboardTab({
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <div className="w-full h-full flex items-center justify-center text-gray-500 text-sm font-medium">
-                Insufficient sales history to populate performance chart.
+              <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center rounded-xl bg-slate-50/60 border border-dashed border-slate-200">
+                <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center mb-2.5">
+                  <TrendingUp className="w-5 h-5" />
+                </div>
+                <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-1">
+                  Shift Performance
+                </h4>
+                <p className="text-xs text-slate-500 max-w-md font-medium leading-relaxed">
+                  No shift revenue recorded yet. Completed shifts with metered fuel sales will reflect here automatically.
+                </p>
               </div>
             )}
           </div>
