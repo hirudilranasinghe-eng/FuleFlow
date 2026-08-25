@@ -657,11 +657,13 @@ export default function App() {
     // Set up Real-time Supabase subscription for underground fuel tanks and bulk lubricants
     let realtimeChannel: any = null;
     let bulkOilChannel: any = null;
+    let shiftsChannel: any = null;
+
     if (isConfigured) {
       try {
         const targetTable = getTanksTableName();
         realtimeChannel = supabase
-          .channel('public:fuel_tanks_realtime')
+          .channel(`fuel_tanks_realtime_${Date.now()}`)
           .on(
             'postgres_changes',
             { event: '*', schema: 'public', table: targetTable },
@@ -704,8 +706,8 @@ export default function App() {
           )
           .subscribe();
 
-          bulkOilChannel = supabase
-          .channel('public:bulk_lubricants_app_realtime')
+        bulkOilChannel = supabase
+          .channel(`bulk_lubricants_app_realtime_${Date.now()}`)
           .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'bulk_lubricants' }, (payload: any) => {
             if (payload?.old?.id) {
               setOilTanks(prev => prev.filter(t => t.id !== payload.old.id));
@@ -743,8 +745,8 @@ export default function App() {
           .subscribe();
 
         // Shifts real-time channel
-        const shiftsChannel = supabase
-          .channel('public:shifts_app_realtime')
+        shiftsChannel = supabase
+          .channel(`shifts_app_realtime_${Date.now()}`)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'shifts' }, async () => {
             try {
               const { data: updatedShifts } = await supabase.from('shifts').select(`
@@ -820,6 +822,9 @@ export default function App() {
       }
       if (bulkOilChannel) {
         supabase.removeChannel(bulkOilChannel);
+      }
+      if (shiftsChannel) {
+        supabase.removeChannel(shiftsChannel);
       }
     };
   }, []);

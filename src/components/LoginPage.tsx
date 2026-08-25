@@ -260,7 +260,7 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
 
             <div>
               <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
-                Station Management Portal
+                Fuel Management System
               </h2>
               <div className="mt-1.5 inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 border border-emerald-200/80 text-emerald-800 text-[11px] font-extrabold rounded-full uppercase tracking-wider">
                 <Building2 className="w-3 h-3 text-emerald-600" />
@@ -268,7 +268,7 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
               </div>
             </div>
             <p className="text-xs text-slate-500 pt-1">
-              Sign in with your station credentials to access active meters & shift ledgers
+              Sign in with your station credentials to access
             </p>
           </div>
 

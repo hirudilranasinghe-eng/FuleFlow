@@ -66,7 +66,7 @@ export default function DashboardTab({
     fetchLiveShifts();
 
     const channel = supabase
-      .channel('public:dashboard_shifts_realtime')
+      .channel(`dashboard_shifts_realtime_${Date.now()}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'shifts' }, () => {
         fetchLiveShifts();
       })
