@@ -477,7 +477,7 @@ export default function ManualDipTab({ tanks = [] }: ManualDipTabProps) {
             className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white hover:bg-gray-50 disabled:opacity-50 text-gray-700 border border-gray-200 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs"
           >
             <Download className="w-3.5 h-3.5 text-gray-600" />
-            <span>Export CSV</span>
+            <span>Export</span>
           </button>
 
           {/* Prominent Add New Dip Button */}
@@ -962,7 +962,7 @@ export default function ManualDipTab({ tanks = [] }: ManualDipTabProps) {
                   className="inline-flex items-center gap-1 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-bold transition-all cursor-pointer"
                 >
                   <Download className="w-3.5 h-3.5" />
-                  <span>Export CSV</span>
+                  <span>Export</span>
                 </button>
                 <button
                   onClick={() => setSelectedDetailSession(null)}

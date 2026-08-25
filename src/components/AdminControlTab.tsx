@@ -13,6 +13,7 @@ import {
 import { Employee, FuelTank, FuelType, Pump, PumpMachine, PriceSchedule, OilTank } from '../types';
 import { supabase, getTanksTableName } from '../lib/supabase';
 import { savePumpMachine, deletePumpMachine, saveNozzle, deleteNozzle, saveFuelTank, deleteFuelTank, saveOilTank, deleteOilTank } from '../lib/supabaseClient';
+import { saveBulkLubricant, deleteBulkLubricant } from '../lib/lubricantsClient';
 import { SUPABASE_SQL } from '../lib/sqlSchema';
 
 interface AdminControlTabProps {
@@ -79,28 +80,22 @@ export default function AdminControlTab({
   }, [tanks]);
 
   // Local oil tanks state fallback if not passed from parent
-  const [localOilTanks, setLocalOilTanks] = useState<OilTank[]>(() => {
-    try {
-      const stored = localStorage.getItem('fms_oil_tanks');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch (_) {}
-    return [
-      { id: 'oil-tank-01', name: 'Oil Tank 01', grade: 'Caltex 20W-50', capacity: 1000, currentLevel: 680, pricePerLiter: 2450 },
-      { id: 'oil-tank-02', name: 'Oil Tank 02', grade: 'Lanka 2T Super', capacity: 500, currentLevel: 340, pricePerLiter: 1850 },
-      { id: 'oil-tank-03', name: 'Barrel Storage 01', grade: 'Hydraulic 68', capacity: 210, currentLevel: 145, pricePerLiter: 1950 },
-      { id: 'oil-tank-04', name: 'Coolant Bay 01', grade: 'Radiator Coolant 50/50', capacity: 500, currentLevel: 290, pricePerLiter: 1200 },
-    ];
-  });
+  const [localOilTanks, setLocalOilTanks] = useState<OilTank[]>([]);
 
   const effectiveOilTanks = oilTanks ?? localOilTanks;
   const setEffectiveOilTanks = setOilTanks ?? setLocalOilTanks;
 
-  // Natural numerical sorting of oil tanks
+  // Natural numerical sorting and ID deduplication of oil tanks
   const sortedOilTanks = useMemo(() => {
-    return [...effectiveOilTanks].sort((a, b) => (a.name || a.id || '').localeCompare(b.name || b.id || '', undefined, { numeric: true, sensitivity: 'base' }));
+    const seen = new Set<string>();
+    const unique: OilTank[] = [];
+    for (const t of effectiveOilTanks) {
+      if (!t || !t.id) continue;
+      if (seen.has(t.id)) continue;
+      seen.add(t.id);
+      unique.push(t);
+    }
+    return unique.sort((a, b) => (a.name || a.id || '').localeCompare(b.name || b.id || '', undefined, { numeric: true, sensitivity: 'base' }));
   }, [effectiveOilTanks]);
 
   // Oil Tank Grade styling helper
@@ -235,18 +230,39 @@ export default function AdminControlTab({
   const [editingOilTank, setEditingOilTank] = useState<OilTank | null>(null);
 
   // Form fields for Oil Tank Add/Edit
+  const [oilTankFormType, setOilTankFormType] = useState<'chamber' | 'drum'>('chamber');
+  const [oilTankFormChamberNo, setOilTankFormChamberNo] = useState<number>(1);
   const [oilTankFormName, setOilTankFormName] = useState('');
-  const [oilTankFormGrade, setOilTankFormGrade] = useState('Caltex 20W-50');
-  const [oilTankFormCapacity, setOilTankFormCapacity] = useState<number>(1000);
+  const [oilTankFormGrade, setOilTankFormGrade] = useState('Lanka 2T Super');
+  const [oilTankFormCapacity, setOilTankFormCapacity] = useState<number>(100);
   const [oilTankFormCurrentLevel, setOilTankFormCurrentLevel] = useState<number>(0);
   const [oilTankFormPrice, setOilTankFormPrice] = useState<number>(0);
   const [oilTankModalError, setOilTankModalError] = useState<string | null>(null);
 
-  const handleOpenAddOilTankModal = () => {
+  // 1. Open Modal for Forecourt Dispenser Chamber (50L / 100L)
+  const handleOpenAddChamberModal = () => {
     setEditingOilTank(null);
-    setOilTankFormName(`Oil Tank ${(effectiveOilTanks.length + 1).toString().padStart(2, '0')}`);
+    setOilTankFormType('chamber');
+    const existingChambers = effectiveOilTanks.filter(t => t.type === 'chamber' || t.name.toLowerCase().includes('chamber') || t.id.includes('chamber'));
+    const nextChamberNo = existingChambers.length + 1;
+    setOilTankFormChamberNo(nextChamberNo);
+    setOilTankFormName(`Chamber 0${nextChamberNo}`);
+    setOilTankFormGrade('Lanka 2T Super');
+    setOilTankFormCapacity(100);
+    setOilTankFormCurrentLevel(0);
+    setOilTankFormPrice(0);
+    setOilTankModalError(null);
+    setIsAddOilTankModalOpen(true);
+  };
+
+  // 2. Open Modal for Back Store Storage Drum / Tank (210L)
+  const handleOpenAddDrumModal = () => {
+    setEditingOilTank(null);
+    setOilTankFormType('drum');
+    setOilTankFormChamberNo(1);
+    setOilTankFormName(`Back Store Drum - Caltex 20W-50`);
     setOilTankFormGrade('Caltex 20W-50');
-    setOilTankFormCapacity(1000);
+    setOilTankFormCapacity(210);
     setOilTankFormCurrentLevel(0);
     setOilTankFormPrice(0);
     setOilTankModalError(null);
@@ -255,6 +271,9 @@ export default function AdminControlTab({
 
   const handleOpenEditOilTankModal = (oilTank: OilTank) => {
     setEditingOilTank(oilTank);
+    const isChamber = oilTank.type === 'chamber' || oilTank.name.toLowerCase().includes('chamber') || oilTank.id.includes('chamber');
+    setOilTankFormType(isChamber ? 'chamber' : 'drum');
+    setOilTankFormChamberNo(oilTank.chamberNumber || 1);
     setOilTankFormName(oilTank.name);
     setOilTankFormGrade(oilTank.grade);
     setOilTankFormCapacity(oilTank.capacity);
@@ -266,15 +285,15 @@ export default function AdminControlTab({
 
   const handleSaveOilTankSubmit = async () => {
     if (!oilTankFormName.trim()) {
-      setOilTankModalError('Tank name / identifier is required (e.g. Oil Tank 01).');
+      setOilTankModalError('Name / identifier is required (e.g. Chamber 01 or Back Store Drum 01).');
       return;
     }
     if (!oilTankFormGrade.trim()) {
-      setOilTankModalError('Oil grade / product name is required (e.g. Caltex 20W-50).');
+      setOilTankModalError('Oil grade / product name is required (e.g. Lanka 2T Super, Caltex 20W-50).');
       return;
     }
     if (oilTankFormCapacity <= 0) {
-      setOilTankModalError('Tank capacity must be greater than 0 liters.');
+      setOilTankModalError('Capacity must be greater than 0 liters.');
       return;
     }
     if (oilTankFormCurrentLevel < 0) {
@@ -297,35 +316,40 @@ export default function AdminControlTab({
         grade: oilTankFormGrade.trim(),
         capacity: capVal,
         currentLevel: curVal,
-        pricePerLiter: priceVal
+        pricePerLiter: priceVal,
+        type: oilTankFormType,
+        chamberNumber: oilTankFormType === 'chamber' ? Number(oilTankFormChamberNo) : undefined
       };
 
       const nextOilTanks = effectiveOilTanks.map(t => t.id === editingOilTank.id ? updatedOilTank : t);
       setEffectiveOilTanks(nextOilTanks);
-      try { localStorage.setItem('fms_oil_tanks', JSON.stringify(nextOilTanks)); } catch (_) {}
 
-      await saveOilTank(supabase, updatedOilTank);
+      await saveBulkLubricant(updatedOilTank);
 
       setIsAddOilTankModalOpen(false);
-      showToast(`Oil Storage Tank "${updatedOilTank.name}" updated successfully.`);
+      showToast(`${oilTankFormType === 'chamber' ? 'Dispenser Chamber' : 'Storage Drum'} "${updatedOilTank.name}" updated.`);
     } else {
+      const uniqueSuffix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
       const newOilTank: OilTank = {
-        id: `oil-tank-${Date.now().toString().slice(-6)}`,
+        id: oilTankFormType === 'chamber' 
+          ? `forecourt-chamber-${uniqueSuffix}`
+          : `drum-store-${uniqueSuffix}`,
         name: oilTankFormName.trim(),
         grade: oilTankFormGrade.trim(),
         capacity: capVal,
         currentLevel: curVal,
-        pricePerLiter: priceVal
+        pricePerLiter: priceVal,
+        type: oilTankFormType,
+        chamberNumber: oilTankFormType === 'chamber' ? Number(oilTankFormChamberNo) : undefined
       };
 
-      const nextOilTanks = [...effectiveOilTanks, newOilTank];
+      const nextOilTanks = [...effectiveOilTanks.filter(t => t.id !== newOilTank.id), newOilTank];
       setEffectiveOilTanks(nextOilTanks);
-      try { localStorage.setItem('fms_oil_tanks', JSON.stringify(nextOilTanks)); } catch (_) {}
 
-      await saveOilTank(supabase, newOilTank);
+      await saveBulkLubricant(newOilTank);
 
       setIsAddOilTankModalOpen(false);
-      showToast(`Oil Storage Tank "${newOilTank.name}" created successfully.`);
+      showToast(`${oilTankFormType === 'chamber' ? 'Dispenser Chamber' : 'Storage Drum'} "${newOilTank.name}" created in database.`);
     }
   };
 
@@ -333,17 +357,16 @@ export default function AdminControlTab({
     const targetTank = effectiveOilTanks.find(t => t.id === oilTankId);
     if (!targetTank) return;
 
-    if (!confirm(`Are you sure you want to delete "${targetTank.name} - ${targetTank.grade}"? This action cannot be undone.`)) {
+    if (!confirm(`Are you sure you want to delete "${targetTank.name} - ${targetTank.grade}" from database? This action cannot be undone.`)) {
       return;
     }
 
     const nextOilTanks = effectiveOilTanks.filter(t => t.id !== oilTankId);
     setEffectiveOilTanks(nextOilTanks);
-    try { localStorage.setItem('fms_oil_tanks', JSON.stringify(nextOilTanks)); } catch (_) {}
 
-    await deleteOilTank(supabase, oilTankId);
+    await deleteBulkLubricant(oilTankId);
 
-    showToast(`Oil Storage Tank "${targetTank.name}" deleted.`);
+    showToast(`Deleted "${targetTank.name}" from database.`);
   };
 
   // -------------------------------------------------------------
@@ -986,18 +1009,27 @@ export default function AdminControlTab({
         <div className="space-y-6 animate-fade-in">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
             <div>
-              <h2 className="text-sm font-extrabold text-[#1C1C1C]">Oil & Lubricant Storage Tanks</h2>
+              <h2 className="text-sm font-extrabold text-[#1C1C1C]">Bulk Oil & Lubricants Configuration</h2>
               <p className="text-xs text-gray-500 mt-0.5">
-                Centralized lubricant storage management: engine oil barrels, hydraulic oil tanks, volume meters, and tariff rates
+                Manage Forecourt 4-Chamber Dispenser units and Back Store 210L wholesale drums stored in Supabase
               </p>
             </div>
-            <button
-              onClick={handleOpenAddOilTankModal}
-              className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm self-start sm:self-auto"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Add Oil Tank</span>
-            </button>
+            <div className="flex items-center gap-2 flex-wrap self-start sm:self-auto">
+              <button
+                onClick={handleOpenAddChamberModal}
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm cursor-pointer"
+              >
+                <Droplets className="w-3.5 h-3.5" />
+                <span>+ Add Dispenser Chamber</span>
+              </button>
+              <button
+                onClick={handleOpenAddDrumModal}
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm cursor-pointer"
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>+ Add Storage Drum / Tank</span>
+              </button>
+            </div>
           </div>
 
           {/* Oil Tanks Grid */}
@@ -1007,52 +1039,73 @@ export default function AdminControlTab({
                 <Droplets className="w-6 h-6" />
               </div>
               <div className="space-y-1">
-                <h3 className="text-sm font-bold text-[#1C1C1C]">No Oil & Lubricant Tanks Configured</h3>
-                <p className="text-xs text-gray-500 max-w-sm mx-auto">
-                  Click 'Add Oil Tank' to register bulk oil storage, lubricant drums, or hydraulic fluid tanks.
+                <h3 className="text-sm font-bold text-[#1C1C1C]">No Bulk Oil Chambers or Drums Configured</h3>
+                <p className="text-xs text-gray-500 max-w-md mx-auto">
+                  Add Forecourt Dispenser Chambers (50L/100L) or Back Store Storage Drums (210L) to establish your station's bulk lubricant infrastructure.
                 </p>
               </div>
-              <button
-                onClick={handleOpenAddOilTankModal}
-                className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Add Oil Tank</span>
-              </button>
+              <div className="flex items-center justify-center gap-3 pt-2 flex-wrap">
+                <button
+                  onClick={handleOpenAddChamberModal}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm cursor-pointer"
+                >
+                  <Droplets className="w-4 h-4" />
+                  <span>+ Add Dispenser Chamber</span>
+                </button>
+                <button
+                  onClick={handleOpenAddDrumModal}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm cursor-pointer"
+                >
+                  <Layers className="w-4 h-4" />
+                  <span>+ Add Storage Drum / Tank</span>
+                </button>
+              </div>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {sortedOilTanks.map((oilTank) => {
+                const isChamber = oilTank.type === 'chamber' || oilTank.name.toLowerCase().includes('chamber') || oilTank.id.includes('chamber');
                 const pct = oilTank.capacity > 0 ? Math.round((oilTank.currentLevel / oilTank.capacity) * 100) : 0;
                 const totalStockVal = oilTank.currentLevel * (oilTank.pricePerLiter || 0);
 
                 return (
-                  <div key={oilTank.id} className="bg-white rounded-xl border border-gray-100 p-4 space-y-3 shadow-sm hover:border-gray-200 transition-all">
+                  <div key={oilTank.id} className="bg-white rounded-2xl border border-gray-100 p-4 space-y-3.5 shadow-sm hover:border-gray-200 transition-all">
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center flex-shrink-0 font-bold">
-                          <Droplets className="w-4 h-4" />
+                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 font-bold ${
+                          isChamber ? 'bg-amber-50 text-amber-600 border border-amber-200/60' : 'bg-blue-50 text-blue-600 border border-blue-200/60'
+                        }`}>
+                          {isChamber ? <Droplets className="w-4 h-4" /> : <Layers className="w-4 h-4" />}
                         </div>
                         <div>
-                          <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${getOilGradeBadgeStyle(oilTank.grade)}`}>
-                            {oilTank.grade}
-                          </span>
-                          <h3 className="text-sm font-extrabold text-[#1C1C1C] leading-snug mt-0.5">{oilTank.name}</h3>
+                          <div className="flex items-center gap-1.5">
+                            <span className={`inline-flex px-2 py-0.5 rounded-md text-[9px] font-extrabold uppercase tracking-wide border ${
+                              isChamber 
+                                ? 'bg-amber-50 text-amber-800 border-amber-200' 
+                                : 'bg-blue-50 text-blue-800 border-blue-200'
+                            }`}>
+                              {isChamber ? `Chamber ${oilTank.chamberNumber ? `0${oilTank.chamberNumber}` : ''} (Forecourt)` : 'Back Store Drum'}
+                            </span>
+                            <span className={`inline-flex px-2 py-0.5 rounded-md text-[9px] font-extrabold border ${getOilGradeBadgeStyle(oilTank.grade)}`}>
+                              {oilTank.grade}
+                            </span>
+                          </div>
+                          <h3 className="text-sm font-extrabold text-[#1C1C1C] leading-snug mt-1">{oilTank.name}</h3>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1">
                         <button
                           onClick={() => handleOpenEditOilTankModal(oilTank)}
-                          className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                          title="Edit Oil Tank"
+                          className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                          title="Edit Configuration"
                         >
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
                         <button
                           onClick={() => handleDeleteOilTank(oilTank.id)}
-                          className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                          title="Delete Oil Tank"
+                          className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                          title="Delete from Database"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -1064,7 +1117,7 @@ export default function AdminControlTab({
                       <div className="flex justify-between text-xs font-bold">
                         <span className="text-gray-500">Current Volume Level</span>
                         <div className="flex items-center gap-1.5 tabular-nums">
-                          <span className={`text-xs font-extrabold ${pct < 20 ? 'text-rose-600' : pct < 40 ? 'text-amber-600' : 'text-[#1C1C1C]'}`}>
+                          <span className={`text-xs font-extrabold ${pct < 20 ? 'text-rose-600' : pct < 40 ? 'text-amber-600' : 'text-emerald-700'}`}>
                             {pct}%
                           </span>
                           <span className="text-gray-400">({oilTank.currentLevel.toLocaleString()} L)</span>
@@ -1991,23 +2044,77 @@ export default function AdminControlTab({
       )}
 
       {/* ========================================================================= */}
-      {/* MODAL: ADD / EDIT OIL STORAGE TANK */}
+      {/* MODAL: ADD / EDIT BULK OIL CHAMBER OR STORAGE DRUM */}
       {/* ========================================================================= */}
       {isAddOilTankModalOpen && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-6 max-w-md w-full space-y-5 shadow-2xl animate-scale-up">
             <div className="flex items-center justify-between border-b border-gray-100 pb-3">
-              <h3 className="text-base font-extrabold text-[#1C1C1C] flex items-center gap-2">
-                <Droplets className="w-5 h-5 text-amber-600" />
-                <span>{editingOilTank ? 'Edit Oil (Lubricant) Storage Tank' : 'Add Oil (Lubricant) Storage Tank'}</span>
-              </h3>
+              <div className="flex items-center gap-2">
+                <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold ${
+                  oilTankFormType === 'chamber' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
+                }`}>
+                  {oilTankFormType === 'chamber' ? <Droplets className="w-4 h-4" /> : <Layers className="w-4 h-4" />}
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-[#1C1C1C]">
+                    {editingOilTank 
+                      ? (oilTankFormType === 'chamber' ? 'Edit Dispenser Chamber' : 'Edit Storage Drum / Tank') 
+                      : (oilTankFormType === 'chamber' ? 'Add Forecourt Dispenser Chamber' : 'Add Back Store Storage Drum')}
+                  </h3>
+                  <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
+                    {oilTankFormType === 'chamber' ? 'Forecourt 4-Chamber Dispenser Unit' : 'Back Store Wholesale Inventory'}
+                  </span>
+                </div>
+              </div>
               <button 
                 onClick={() => setIsAddOilTankModalOpen(false)}
-                className="p-1 text-gray-400 hover:text-gray-600 rounded-lg"
+                className="p-1 text-gray-400 hover:text-gray-600 rounded-lg cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
+
+            {/* Type selector toggle (Chamber vs Drum) */}
+            {!editingOilTank && (
+              <div className="grid grid-cols-2 gap-2 p-1 bg-gray-100 rounded-xl text-xs font-bold">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOilTankFormType('chamber');
+                    setOilTankFormCapacity(100);
+                    setOilTankFormGrade('Lanka 2T Super');
+                    const existingChambers = effectiveOilTanks.filter(t => t.type === 'chamber' || t.name.toLowerCase().includes('chamber'));
+                    setOilTankFormName(`Chamber 0${existingChambers.length + 1}`);
+                  }}
+                  className={`py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    oilTankFormType === 'chamber'
+                      ? 'bg-amber-600 text-white shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  <Droplets className="w-3.5 h-3.5" />
+                  <span>Dispenser Chamber</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOilTankFormType('drum');
+                    setOilTankFormCapacity(210);
+                    setOilTankFormGrade('Caltex 20W-50');
+                    setOilTankFormName('Back Store Drum - Caltex 20W-50');
+                  }}
+                  className={`py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    oilTankFormType === 'drum'
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  <Layers className="w-3.5 h-3.5" />
+                  <span>Storage Drum / Tank</span>
+                </button>
+              </div>
+            )}
 
             {oilTankModalError && (
               <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl font-medium flex items-center gap-2">
@@ -2016,34 +2123,67 @@ export default function AdminControlTab({
               </div>
             )}
 
-            <div className="space-y-4 text-xs">
-              <div>
-                <label className="font-bold text-gray-600 block mb-1">Tank Name / Identifier</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Oil Tank 01, Barrel Storage 02"
-                  value={oilTankFormName}
-                  onChange={(e) => setOilTankFormName(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] focus:outline-none focus:border-blue-500 font-medium"
-                />
-              </div>
+            <div className="space-y-3.5 text-xs">
+              {oilTankFormType === 'chamber' && (
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="col-span-1">
+                    <label className="font-bold text-gray-600 block mb-1">Chamber #</label>
+                    <select
+                      value={oilTankFormChamberNo}
+                      onChange={(e) => {
+                        const num = Number(e.target.value);
+                        setOilTankFormChamberNo(num);
+                        setOilTankFormName(`Chamber 0${num}`);
+                      }}
+                      className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] font-bold"
+                    >
+                      {[1, 2, 3, 4, 5, 6, 7, 8].map(n => (
+                        <option key={n} value={n}>Chamber 0{n}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="col-span-2">
+                    <label className="font-bold text-gray-600 block mb-1">Display Identifier</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Chamber 01"
+                      value={oilTankFormName}
+                      onChange={(e) => setOilTankFormName(e.target.value)}
+                      className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] font-bold"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {oilTankFormType === 'drum' && (
+                <div>
+                  <label className="font-bold text-gray-600 block mb-1">Storage Drum / Tank Name</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Back Store Wholesale Drum - Caltex 20W-50"
+                    value={oilTankFormName}
+                    onChange={(e) => setOilTankFormName(e.target.value)}
+                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] font-semibold"
+                  />
+                </div>
+              )}
 
               <div>
                 <label className="font-bold text-gray-600 block mb-1">Oil Grade / Lubricant Product</label>
                 <input
                   type="text"
-                  placeholder="e.g. Caltex 20W-50, Lanka 2T, Hydraulic 68"
+                  placeholder="e.g. Lanka 2T Super, Caltex 20W-50, 20W-40"
                   value={oilTankFormGrade}
                   onChange={(e) => setOilTankFormGrade(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] focus:outline-none focus:border-blue-500 font-semibold"
+                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] font-bold"
                 />
                 {/* Quick Grade Presets */}
-                <div className="flex flex-wrap gap-1.5 mt-2">
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
                   {[
-                    'Caltex 20W-50',
                     'Lanka 2T Super',
+                    '20W-40',
+                    'Caltex 20W-50',
                     'Hydraulic 68',
-                    'Coolant 50/50',
                     'Engine Oil 15W-40',
                     'Gear Oil EP 90'
                   ].map((preset) => (
@@ -2051,7 +2191,7 @@ export default function AdminControlTab({
                       key={preset}
                       type="button"
                       onClick={() => setOilTankFormGrade(preset)}
-                      className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition-colors ${
+                      className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition-colors cursor-pointer ${
                         oilTankFormGrade === preset
                           ? 'bg-amber-100 text-amber-800 border-amber-300'
                           : 'bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-200'
@@ -2065,13 +2205,52 @@ export default function AdminControlTab({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="font-bold text-gray-600 block mb-1">Total Capacity (L)</label>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="font-bold text-gray-600">Total Capacity (L)</label>
+                    <div className="flex gap-1">
+                      {oilTankFormType === 'chamber' ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setOilTankFormCapacity(50)}
+                            className="text-[9px] font-bold px-1 py-0.5 bg-gray-100 hover:bg-gray-200 rounded text-gray-700"
+                          >
+                            50L
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setOilTankFormCapacity(100)}
+                            className="text-[9px] font-bold px-1 py-0.5 bg-amber-100 hover:bg-amber-200 rounded text-amber-800"
+                          >
+                            100L
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setOilTankFormCapacity(210)}
+                            className="text-[9px] font-bold px-1 py-0.5 bg-blue-100 hover:bg-blue-200 rounded text-blue-800"
+                          >
+                            210L
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setOilTankFormCapacity(1000)}
+                            className="text-[9px] font-bold px-1 py-0.5 bg-gray-100 hover:bg-gray-200 rounded text-gray-700"
+                          >
+                            1000L
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
                   <input
                     type="number"
                     value={oilTankFormCapacity}
                     onFocus={(e) => e.target.select()}
                     onChange={(e) => setOilTankFormCapacity(Number(e.target.value))}
-                    className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] focus:outline-none focus:border-blue-500 tabular-nums font-bold"
+                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] tabular-nums font-bold"
                   />
                 </div>
 
@@ -2082,13 +2261,13 @@ export default function AdminControlTab({
                     value={oilTankFormCurrentLevel}
                     onFocus={(e) => e.target.select()}
                     onChange={(e) => setOilTankFormCurrentLevel(Number(e.target.value))}
-                    className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] focus:outline-none focus:border-blue-500 tabular-nums font-bold"
+                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] tabular-nums font-bold"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="font-bold text-gray-600 block mb-1">Price / Rate (Rs. per Liter)</label>
+                <label className="font-bold text-gray-600 block mb-1">Price / Tariff Rate (Rs. per Liter)</label>
                 <div className="relative">
                   <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 font-bold text-xs">Rs.</span>
                   <input
@@ -2097,7 +2276,7 @@ export default function AdminControlTab({
                     value={oilTankFormPrice}
                     onFocus={(e) => e.target.select()}
                     onChange={(e) => setOilTankFormPrice(Number(e.target.value))}
-                    className="w-full pl-10 pr-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] focus:outline-none focus:border-blue-500 tabular-nums font-bold"
+                    className="w-full pl-10 pr-3.5 py-2 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] tabular-nums font-bold"
                   />
                 </div>
               </div>
@@ -2105,16 +2284,20 @@ export default function AdminControlTab({
 
             <div className="flex gap-3 pt-2">
               <button
+                type="button"
                 onClick={() => setIsAddOilTankModalOpen(false)}
-                className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition-colors"
+                className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={handleSaveOilTankSubmit}
-                className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm"
+                className={`flex-1 py-2.5 text-white rounded-xl text-xs font-bold transition-colors shadow-sm cursor-pointer ${
+                  oilTankFormType === 'chamber' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'
+                }`}
               >
-                {editingOilTank ? 'Update Oil Tank' : 'Save Oil Tank'}
+                {editingOilTank ? 'Update in Database' : 'Save to Supabase'}
               </button>
             </div>
           </div>

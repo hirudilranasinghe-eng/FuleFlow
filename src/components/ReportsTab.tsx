@@ -7,11 +7,13 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Clock, Droplet, CreditCard, TrendingUp, ArrowLeft,
   Search, RefreshCw, Eye, Database, CheckCircle2, AlertTriangle, 
-  Fuel, User, Receipt, Filter, Calendar, Download, X, Plus, BarChart3
+  Fuel, User, Receipt, Filter, Calendar, Download, X, Plus, BarChart3,
+  ArrowLeftRight
 } from 'lucide-react';
 import { Shift, StockDelivery, FuelTank, OilTank, Pump, Employee, Customer, CreditTransaction, CreditPayment } from '../types';
 import { supabase } from '../lib/supabase';
 import DailySalesTab from './DailySalesTab';
+import OilMovementReport from './OilMovementReport';
 
 export interface TankDipLog {
   id: string;
@@ -59,7 +61,7 @@ interface ReportsTabProps {
   onSubTabChange?: (tab: SubTab) => void;
 }
 
-type SubTab = 'daily-sales' | 'shift-meter' | 'tank-stock' | 'credit-customer' | 'financials';
+type SubTab = 'daily-sales' | 'shift-meter' | 'tank-stock' | 'oil-movement' | 'credit-customer' | 'financials';
 
 export default function ReportsTab({
   shiftHistory = [],
@@ -524,6 +526,11 @@ export default function ReportsTab({
       subtitle: 'Storage tank dip readings, bowser deliveries, and stock depletion tracking',
       icon: Droplet,
     },
+    'oil-movement': {
+      title: 'Oil Movement Report',
+      subtitle: 'Audit log of bulk oil and barrel-to-chamber internal transfers',
+      icon: ArrowLeftRight,
+    },
     'credit-customer': {
       title: 'Credit & Customer Statements',
       subtitle: 'Corporate account aging analysis, vehicle logs, and deposit balance usage',
@@ -583,7 +590,7 @@ export default function ReportsTab({
                         className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg text-xs font-bold transition-all cursor-pointer"
                       >
                         <Download className="w-3 h-3 text-gray-600" />
-                        <span>Export CSV</span>
+                        <span>Export</span>
                       </button>
                     )}
                   </div>
@@ -645,7 +652,7 @@ export default function ReportsTab({
                       className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg text-xs font-bold transition-all cursor-pointer"
                     >
                       <Download className="w-3 h-3 text-gray-600" />
-                      <span>Export CSV</span>
+                      <span>Export</span>
                     </button>
                   )}
                 </div>
@@ -860,7 +867,7 @@ export default function ReportsTab({
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs"
                   >
                     <Download className="w-3.5 h-3.5" />
-                    <span>Export CSV</span>
+                    <span>Export</span>
                   </button>
                 </div>
               </div>
@@ -1038,7 +1045,7 @@ export default function ReportsTab({
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 disabled:opacity-50 text-gray-800 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs"
                 >
                   <Download className="w-3.5 h-3.5 text-gray-600" />
-                  <span>Export CSV</span>
+                  <span>Export</span>
                 </button>
               </div>
             </div>
@@ -1109,8 +1116,16 @@ export default function ReportsTab({
         </div>
       )}
 
+      {/* SUB-TAB: OIL MOVEMENT AUDIT REPORT */}
+      {activeSubTab === 'oil-movement' && (
+        <OilMovementReport
+          oilTanks={oilTanks}
+          employees={employees}
+        />
+      )}
+
       {/* RENDER FALLBACK EMPTY CONTAINERS FOR OTHER SUB-TABS */}
-      {activeSubTab !== 'daily-sales' && activeSubTab !== 'shift-meter' && activeSubTab !== 'tank-stock' && (
+      {activeSubTab !== 'daily-sales' && activeSubTab !== 'shift-meter' && activeSubTab !== 'tank-stock' && activeSubTab !== 'oil-movement' && (
         <div className="bg-white rounded-2xl border border-gray-200/80 p-12 text-center shadow-2xs">
           {(() => {
             const details = subTabDetails[activeSubTab];

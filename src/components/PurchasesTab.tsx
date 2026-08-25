@@ -323,7 +323,7 @@ export default function PurchasesTab({
       if (Array.isArray(fetchedPackaged)) {
         setPackagedItems(fetchedPackaged);
       }
-      if (Array.isArray(fetchedBulk) && fetchedBulk.length > 0) {
+      if (Array.isArray(fetchedBulk)) {
         setOilTanks(fetchedBulk);
       }
       if (Array.isArray(fetchedGRN)) {
@@ -350,11 +350,11 @@ export default function PurchasesTab({
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'bulk_lubricants' }, async () => {
         const updated = await fetchBulkLubricants();
-        if (Array.isArray(updated) && updated.length > 0) setOilTanks(updated);
+        if (Array.isArray(updated)) setOilTanks(updated);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'oil_tanks' }, async () => {
         const updated = await fetchBulkLubricants();
-        if (Array.isArray(updated) && updated.length > 0) setOilTanks(updated);
+        if (Array.isArray(updated)) setOilTanks(updated);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'lubricant_grn_receipts' }, async () => {
         const updated = await fetchLubricantGRNReceipts();
@@ -388,7 +388,7 @@ export default function PurchasesTab({
   const [selectedPackagedItemId, setSelectedPackagedItemId] = useState<string>('');
   const [lubeQuantity, setLubeQuantity] = useState<number | ''>('');
   const [lubeUnitCost, setLubeUnitCost] = useState<number | ''>('');
-  const [lubeSupplier, setLubeSupplier] = useState('Chevron Lubricants Lanka PLC');
+  const [lubeSupplier, setLubeSupplier] = useState('');
   const [lubeInvoiceNo, setLubeInvoiceNo] = useState('');
   const [lubeDeliveryDate, setLubeDeliveryDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [lubeReceivedBy, setLubeReceivedBy] = useState('Station Supervisor');
@@ -472,7 +472,7 @@ export default function PurchasesTab({
 
     const grnId = `GRN-${Date.now().toString().slice(-6)}`;
     const invoiceNumber = lubeInvoiceNo.trim() || `INV-${Date.now().toString().slice(-6)}`;
-    const supplierName = lubeSupplier.trim() || 'Chevron Lubricants Lanka PLC';
+    const supplierName = lubeSupplier.trim() || 'Supplier / Distributor';
     const totalCost = Math.round(numQty * numUnitCost);
 
     if (lubePurchaseType === 'packaged') {

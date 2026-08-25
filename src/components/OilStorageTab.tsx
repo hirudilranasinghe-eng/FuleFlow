@@ -9,9 +9,9 @@ import {
   AlertTriangle, CheckCircle2, DollarSign, Calendar, 
   ArrowDownRight, ArrowUpRight, Filter, Edit2, Trash2, 
   RefreshCw, Layers, ShieldAlert, ShoppingCart, FileText,
-  Clock, Check, X, Tag, BarChart3, AlertCircle, Loader2
+  Clock, Check, X, Tag, BarChart3, AlertCircle, Loader2, Zap
 } from 'lucide-react';
-import { OilTank, PackagedOilItem, Employee } from '../types';
+import { OilTank, PackagedOilItem, Employee, AuthUser } from '../types';
 import { supabase } from '../lib/supabase';
 import {
   fetchPackagedLubricants,
@@ -20,19 +20,22 @@ import {
   fetchBulkLubricants,
   saveBulkLubricant,
   deleteBulkLubricant,
-  deductPackagedStock
+  deductPackagedStock,
+  recordBulkOilTransfer
 } from '../lib/lubricantsClient';
 
 interface OilStorageTabProps {
   oilTanks: OilTank[];
   setOilTanks: React.Dispatch<React.SetStateAction<OilTank[]>>;
   employees?: Employee[];
+  user?: AuthUser | null;
 }
 
 export default function OilStorageTab({
   oilTanks,
   setOilTanks,
-  employees = []
+  employees = [],
+  user
 }: OilStorageTabProps) {
   // Sub-tabs: 'bulk' | 'packaged'
   const [activeSubTab, setActiveSubTab] = useState<'bulk' | 'packaged'>('bulk');
@@ -69,8 +72,10 @@ export default function OilStorageTab({
         fetchBulkLubricants()
       ]);
 
-      setPackagedItems(fetchedPackaged);
-      if (fetchedBulk && fetchedBulk.length > 0) {
+      if (Array.isArray(fetchedPackaged)) {
+        setPackagedItems(fetchedPackaged);
+      }
+      if (Array.isArray(fetchedBulk)) {
         setOilTanks(fetchedBulk);
       }
     } catch (err) {
@@ -81,26 +86,50 @@ export default function OilStorageTab({
     }
   }, [setOilTanks]);
 
-  // Initial fetch on mount
+  // Initial fetch on mount & purge stale localStorage seed cache
   useEffect(() => {
+    try {
+      localStorage.removeItem('dispenser_chambers');
+      localStorage.removeItem('fms_dispenser_chambers');
+      localStorage.removeItem('dispenserChambers');
+      localStorage.removeItem('fms_oil_tanks');
+    } catch (_) {}
     loadAllLubricantData(true);
   }, [loadAllLubricantData]);
 
-  // Real-time Supabase subscriptions
+  // Real-time Supabase subscriptions with explicit DELETE handling
   useEffect(() => {
     const channel = supabase
       .channel('lubricants_realtime_channel')
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'bulk_lubricants' }, (payload: any) => {
+        if (payload?.old?.id) {
+          const deletedId = payload.old.id;
+          setOilTanks(prev => prev.filter(t => t.id !== deletedId));
+        }
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'oil_tanks' }, (payload: any) => {
+        if (payload?.old?.id) {
+          const deletedId = payload.old.id;
+          setOilTanks(prev => prev.filter(t => t.id !== deletedId));
+        }
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'packaged_lubricants' }, (payload: any) => {
+        if (payload?.old?.id) {
+          const deletedId = payload.old.id;
+          setPackagedItems(prev => prev.filter(i => i.id !== deletedId));
+        }
+      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'packaged_lubricants' }, async () => {
         const updated = await fetchPackagedLubricants();
-        setPackagedItems(updated);
+        if (Array.isArray(updated)) setPackagedItems(updated);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'bulk_lubricants' }, async () => {
         const updated = await fetchBulkLubricants();
-        if (updated.length > 0) setOilTanks(updated);
+        if (Array.isArray(updated)) setOilTanks(updated);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'oil_tanks' }, async () => {
         const updated = await fetchBulkLubricants();
-        if (updated.length > 0) setOilTanks(updated);
+        if (Array.isArray(updated)) setOilTanks(updated);
       })
       .subscribe();
 
@@ -160,17 +189,6 @@ export default function OilStorageTab({
   const [itemFormPrice, setItemFormPrice] = useState<number>(0);
   const [itemFormLocation, setItemFormLocation] = useState('Front Rack');
 
-  // 3. Add / Edit Bulk Tank Modal
-  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
-  const [editingBulkTank, setEditingBulkTank] = useState<OilTank | null>(null);
-  const [bulkFormName, setBulkFormName] = useState('');
-  const [bulkFormGrade, setBulkFormGrade] = useState('Caltex 20W-50');
-  const [bulkFormCapacity, setBulkFormCapacity] = useState<number>(210);
-  const [bulkFormLevel, setBulkFormLevel] = useState<number>(100);
-  const [bulkFormPrice, setBulkFormPrice] = useState<number>(2450);
-  const [bulkFormType, setBulkFormType] = useState<'chamber' | 'drum'>('drum');
-  const [bulkFormChamberNo, setBulkFormChamberNo] = useState<number>(1);
-
   // 4. Refill Forecourt Dispenser Chamber Modal
   const [isRefillModalOpen, setIsRefillModalOpen] = useState(false);
   const [refillTargetChamberId, setRefillTargetChamberId] = useState('');
@@ -182,35 +200,55 @@ export default function OilStorageTab({
 
   // Group Oil Tanks into Forecourt 4-Chamber Unit & Back Store 210L Drums
   const forecourtChambers = useMemo(() => {
-    const chambers = oilTanks.filter(t => t.type === 'chamber' || t.name.toLowerCase().includes('chamber') || t.id.includes('chamber'));
-    if (chambers.length > 0) {
-      return [...chambers].sort((a, b) => (a.chamberNumber || 0) - (b.chamberNumber || 0));
+    const seen = new Set<string>();
+    const chambers: OilTank[] = [];
+    for (const t of oilTanks) {
+      if (!t || !t.id) continue;
+      if (seen.has(t.id)) continue;
+      if (t.type === 'chamber' || t.name.toLowerCase().includes('chamber') || t.id.includes('chamber')) {
+        seen.add(t.id);
+        chambers.push(t);
+      }
     }
-    return oilTanks.filter(t => t.type === 'chamber');
+    return chambers.sort((a, b) => (a.chamberNumber || 0) - (b.chamberNumber || 0) || (a.name || a.id).localeCompare(b.name || b.id));
   }, [oilTanks]);
 
   const backStoreDrums = useMemo(() => {
-    const drums = oilTanks.filter(t => t.type === 'drum' || t.name.toLowerCase().includes('drum') || t.name.toLowerCase().includes('barrel') || t.id.includes('drum'));
-    if (drums.length > 0) return drums;
-    return oilTanks.filter(t => t.type !== 'chamber');
+    const seen = new Set<string>();
+    const drums: OilTank[] = [];
+    for (const t of oilTanks) {
+      if (!t || !t.id) continue;
+      if (seen.has(t.id)) continue;
+      if (t.type === 'drum' || t.name.toLowerCase().includes('drum') || t.name.toLowerCase().includes('barrel') || t.id.includes('drum')) {
+        seen.add(t.id);
+        drums.push(t);
+      }
+    }
+    return drums.sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
   }, [oilTanks]);
 
   // Refill Modal Helpers
   const selectedTargetChamber = forecourtChambers.find(c => c.id === refillTargetChamberId) || forecourtChambers[0];
   const selectedSourceDrum = backStoreDrums.find(d => d.id === refillSourceDrumId) || backStoreDrums[0];
 
-  const handleOpenRefillModal = (targetChamberId?: string) => {
+  const handleOpenRefillModal = (targetChamberId?: string, sourceDrumId?: string) => {
     const targetId = targetChamberId || forecourtChambers[0]?.id || '';
     setRefillTargetChamberId(targetId);
     const targetChamber = forecourtChambers.find(c => c.id === targetId) || forecourtChambers[0];
     
-    if (targetChamber) {
+    if (sourceDrumId) {
+      setRefillSourceDrumId(sourceDrumId);
+    } else if (targetChamber) {
       const matchingDrum = backStoreDrums.find(d => d.grade === targetChamber.grade) || backStoreDrums[0];
       if (matchingDrum) setRefillSourceDrumId(matchingDrum.id);
+    } else {
+      setRefillSourceDrumId(backStoreDrums[0]?.id || '');
+    }
+
+    if (targetChamber) {
       const availableSpace = Math.max(0, targetChamber.capacity - targetChamber.currentLevel);
       setRefillLiters(Math.min(20, Math.max(1, availableSpace)));
     } else {
-      setRefillSourceDrumId(backStoreDrums[0]?.id || '');
       setRefillLiters(20);
     }
     setIsRefillModalOpen(true);
@@ -263,9 +301,50 @@ export default function OilStorageTab({
 
     setOilTanks(nextTanks);
     
+    const unitRate = targetChamber.pricePerLiter || sourceDrum.pricePerLiter || 0;
+    const totalTransferValue = actualTransferLiters * unitRate;
+    const transferredBy = user?.name || (employees.length > 0 ? employees[0].name : 'Rumesh Anjana');
+
+    try {
+      const { error: transferError } = await supabase.from('bulk_oil_transfers').insert([{
+        transfer_date: new Date().toISOString(),
+        source_drum_id: sourceDrum.id,
+        source_drum_name: sourceDrum.name,
+        target_chamber_id: targetChamber.id,
+        target_chamber_name: targetChamber.name,
+        oil_grade: sourceDrum.grade || targetChamber.grade || 'Standard',
+        transferred_liters: Number(actualTransferLiters),
+        source_drum_remaining_liters: Number(sourceDrum.currentLevel) - Number(actualTransferLiters),
+        target_chamber_new_level: Number(targetChamber.currentLevel) + Number(actualTransferLiters),
+        unit_rate: Number(sourceDrum.pricePerLiter || targetChamber.pricePerLiter || 0),
+        total_transfer_value: Number(actualTransferLiters) * Number(sourceDrum.pricePerLiter || targetChamber.pricePerLiter || 0),
+        transferred_by: transferredBy,
+        remarks: 'Forecourt refill'
+      }]);
+      if (transferError) console.error("Error recording transfer log:", transferError);
+    } catch (err) {
+      console.error("Error executing transfer log insertion:", err);
+    }
+
     await Promise.all([
       saveBulkLubricant(updatedTargetChamber),
-      saveBulkLubricant(updatedSourceDrum)
+      saveBulkLubricant(updatedSourceDrum),
+      recordBulkOilTransfer({
+        transfer_date: new Date().toISOString(),
+        source_drum_id: sourceDrum.id,
+        source_drum_name: sourceDrum.name,
+        target_chamber_id: targetChamber.id,
+        target_chamber_name: targetChamber.name,
+        oil_grade: sourceDrum.grade || targetChamber.grade || 'Standard',
+        transferred_liters: actualTransferLiters,
+        source_drum_remaining_liters: updatedSourceDrum.currentLevel,
+        target_chamber_new_level: updatedTargetChamber.currentLevel,
+        unit_rate: unitRate,
+        total_transfer_value: totalTransferValue,
+        transferred_by: transferredBy,
+        notes: `Transfer of ${actualTransferLiters}L from ${sourceDrum.name} to ${targetChamber.name}`,
+        remarks: 'Forecourt refill'
+      })
     ]);
 
     setIsSubmitting(false);
@@ -304,39 +383,6 @@ export default function OilStorageTab({
     setItemFormPrice(item.retailPrice);
     setItemFormLocation(item.location || 'Front Rack');
     setIsItemModalOpen(true);
-  };
-
-  const handleOpenAddBulkModal = (type: 'chamber' | 'drum' = 'drum') => {
-    setEditingBulkTank(null);
-    setBulkFormType(type);
-    if (type === 'chamber') {
-      const nextNo = forecourtChambers.length + 1;
-      setBulkFormName(`Chamber 0${nextNo}: Lanka 2T Super`);
-      setBulkFormGrade('Lanka 2T Super');
-      setBulkFormCapacity(100);
-      setBulkFormLevel(50);
-      setBulkFormPrice(1850);
-      setBulkFormChamberNo(nextNo);
-    } else {
-      setBulkFormName('Back Store Drum: Caltex 20W-50');
-      setBulkFormGrade('Caltex 20W-50');
-      setBulkFormCapacity(210);
-      setBulkFormLevel(150);
-      setBulkFormPrice(2450);
-    }
-    setIsBulkModalOpen(true);
-  };
-
-  const handleOpenEditBulkModal = (tank: OilTank) => {
-    setEditingBulkTank(tank);
-    setBulkFormName(tank.name);
-    setBulkFormGrade(tank.grade);
-    setBulkFormCapacity(tank.capacity);
-    setBulkFormLevel(tank.currentLevel);
-    setBulkFormPrice(tank.pricePerLiter);
-    setBulkFormType(tank.type || (tank.name.toLowerCase().includes('chamber') ? 'chamber' : 'drum'));
-    setBulkFormChamberNo(tank.chamberNumber || 1);
-    setIsBulkModalOpen(true);
   };
 
   // Submit Retail Sale
@@ -468,80 +514,6 @@ export default function OilStorageTab({
     }
   };
 
-  // Save Bulk Tank / Drum (Add or Edit)
-  const handleSaveBulkSubmit = async () => {
-    if (!bulkFormName.trim()) {
-      alert('Tank / Drum name is required.');
-      return;
-    }
-    if (bulkFormCapacity <= 0) {
-      alert('Capacity must be greater than 0.');
-      return;
-    }
-
-    setIsSubmitting(true);
-
-    if (editingBulkTank) {
-      const updated: OilTank = {
-        ...editingBulkTank,
-        name: bulkFormName.trim(),
-        grade: bulkFormGrade.trim(),
-        capacity: Number(bulkFormCapacity) || 100,
-        currentLevel: Number(bulkFormLevel) || 0,
-        pricePerLiter: Number(bulkFormPrice) || 0,
-        type: bulkFormType,
-        chamberNumber: bulkFormType === 'chamber' ? Number(bulkFormChamberNo) : undefined
-      };
-
-      const res = await saveBulkLubricant(updated);
-      if (res.success) {
-        setOilTanks(prev => prev.map(t => t.id === editingBulkTank.id ? updated : t));
-        setIsBulkModalOpen(false);
-        showToast(`Updated bulk tank "${updated.name}"`);
-      } else {
-        alert('Failed to save bulk tank to database.');
-      }
-    } else {
-      const newTank: OilTank = {
-        id: bulkFormType === 'chamber' 
-          ? `forecourt-chamber-${Date.now().toString().slice(-6)}`
-          : `drum-store-${Date.now().toString().slice(-6)}`,
-        name: bulkFormName.trim(),
-        grade: bulkFormGrade.trim(),
-        capacity: Number(bulkFormCapacity) || 100,
-        currentLevel: Number(bulkFormLevel) || 0,
-        pricePerLiter: Number(bulkFormPrice) || 0,
-        type: bulkFormType,
-        chamberNumber: bulkFormType === 'chamber' ? Number(bulkFormChamberNo) : undefined
-      };
-
-      const res = await saveBulkLubricant(newTank);
-      if (res.success) {
-        setOilTanks(prev => [...prev, newTank]);
-        setIsBulkModalOpen(false);
-        showToast(`Added bulk tank "${newTank.name}"`);
-      } else {
-        alert('Failed to save bulk tank to database.');
-      }
-    }
-
-    setIsSubmitting(false);
-  };
-
-  const handleDeleteBulkTank = async (tankId: string) => {
-    const target = oilTanks.find(t => t.id === tankId);
-    if (!target) return;
-    if (confirm(`Are you sure you want to delete "${target.name}"?`)) {
-      const ok = await deleteBulkLubricant(tankId);
-      if (ok) {
-        setOilTanks(prev => prev.filter(t => t.id !== tankId));
-        showToast(`Deleted "${target.name}"`);
-      } else {
-        alert('Failed to delete bulk tank from database.');
-      }
-    }
-  };
-
   // Filtered Packaged Items
   const filteredPackagedItems = useMemo(() => {
     return packagedItems.filter(item => {
@@ -641,7 +613,7 @@ export default function OilStorageTab({
             <div className="space-y-6">
               {/* 1. FORECOURT DISPENSER STATION (CHAMBER UNITS) */}
               <div className="space-y-3">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-1 border-b border-gray-100">
+                <div className="flex items-center justify-between gap-2 pb-1 border-b border-gray-100">
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse" />
@@ -649,35 +621,22 @@ export default function OilStorageTab({
                         Forecourt Dispenser Station (Chamber Units)
                       </h2>
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-50 text-amber-800 border border-amber-200">
-                        Forecourt Unit
+                        {forecourtChambers.length} Active {forecourtChambers.length === 1 ? 'Chamber' : 'Chambers'}
                       </span>
                     </div>
                     <p className="text-xs text-gray-500 mt-0.5 font-medium">
-                      Live Forecourt bulk dispenser with segregated compartments for vehicle servicing & top-ups
+                      Forecourt 4-chamber dispenser unit for direct vehicle servicing and loose oil sales
                     </p>
                   </div>
-
-                  <button
-                    onClick={() => handleOpenAddBulkModal('chamber')}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-gray-50 text-slate-800 border border-gray-200 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer self-start sm:self-auto"
-                  >
-                    <Plus className="w-3.5 h-3.5 text-amber-600" />
-                    <span>Add Dispenser Chamber</span>
-                  </button>
                 </div>
 
                 {forecourtChambers.length === 0 ? (
                   <div className="bg-white p-8 text-center rounded-2xl border border-gray-100 space-y-2">
-                    <Droplets className="w-8 h-8 text-gray-400 mx-auto" />
-                    <h4 className="text-xs font-bold text-slate-700">No Dispenser Chambers Configured</h4>
-                    <p className="text-[11px] text-gray-500">Add forecourt compartments to monitor pump dispenser levels.</p>
-                    <button
-                      onClick={() => handleOpenAddBulkModal('chamber')}
-                      className="mt-2 inline-flex items-center gap-1.5 px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold cursor-pointer transition-colors"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Add Dispenser Chamber</span>
-                    </button>
+                    <Droplets className="w-8 h-8 text-gray-300 mx-auto" />
+                    <h4 className="text-xs font-bold text-slate-700">No Forecourt Dispenser Chambers Configured</h4>
+                    <p className="text-[11px] text-gray-500 max-w-md mx-auto">
+                      Dispenser chambers are provisioned in the <strong>Admin Control</strong> tab under <em>Bulk Oil & Lubricants</em>. Once configured, real-time liquid levels and refill controls will appear here.
+                    </p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -705,20 +664,11 @@ export default function OilStorageTab({
                               <h3 className="text-sm font-extrabold text-slate-900 mt-1">{chamber.grade}</h3>
                             </div>
 
-                            <div className="flex items-center gap-1">
-                              <div className="text-right mr-1">
-                                <span className={`text-xs font-black tabular-nums ${isLow ? 'text-rose-600' : pct < 50 ? 'text-amber-600' : 'text-emerald-600'}`}>
-                                  {pct}%
-                                </span>
-                                <span className="text-[10px] text-gray-400 block font-medium">Capacity</span>
-                              </div>
-                              <button
-                                onClick={() => handleOpenEditBulkModal(chamber)}
-                                className="p-1 text-gray-400 hover:text-blue-600 rounded-lg transition-colors cursor-pointer"
-                                title="Edit Chamber"
-                              >
-                                <Edit2 className="w-3.5 h-3.5" />
-                              </button>
+                            <div className="text-right">
+                              <span className={`text-xs font-black tabular-nums ${isLow ? 'text-rose-600' : pct < 50 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                                {pct}%
+                              </span>
+                              <span className="text-[10px] text-gray-400 block font-medium">Capacity</span>
                             </div>
                           </div>
 
@@ -727,7 +677,7 @@ export default function OilStorageTab({
                             <div className="w-full bg-gray-100 h-3 rounded-full overflow-hidden p-0.5 border border-gray-200/50">
                               <div 
                                 className={`h-full rounded-full transition-all duration-500 ${
-                                  isLow ? 'bg-rose-500' : pct < 50 ? 'bg-amber-500' : 'bg-emerald-500'
+                                   isLow ? 'bg-rose-500' : pct < 50 ? 'bg-amber-500' : 'bg-emerald-500'
                                 }`}
                                 style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
                               />
@@ -758,42 +708,29 @@ export default function OilStorageTab({
 
               {/* 2. BACK STORE DRUM / BARREL STORAGE */}
               <div className="space-y-3 pt-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-1 border-b border-gray-100">
+                <div className="flex items-center justify-between gap-2 pb-1 border-b border-gray-100">
                   <div>
                     <div className="flex items-center gap-2">
                       <h2 className="text-sm font-extrabold text-[#1C1C1C] uppercase tracking-wide">
                         Back Store Drum / Barrel Storage
                       </h2>
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-50 text-blue-800 border border-blue-200">
-                        Wholesale Stock
+                        {backStoreDrums.length} {backStoreDrums.length === 1 ? 'Drum' : 'Drums'}
                       </span>
                     </div>
                     <p className="text-xs text-gray-500 mt-0.5 font-medium">
-                      Bulk wholesale drums received via supplier purchases for forecourt dispenser replenishment
+                      Wholesale barrels (210L) used for forecourt dispenser replenishment and bulk sales
                     </p>
                   </div>
-
-                  <button
-                    onClick={() => handleOpenAddBulkModal('drum')}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-gray-50 text-slate-800 border border-gray-200 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer self-start sm:self-auto"
-                  >
-                    <Plus className="w-3.5 h-3.5 text-blue-600" />
-                    <span>Add Storage Drum</span>
-                  </button>
                 </div>
 
                 {backStoreDrums.length === 0 ? (
                   <div className="bg-white p-8 text-center rounded-2xl border border-gray-100 space-y-2">
-                    <Droplets className="w-8 h-8 text-gray-400 mx-auto" />
+                    <Layers className="w-8 h-8 text-gray-300 mx-auto" />
                     <h4 className="text-xs font-bold text-slate-700">No Back Store Drums Configured</h4>
-                    <p className="text-[11px] text-gray-500">Receive new wholesale barrels via the Receive Stock (GRN) tab or add a drum.</p>
-                    <button
-                      onClick={() => handleOpenAddBulkModal('drum')}
-                      className="mt-2 inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold cursor-pointer transition-colors"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Add Storage Drum</span>
-                    </button>
+                    <p className="text-[11px] text-gray-500 max-w-md mx-auto">
+                      Storage drums are provisioned in <strong>Admin Control</strong> or automatically created when accepting bulk purchases in <strong>Receive Stock (GRN)</strong>.
+                    </p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -817,26 +754,10 @@ export default function OilStorageTab({
                               </div>
                             </div>
 
-                            <div className="flex items-center gap-1">
-                              <div className="text-right tabular-nums mr-1">
-                                <span className={`text-xs font-extrabold ${pct < 25 ? 'text-rose-600' : pct < 50 ? 'text-amber-600' : 'text-emerald-600'}`}>
-                                  {pct}%
-                                </span>
-                              </div>
-                              <button
-                                onClick={() => handleOpenEditBulkModal(drum)}
-                                className="p-1 text-gray-400 hover:text-blue-600 rounded-lg transition-colors cursor-pointer"
-                                title="Edit Drum"
-                              >
-                                <Edit2 className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                onClick={() => handleDeleteBulkTank(drum.id)}
-                                className="p-1 text-gray-400 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
-                                title="Delete Drum"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+                            <div className="text-right tabular-nums">
+                              <span className={`text-xs font-extrabold ${pct < 25 ? 'text-rose-600' : pct < 50 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                                {pct}%
+                              </span>
                             </div>
                           </div>
 
@@ -868,18 +789,22 @@ export default function OilStorageTab({
                             </div>
                           </div>
 
-                          {/* Transfer to Dispenser */}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const matchingChamber = forecourtChambers.find(c => c.grade === drum.grade) || forecourtChambers[0];
-                              handleOpenRefillModal(matchingChamber?.id);
-                            }}
-                            className="w-full py-1.5 px-2 bg-gray-50 hover:bg-gray-100 text-gray-700 font-bold rounded-xl text-xs transition-colors border border-gray-200 flex items-center justify-center gap-1 cursor-pointer"
-                          >
-                            <Droplets className="w-3.5 h-3.5 text-blue-500" />
-                            <span>Transfer to Dispenser</span>
-                          </button>
+                          {/* Operational Actions - Single clean action button */}
+                          <div className="pt-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const matchingChamber = forecourtChambers.find(c => c.grade === drum.grade) || forecourtChambers[0];
+                                handleOpenRefillModal(matchingChamber?.id, drum.id);
+                              }}
+                              disabled={forecourtChambers.length === 0 || drum.currentLevel <= 0}
+                              className="w-full py-2 px-3 bg-blue-50 hover:bg-blue-100 disabled:opacity-40 disabled:cursor-not-allowed text-blue-800 font-bold rounded-xl text-xs transition-colors border border-blue-200 flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+                              title="Transfer to Forecourt Chamber"
+                            >
+                              <Zap className="w-3.5 h-3.5 text-blue-600" />
+                              <span>⚡ Transfer to Chamber</span>
+                            </button>
+                          </div>
                         </div>
                       );
                     })}
@@ -1278,133 +1203,7 @@ export default function OilStorageTab({
       )}
 
       {/* ========================================================================= */}
-      {/* MODAL 4: ADD / EDIT BULK TANK / DRUM */}
-      {/* ========================================================================= */}
-      {isBulkModalOpen && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl animate-scale-up">
-            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
-              <h3 className="text-base font-extrabold text-[#1C1C1C] flex items-center gap-2">
-                <Droplets className="w-5 h-5 text-amber-600" />
-                <span>{editingBulkTank ? 'Edit Bulk Tank / Drum' : `Add Bulk ${bulkFormType === 'chamber' ? 'Chamber' : 'Drum'}`}</span>
-              </h3>
-              <button 
-                onClick={() => setIsBulkModalOpen(false)}
-                className="p-1 text-gray-400 hover:text-gray-600 rounded-lg cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-3.5 text-xs">
-              <div>
-                <label className="font-bold text-gray-600 block mb-1">Tank / Drum Name</label>
-                <input
-                  type="text"
-                  value={bulkFormName}
-                  onChange={(e) => setBulkFormName(e.target.value)}
-                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-medium"
-                  placeholder="e.g. Back Store Drum - Caltex 20W-50"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="font-bold text-gray-600 block mb-1">Storage Type</label>
-                  <select
-                    value={bulkFormType}
-                    onChange={(e) => setBulkFormType(e.target.value as any)}
-                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-semibold"
-                  >
-                    <option value="chamber">Forecourt Chamber</option>
-                    <option value="drum">Back Store Drum (210L)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="font-bold text-gray-600 block mb-1">Oil Grade</label>
-                  <input
-                    type="text"
-                    value={bulkFormGrade}
-                    onChange={(e) => setBulkFormGrade(e.target.value)}
-                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-medium"
-                    placeholder="e.g. Caltex 20W-50"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="font-bold text-gray-600 block mb-1">Capacity (Liters)</label>
-                  <input
-                    type="number"
-                    value={bulkFormCapacity}
-                    onChange={(e) => setBulkFormCapacity(Number(e.target.value))}
-                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-bold tabular-nums"
-                  />
-                </div>
-
-                <div>
-                  <label className="font-bold text-gray-600 block mb-1">Current Level (Liters)</label>
-                  <input
-                    type="number"
-                    value={bulkFormLevel}
-                    onChange={(e) => setBulkFormLevel(Number(e.target.value))}
-                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-bold tabular-nums"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="font-bold text-gray-600 block mb-1">Price Per Liter (Rs.)</label>
-                  <input
-                    type="number"
-                    value={bulkFormPrice}
-                    onChange={(e) => setBulkFormPrice(Number(e.target.value))}
-                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-bold tabular-nums"
-                  />
-                </div>
-
-                {bulkFormType === 'chamber' && (
-                  <div>
-                    <label className="font-bold text-gray-600 block mb-1">Chamber Number</label>
-                    <input
-                      type="number"
-                      min="1"
-                      max="8"
-                      value={bulkFormChamberNo}
-                      onChange={(e) => setBulkFormChamberNo(Number(e.target.value))}
-                      className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-bold tabular-nums"
-                    />
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="flex gap-3 pt-2">
-              <button
-                disabled={isSubmitting}
-                onClick={() => setIsBulkModalOpen(false)}
-                className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                disabled={isSubmitting}
-                onClick={handleSaveBulkSubmit}
-                className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5"
-              >
-                {isSubmitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                <span>{isSubmitting ? 'Saving...' : editingBulkTank ? 'Save Changes' : 'Add Tank'}</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* MODAL 5: REFILL FORECOURT DISPENSER CHAMBER */}
+      {/* MODAL: REFILL FORECOURT DISPENSER CHAMBER */}
       {/* ========================================================================= */}
       {isRefillModalOpen && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">

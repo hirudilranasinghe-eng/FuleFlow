@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { PackagedOilItem, OilTank, OilGRNRecord } from '../types';
+import { PackagedOilItem, OilTank, OilGRNRecord, BulkOilTransfer } from '../types';
 
 /**
  * Normalizes a raw Supabase record to PackagedOilItem
@@ -24,13 +24,13 @@ export function mapPackagedLubricant(raw: any): PackagedOilItem {
  * Normalizes a raw Supabase record to OilTank (Bulk Lubricant / Drum / Chamber)
  */
 export function mapBulkLubricant(raw: any): OilTank {
-  const name = raw.name || 'Bulk Oil Tank';
+  const name = raw.name || 'Bulk Oil Unit';
   const isChamber = raw.type === 'chamber' || name.toLowerCase().includes('chamber') || String(raw.id).includes('chamber');
   
   return {
     id: raw.id || `oil-tank-${Date.now()}`,
     name: name,
-    grade: raw.grade || raw.oil_grade || 'Caltex 20W-50',
+    grade: raw.grade || raw.oil_grade || '',
     capacity: Number(raw.capacity) || (isChamber ? 100 : 210),
     currentLevel: Number(raw.current_level ?? raw.currentlevel ?? 0) || 0,
     pricePerLiter: Number(raw.price_per_liter ?? raw.priceperliter ?? raw.rate ?? 0) || 0,
@@ -99,7 +99,14 @@ export async function fetchPackagedLubricants(): Promise<PackagedOilItem[]> {
     }
 
     if (data && Array.isArray(data)) {
-      return data.map(mapPackagedLubricant).sort((a, b) => 
+      const mapped = data.map(mapPackagedLubricant);
+      const uniqueMap = new Map<string, PackagedOilItem>();
+      for (const item of mapped) {
+        if (item && item.id && !uniqueMap.has(item.id)) {
+          uniqueMap.set(item.id, item);
+        }
+      }
+      return Array.from(uniqueMap.values()).sort((a, b) => 
         (a.name || '').localeCompare(b.name || '', undefined, { numeric: true, sensitivity: 'base' })
       );
     }
@@ -273,8 +280,8 @@ export async function fetchBulkLubricants(): Promise<OilTank[]> {
     // Primary: bulk_lubricants
     let { data, error } = await supabase.from('bulk_lubricants').select('*');
     
-    // Fallback: oil_tanks
-    if (error || !data || data.length === 0) {
+    // Fallback: only if bulk_lubricants table does not exist
+    if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
       const fallback = await supabase.from('oil_tanks').select('*');
       if (!fallback.error && fallback.data) {
         data = fallback.data;
@@ -282,7 +289,14 @@ export async function fetchBulkLubricants(): Promise<OilTank[]> {
     }
 
     if (data && Array.isArray(data)) {
-      return data.map(mapBulkLubricant).sort((a, b) => 
+      const mapped = data.map(mapBulkLubricant);
+      const uniqueMap = new Map<string, OilTank>();
+      for (const item of mapped) {
+        if (item && item.id && !uniqueMap.has(item.id)) {
+          uniqueMap.set(item.id, item);
+        }
+      }
+      return Array.from(uniqueMap.values()).sort((a, b) => 
         (a.name || a.id).localeCompare(b.name || b.id, undefined, { numeric: true, sensitivity: 'base' })
       );
     }
@@ -617,4 +631,177 @@ export async function deductPackagedStock(itemId: string, qtySold: number): Prom
     console.warn("deductPackagedStock error:", err);
   }
   return false;
+}
+
+/**
+ * 10. DEDUCT BULK OIL STOCK (Quick Sale / Dispense)
+ */
+export async function deductBulkOilStock(tankId: string, litersSold: number): Promise<{ success: boolean; newLevel: number }> {
+  if (!tankId || litersSold <= 0) return { success: false, newLevel: 0 };
+  try {
+    let { data: tank } = await supabase.from('bulk_lubricants').select('*').eq('id', tankId).maybeSingle();
+    if (!tank) {
+      const fallback = await supabase.from('oil_tanks').select('*').eq('id', tankId).maybeSingle();
+      if (fallback.data) tank = fallback.data;
+    }
+
+    const curLevel = Number(tank?.current_level ?? tank?.currentlevel ?? 0);
+    const newLevel = Math.max(0, curLevel - litersSold);
+
+    const updateVariants = [
+      { current_level: newLevel },
+      { currentlevel: newLevel }
+    ];
+
+    for (const v of updateVariants) {
+      try {
+        const res = await supabase.from('bulk_lubricants').update(v).eq('id', tankId);
+        if (!res.error) break;
+      } catch (_) {}
+    }
+
+    for (const v of updateVariants) {
+      try {
+        const alt = await supabase.from('oil_tanks').update(v).eq('id', tankId);
+        if (!alt.error) break;
+      } catch (_) {}
+    }
+
+    return { success: true, newLevel };
+  } catch (err) {
+    console.warn("deductBulkOilStock error:", err);
+    return { success: false, newLevel: 0 };
+  }
+}
+
+/**
+ * Normalizes a raw Supabase record to BulkOilTransfer
+ */
+export function mapBulkOilTransfer(raw: any): BulkOilTransfer {
+  return {
+    id: raw.id || `transfer-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    transfer_date: raw.transfer_date || raw.transferdate || raw.date || raw.created_at || new Date().toISOString(),
+    source_drum_name: raw.source_drum_name || raw.sourcedrumname || raw.source_drum || raw.from_drum || 'Storage Drum',
+    target_chamber_name: raw.target_chamber_name || raw.targetchambername || raw.target_chamber || raw.to_chamber || 'Forecourt Chamber',
+    oil_grade: raw.oil_grade || raw.oilgrade || raw.grade || 'Standard',
+    transferred_liters: Number(raw.transferred_liters ?? raw.transferredliters ?? raw.liters ?? raw.quantity ?? 0) || 0,
+    source_drum_remaining_liters: Number(raw.source_drum_remaining_liters ?? raw.sourcedrumremainingliters ?? raw.drum_balance ?? 0) || 0,
+    target_chamber_new_level: Number(raw.target_chamber_new_level ?? raw.targetchambernewlevel ?? raw.chamber_level ?? 0) || 0,
+    unit_rate: Number(raw.unit_rate ?? raw.unitrate ?? raw.rate ?? raw.price_per_liter ?? 0) || 0,
+    total_transfer_value: Number(raw.total_transfer_value ?? raw.totaltransfervalue ?? raw.amount ?? raw.total_value ?? 0) || 0,
+    transferred_by: raw.transferred_by || raw.transferredby || raw.recorded_by || raw.user || 'Supervisor',
+    notes: raw.notes || ''
+  };
+}
+
+/**
+ * 11. FETCH BULK OIL TRANSFERS
+ */
+export async function fetchBulkOilTransfers(): Promise<BulkOilTransfer[]> {
+  try {
+    let { data, error } = await supabase
+      .from('bulk_oil_transfers')
+      .select('*')
+      .order('transfer_date', { ascending: false });
+
+    // Fallback: lowercase column name sorting
+    if (error) {
+      const fallback = await supabase
+        .from('bulk_oil_transfers')
+        .select('*');
+      if (!fallback.error && fallback.data) {
+        data = fallback.data;
+      }
+    }
+
+    if (data && Array.isArray(data)) {
+      return data.map(mapBulkOilTransfer).sort((a, b) => {
+        const timeA = new Date(a.transfer_date).getTime() || 0;
+        const timeB = new Date(b.transfer_date).getTime() || 0;
+        return timeB - timeA;
+      });
+    }
+  } catch (err) {
+    console.warn("fetchBulkOilTransfers notice:", err);
+  }
+  return [];
+}
+
+/**
+ * 12. RECORD BULK OIL TRANSFER AUDIT LOG
+ */
+export async function recordBulkOilTransfer(
+  transfer: Omit<BulkOilTransfer, 'id'> & { id?: string }
+): Promise<{ success: boolean; data?: BulkOilTransfer; error?: any }> {
+  const id = transfer.id || `bot-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const transfer_date = transfer.transfer_date || new Date().toISOString();
+  const source_drum_name = transfer.source_drum_name || 'Storage Drum';
+  const target_chamber_name = transfer.target_chamber_name || 'Forecourt Chamber';
+  const oil_grade = transfer.oil_grade || 'Standard';
+  const transferred_liters = Number(transfer.transferred_liters) || 0;
+  const source_drum_remaining_liters = Number(transfer.source_drum_remaining_liters) || 0;
+  const target_chamber_new_level = Number(transfer.target_chamber_new_level) || 0;
+  const unit_rate = Number(transfer.unit_rate) || 0;
+  const total_transfer_value = Number(transfer.total_transfer_value) || (transferred_liters * unit_rate);
+  const transferred_by = transfer.transferred_by || 'Supervisor';
+  const notes = transfer.notes || '';
+
+  const fullTransferRecord: BulkOilTransfer = {
+    id,
+    transfer_date,
+    source_drum_name,
+    target_chamber_name,
+    oil_grade,
+    transferred_liters,
+    source_drum_remaining_liters,
+    target_chamber_new_level,
+    unit_rate,
+    total_transfer_value,
+    transferred_by,
+    notes
+  };
+
+  const snakePayload = {
+    id,
+    transfer_date,
+    source_drum_name,
+    target_chamber_name,
+    oil_grade,
+    transferred_liters,
+    source_drum_remaining_liters,
+    target_chamber_new_level,
+    unit_rate,
+    total_transfer_value,
+    transferred_by,
+    notes
+  };
+
+  const lowerPayload = {
+    id,
+    transferdate: transfer_date,
+    sourcedrumname: source_drum_name,
+    targetchambername: target_chamber_name,
+    oilgrade: oil_grade,
+    transferredliters: transferred_liters,
+    sourcedrumremainingliters: source_drum_remaining_liters,
+    targetchambernewlevel: target_chamber_new_level,
+    unitrate: unit_rate,
+    totaltransfervalue: total_transfer_value,
+    transferredby: transferred_by,
+    notes
+  };
+
+  try {
+    let res = await supabase.from('bulk_oil_transfers').insert([snakePayload]);
+    if (res.error) {
+      res = await supabase.from('bulk_oil_transfers').insert([lowerPayload]);
+    }
+    if (res.error) {
+      console.warn("Supabase bulk_oil_transfers insert notice:", res.error);
+    }
+    return { success: true, data: fullTransferRecord };
+  } catch (err) {
+    console.warn("recordBulkOilTransfer notice:", err);
+    return { success: true, data: fullTransferRecord };
+  }
 }

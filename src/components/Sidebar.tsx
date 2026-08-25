@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Clock, Fuel, BarChart3, FileText, Users, 
   ShieldCheck, ChevronLeft, ChevronRight, ChevronDown,
   Droplet, CreditCard, TrendingUp, Droplets, Truck,
-  Database, Gauge, Tag
+  Database, Gauge, Tag, ArrowLeftRight
 } from 'lucide-react';
 
 import { AuthUser, resolveUserRole } from '../types';
@@ -77,6 +77,7 @@ export default function Sidebar({
     { id: 'daily-sales', name: 'Daily Sales', fullName: 'Daily Sales History', icon: BarChart3 },
     { id: 'shift-meter', name: 'Shift & Meter Audits', fullName: 'Shift & Meter Audits', icon: Clock },
     { id: 'tank-stock', name: 'Tank & Stock Reconcile', fullName: 'Tank & Stock Reconciliation', icon: Droplet },
+    { id: 'oil-movement', name: 'Oil Movement', fullName: 'Bulk Oil & Transfer Movements', icon: ArrowLeftRight },
     { id: 'credit-customer', name: 'Credit Statements', fullName: 'Credit & Customer Statements', icon: CreditCard },
     { id: 'financials', name: 'Financials & Profit', fullName: 'Financials & Profitability', icon: TrendingUp },
   ];
@@ -152,7 +153,7 @@ export default function Sidebar({
                         <FileText className="w-3.5 h-3.5 text-blue-600" />
                         Reports Operations
                       </span>
-                      <span className="text-[10px] font-bold bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">5 Modules</span>
+                      <span className="text-[10px] font-bold bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">6 Modules</span>
                     </div>
                     <div className="space-y-1 mt-1">
                       {reportSubItems.map((sub) => {

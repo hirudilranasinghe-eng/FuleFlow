@@ -776,7 +776,7 @@ export default function DailySalesTab({
               className="inline-flex items-center gap-2 px-3.5 py-1.5 bg-slate-900 hover:bg-black text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer disabled:opacity-50"
             >
               <Download className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Export to Excel/CSV</span>
+              <span>Export</span>
             </button>
           </div>
         </div>
@@ -1050,7 +1050,7 @@ export default function DailySalesTab({
                 title="Export full day audit to CSV"
               >
                 <Download className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Export Day CSV</span>
+                <span>Export</span>
               </button>
 
               <button
@@ -1412,9 +1412,10 @@ export default function DailySalesTab({
             <div className="flex items-center gap-2.5">
               <button
                 onClick={() => exportDayDetailCSV(selectedDayRecord)}
-                className="px-3.5 py-1.5 bg-white hover:bg-gray-50 border border-gray-200 text-gray-800 rounded-xl text-xs font-bold transition-all shadow-2xs cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-white hover:bg-gray-50 border border-gray-200 text-gray-800 rounded-xl text-xs font-bold transition-all shadow-2xs cursor-pointer"
               >
-                Download Day CSV
+                <Download className="w-3.5 h-3.5 text-gray-600" />
+                <span>Export</span>
               </button>
               <button
                 onClick={() => setSelectedDayRecord(null)}

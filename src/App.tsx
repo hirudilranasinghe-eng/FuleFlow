@@ -172,15 +172,20 @@ export default function App() {
       }
     } catch (_) {}
 
-    const legacyKeys = ['fms_pump_machines', 'fms_pumps', 'fms_tanks', 'fms_customers', 'fms_creditTransactions', 'fms_creditPayments', 'fms_employees'];
+    const legacyKeys = ['fms_pump_machines', 'fms_pumps', 'fms_tanks', 'fms_customers', 'fms_creditTransactions', 'fms_creditPayments', 'fms_employees', 'fms_oil_tanks', 'dispenser_chambers', 'fms_dispenser_chambers', 'dispenserChambers'];
     legacyKeys.forEach(key => {
       try {
+        if (key === 'dispenser_chambers' || key === 'fms_dispenser_chambers' || key === 'dispenserChambers' || key === 'fms_oil_tanks') {
+          localStorage.removeItem(key);
+          return;
+        }
         const stored = localStorage.getItem(key);
         if (stored) {
           const parsed = JSON.parse(stored);
           if (Array.isArray(parsed)) {
             const isLegacyDemo = parsed.some((item: any) => 
-              ['mach-01', 'mach-02', 'noz-101', 'pump-101', 'tank-petrol92', 'CUST-101', 'TX-801', 'emp-101', 'PAY-501'].includes(item.id)
+              ['mach-01', 'mach-02', 'noz-101', 'pump-101', 'tank-petrol92', 'CUST-101', 'TX-801', 'emp-101', 'PAY-501', 'chamber-1', 'oil-tank-01', 'oil-tank-02'].includes(item.id) ||
+              item.name?.includes('Chamber 01') || item.grade?.includes('Lanka 2T Super')
             );
             if (isLegacyDemo) {
               localStorage.removeItem(key);
@@ -219,18 +224,7 @@ export default function App() {
     return [];
   });
 
-  const [oilTanks, setOilTanks] = useState<OilTank[]>(() => {
-    try {
-      const stored = localStorage.getItem('fms_oil_tanks');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return [...parsed].sort((a: any, b: any) => (a.name || a.id || '').localeCompare(b.name || b.id || '', undefined, { numeric: true, sensitivity: 'base' }));
-        }
-      }
-    } catch (_) {}
-    return [];
-  });
+  const [oilTanks, setOilTanks] = useState<OilTank[]>([]);
   const [pumpMachines, setPumpMachines] = useState<PumpMachine[]>(() => {
     try {
       const stored = localStorage.getItem('fms_pump_machines');
@@ -468,18 +462,18 @@ export default function App() {
           setTanks([]);
         }
 
-        // Fetch oil tanks if table exists
+        // Fetch oil tanks / bulk lubricants directly from Supabase
         try {
-          let { data: oilTanksData } = await supabase.from('bulk_lubricants').select('*');
-          if (!oilTanksData || oilTanksData.length === 0) {
+          let { data: oilTanksData, error: bulkError } = await supabase.from('bulk_lubricants').select('*');
+          if (bulkError && (bulkError.code === '42P01' || bulkError.message?.includes('does not exist'))) {
             const { data: altOilData } = await supabase.from('oil_tanks').select('*');
             oilTanksData = altOilData;
           }
-          if (oilTanksData && oilTanksData.length > 0) {
+          if (oilTanksData && Array.isArray(oilTanksData) && oilTanksData.length > 0) {
             const mappedOilTanks: OilTank[] = oilTanksData.map((ot: any) => ({
               id: ot.id,
               name: ot.name,
-              grade: ot.grade || ot.oil_grade || 'Caltex 20W-50',
+              grade: ot.grade || ot.oil_grade || '',
               capacity: Number(ot.capacity) || 100,
               currentLevel: Number(ot.current_level ?? ot.currentlevel) || 0,
               pricePerLiter: Number(ot.price_per_liter ?? ot.priceperliter) || 0,
@@ -487,8 +481,12 @@ export default function App() {
               chamberNumber: ot.chamber_number ?? ot.chambernumber ?? undefined
             }));
             setOilTanks([...mappedOilTanks].sort((a, b) => (a.name || a.id || '').localeCompare(b.name || b.id || '', undefined, { numeric: true, sensitivity: 'base' })));
+          } else {
+            setOilTanks([]);
           }
-        } catch (_) {}
+        } catch (_) {
+          setOilTanks([]);
+        }
 
         // Fetch pump_machines / machines table if available
         try {
@@ -656,8 +654,9 @@ export default function App() {
 
     fetchAllData();
 
-    // Set up Real-time Supabase subscription for underground fuel tanks
+    // Set up Real-time Supabase subscription for underground fuel tanks and bulk lubricants
     let realtimeChannel: any = null;
+    let bulkOilChannel: any = null;
     if (isConfigured) {
       try {
         const targetTable = getTanksTableName();
@@ -704,6 +703,44 @@ export default function App() {
             }
           )
           .subscribe();
+
+        bulkOilChannel = supabase
+          .channel('public:bulk_lubricants_app_realtime')
+          .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'bulk_lubricants' }, (payload: any) => {
+            if (payload?.old?.id) {
+              setOilTanks(prev => prev.filter(t => t.id !== payload.old.id));
+            }
+          })
+          .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'oil_tanks' }, (payload: any) => {
+            if (payload?.old?.id) {
+              setOilTanks(prev => prev.filter(t => t.id !== payload.old.id));
+            }
+          })
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'bulk_lubricants' }, async (payload: any) => {
+            if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+              const row = payload.new;
+              if (row && row.id) {
+                const isChamber = row.type === 'chamber' || row.name?.toLowerCase().includes('chamber');
+                const tank: OilTank = {
+                  id: row.id,
+                  name: row.name || 'Bulk Oil Unit',
+                  grade: row.grade || row.oil_grade || '',
+                  capacity: Number(row.capacity) || (isChamber ? 100 : 210),
+                  currentLevel: Number(row.current_level ?? row.currentlevel ?? 0),
+                  pricePerLiter: Number(row.price_per_liter ?? row.priceperliter ?? 0),
+                  type: row.type || (isChamber ? 'chamber' : 'drum'),
+                  chamberNumber: row.chamber_number ?? row.chambernumber ?? undefined
+                };
+                setOilTanks(prev => {
+                  if (prev.some(t => t.id === tank.id)) {
+                    return prev.map(t => t.id === tank.id ? tank : t);
+                  }
+                  return [...prev, tank].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id, undefined, { numeric: true, sensitivity: 'base' }));
+                });
+              }
+            }
+          })
+          .subscribe();
       } catch (err) {
         console.warn("Realtime subscription setup notice:", err);
       }
@@ -712,6 +749,9 @@ export default function App() {
     return () => {
       if (realtimeChannel) {
         supabase.removeChannel(realtimeChannel);
+      }
+      if (bulkOilChannel) {
+        supabase.removeChannel(bulkOilChannel);
       }
     };
   }, []);
@@ -1410,6 +1450,7 @@ export default function App() {
                 oilTanks={oilTanks}
                 setOilTanks={setOilTanks}
                 employees={employees}
+                user={user}
               />
             )}
 

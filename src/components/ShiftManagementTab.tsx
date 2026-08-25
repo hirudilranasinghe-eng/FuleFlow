@@ -222,12 +222,7 @@ export default function ShiftManagementTab({
         totalAmount: 0
       }));
     }
-    return [
-      { chamberId: 'ch-1', chamberNumber: 1, grade: 'Caltex 20W-50', openingLiters: 75, closingLiters: 75, openingLevel: 75, closingLevel: 75, soldLiters: 0, ratePerLiter: 1850, totalAmount: 0 },
-      { chamberId: 'ch-2', chamberNumber: 2, grade: 'Lanka 2T Super', openingLiters: 60, closingLiters: 60, openingLevel: 60, closingLevel: 60, soldLiters: 0, ratePerLiter: 1450, totalAmount: 0 },
-      { chamberId: 'ch-3', chamberNumber: 3, grade: 'Hydraulic 68', openingLiters: 80, closingLiters: 80, openingLevel: 80, closingLevel: 80, soldLiters: 0, ratePerLiter: 1200, totalAmount: 0 },
-      { chamberId: 'ch-4', chamberNumber: 4, grade: 'Radiator Coolant 50/50', openingLiters: 50, closingLiters: 50, openingLevel: 50, closingLevel: 50, soldLiters: 0, ratePerLiter: 950, totalAmount: 0 },
-    ];
+    return [];
   };
 
   // Sync draft states when activeShift changes

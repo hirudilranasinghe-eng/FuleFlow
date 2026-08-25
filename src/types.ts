@@ -346,3 +346,21 @@ export const DEFAULT_RECEIPT_CONFIG: ReceiptDesignerConfig = {
   footerDisclaimer: 'Samse Auto Mart Management System • Verified & Logged Automatically'
 };
 
+export interface BulkOilTransfer {
+  id: string;
+  transfer_date: string; // ISO string
+  source_drum_id?: string;
+  source_drum_name: string;
+  target_chamber_id?: string;
+  target_chamber_name: string;
+  oil_grade: string;
+  transferred_liters: number;
+  source_drum_remaining_liters: number;
+  target_chamber_new_level: number;
+  unit_rate: number;
+  total_transfer_value: number;
+  transferred_by: string;
+  notes?: string;
+  remarks?: string;
+}
+
