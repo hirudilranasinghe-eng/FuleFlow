@@ -4,7 +4,7 @@
  */
 import { useState, useEffect, useRef } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Info, AlertCircle, Database, ShieldCheck, LogOut, Building2, Calendar, Menu } from 'lucide-react';
+import { Info, AlertCircle, Database, ShieldCheck, LogOut, Building2, Calendar } from 'lucide-react';
 
 function getInitials(name?: string): string {
   if (!name) return 'RA';
@@ -48,11 +48,9 @@ export default function App() {
   const [reportSubTab, setReportSubTab] = useState<string>('daily-sales');
   const [adminSubTab, setAdminSubTab] = useState<'tanks' | 'oils' | 'mapping' | 'employees' | 'price' | 'system'>('tanks');
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState<boolean>(false);
 
   const handleSetActiveTab = (tab: string, subTab?: string) => {
     setActiveTab(tab);
-    setMobileSidebarOpen(false);
     if (tab === 'reports') {
       setReportSubTab(subTab || 'daily-sales');
     } else if (tab === 'admin') {
@@ -1375,48 +1373,34 @@ export default function App() {
         onLogout={handleLogout} 
         isCollapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
-        mobileIsOpen={mobileSidebarOpen}
-        onMobileClose={() => setMobileSidebarOpen(false)}
       />
 
       {/* Main Panel Content Area */}
-      <div id="main-content-panel" className={`flex-1 ${sidebarCollapsed ? 'md:ml-20' : 'md:ml-64'} ml-0 px-3 sm:px-6 pt-3 pb-8 min-h-screen overflow-x-hidden transition-all duration-300 ease-in-out`}>
+      <div id="main-content-panel" className={`flex-1 ${sidebarCollapsed ? 'ml-20' : 'ml-64'} px-6 pt-3 pb-8 min-h-screen overflow-x-hidden transition-all duration-300 ease-in-out`}>
         {/* Global Ultra-Compact Sticky Top Header */}
-        <header id="app-top-header" className="sticky top-0 z-30 bg-[#F4F7F6]/95 backdrop-blur-sm border-b border-slate-200/80 pb-3 pt-2 px-3 sm:px-6 -mx-3 sm:-mx-6 mb-4 flex items-center justify-between gap-2 sm:gap-3">
-          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-            {/* Mobile Hamburger Menu Button */}
-            <button
-              id="mobile-nav-toggle-btn"
-              onClick={() => setMobileSidebarOpen(true)}
-              className="flex md:hidden p-2 rounded-xl bg-white border border-slate-200/90 text-slate-700 hover:text-[#1C1C1C] hover:bg-slate-50 transition-all cursor-pointer shadow-2xs shrink-0"
-              title="Open Navigation Menu"
-              aria-label="Open Navigation Menu"
-            >
-              <Menu className="w-4 h-4" />
-            </button>
-
-            <div className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1 bg-white border border-slate-200/90 rounded-lg shadow-2xs text-[10px] sm:text-[11px] font-extrabold text-slate-800 font-sans truncate">
+        <header id="app-top-header" className="sticky top-0 z-40 bg-[#F4F7F6]/95 backdrop-blur-sm border-b border-slate-200/80 pb-3 pt-2 px-6 -mx-6 mb-4 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-white border border-slate-200/90 rounded-lg shadow-2xs text-[11px] font-extrabold text-slate-800 font-sans">
               <Building2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-              <span className="truncate">Samse Auto Mart</span>
-              <span className="hidden sm:inline">(Pvt) Ltd</span>
+              <span>Samse Auto Mart (Pvt) Ltd</span>
             </div>
 
             {/* Date inline text */}
-            <div className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-slate-500 shrink-0">
+            <div className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
               <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
               <span>{new Date().toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}</span>
             </div>
           </div>
 
           {/* Ultra-Compact User Profile Badge Pill & Logout */}
-          <div id="header-user-profile" className="flex items-center gap-2 shrink-0">
+          <div id="header-user-profile" className="flex items-center gap-2">
             <div className="flex items-center gap-1.5 pl-1 pr-1.5 py-0.5 bg-white border border-slate-200/90 rounded-full shadow-2xs hover:border-slate-300 transition-all font-sans">
               <div className={`w-6 h-6 rounded-full ${user?.avatarColor || 'bg-emerald-600'} text-white flex items-center justify-center font-extrabold text-[10px] shrink-0 shadow-2xs`}>
                 {getInitials(user?.name)}
               </div>
-              <div className="flex flex-col text-left leading-none pr-0.5 max-w-[100px] sm:max-w-none truncate">
-                <span className="font-extrabold text-slate-900 text-[10px] sm:text-[11px] truncate">{user?.name || 'Rumesh Anjana'}</span>
-                <span className="text-[8px] sm:text-[9px] font-semibold text-slate-500 mt-0.5 truncate">{user?.role || 'System Admin'}</span>
+              <div className="flex flex-col text-left leading-none pr-0.5">
+                <span className="font-extrabold text-slate-900 text-[11px]">{user?.name || 'Rumesh Anjana'}</span>
+                <span className="text-[9px] font-semibold text-slate-500 mt-0.5">{user?.role || 'System Admin'}</span>
               </div>
               <div className="h-3.5 w-px bg-slate-200 mx-0.5" />
               <button
