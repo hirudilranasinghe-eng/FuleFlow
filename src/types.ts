@@ -199,6 +199,9 @@ export interface StockDelivery {
   quantity: number; // in liters
   supplier: string;
   cost: number;
+  bowserNo?: string; // Bowser Tanker Registration Number
+  invoiceLiters?: number; // Billed invoice liters
+  offloadedDipLiters?: number; // Physical dip liters offloaded
 }
 
 export interface PriceSchedule {
@@ -210,20 +213,47 @@ export interface PriceSchedule {
 }
 
 export type CustomerType = 'Cash' | 'Credit' | 'Deposit';
+export type CustomerCategory = 'Business' | 'Personal';
+export type CustomerStatus = 'Active' | 'Suspended' | 'Overdue' | 'Blocked';
 
 export interface Customer {
   id: string;
   name: string;
   phone: string;
   customerType: CustomerType;
+  category?: CustomerCategory;
+  email?: string;
   creditLimit: number; // in Rs.
   currentBalance: number; // in Rs. (Outstanding credit owed)
   depositBalance: number; // in Rs. (Prepaid deposit balance available)
   allowedCreditDays: number; // e.g. 14, 30 days
   address?: string;
   vehicleNumbers?: string[];
-  status: 'Active' | 'Blocked' | 'Overdue';
+  status: CustomerStatus;
+  notes?: string;
   createdAt: string;
+}
+
+export interface CustomerLedgerEntry {
+  id: string;
+  customerId: string;
+  customerName?: string;
+  transactionDate: string; // ISO String
+  transactionType: 'DEPOSIT_TOPUP' | 'CREDIT_PAYMENT' | 'FUEL_DISPENSE' | 'ADJUSTMENT' | 'INITIAL_DEPOSIT';
+  description: string;
+  referenceNo?: string;
+  vehicleNo?: string;
+  fuelType?: FuelType | string;
+  liters?: number;
+  ratePerLiter?: number;
+  debit: number; // in Rs. (Increases credit debt or deducts deposit)
+  credit: number; // in Rs. (Reduces credit debt or adds deposit)
+  amount: number; // in Rs.
+  runningBalance: number; // Balance snapshot after this transaction
+  paymentMode?: 'Cash' | 'Cheque' | 'Bank Transfer' | 'Online' | 'Account Balance';
+  notes?: string;
+  createdBy?: string;
+  createdAt?: string;
 }
 
 export interface CreditTransaction {
@@ -362,5 +392,63 @@ export interface BulkOilTransfer {
   transferred_by: string;
   notes?: string;
   remarks?: string;
+}
+
+// -------------------------------------------------------------
+// LP GAS (CYLINDER) STORAGE & INVENTORY CONTROL TYPES
+// -------------------------------------------------------------
+export type GasBrand = 'Litro' | 'Laugfs';
+
+export type GasCylinderSize = '12.5 kg Regular' | '5 kg Baby' | '2.3 kg Mini' | '37.5 kg Industrial';
+
+export interface GasInventoryItem {
+  id: string; // e.g. 'litro-12.5' or 'laugfs-12.5'
+  brand: GasBrand;
+  cylinderSize: GasCylinderSize;
+  sizeKg: number; // 12.5, 5, 2.3, 37.5
+  stockFull: number; // Full Cylinders in Hand
+  stockEmpty: number; // Empty Cylinders in Hand
+  buyingPrice: number; // Unit Purchase Cost (Rs.)
+  refillSellingPrice: number; // Refill Exchange Price (Rs.)
+  packageSellingPrice: number; // New Package Selling Price (Rs.)
+  minAlertThreshold: number;
+  updatedAt?: string;
+}
+
+export interface GasPurchaseRecord {
+  id: string;
+  date: string;
+  brand: GasBrand;
+  cylinderSize: GasCylinderSize;
+  purchaseType: 'Refill Restock' | 'New Packages';
+  fullQtyReceived: number;
+  emptyQtyHandedOver: number;
+  invoiceNo: string; // Invoice / Delivery Order (DO) Number
+  supplier: string; // e.g. 'Litro Gas Lanka Ltd'
+  unitBuyingPrice: number;
+  totalCost: number;
+  receivedBy?: string;
+  notes?: string;
+  createdAt?: string;
+}
+
+export interface GasSaleRecord {
+  id: string;
+  date: string;
+  brand: GasBrand;
+  cylinderSize: GasCylinderSize;
+  saleType: 'Refill Exchange' | 'New Package' | 'Empty Return';
+  quantity: number; // Full cylinders issued
+  emptyReceivedQty: number; // Empty cylinders received from customer
+  unitPrice: number;
+  totalAmount: number;
+  customerType: 'Walk-in' | 'Credit';
+  customerName?: string;
+  customerId?: string;
+  paymentMethod: 'Cash' | 'Card' | 'Credit';
+  soldBy?: string;
+  vehicleNo?: string;
+  notes?: string;
+  createdAt?: string;
 }
 

@@ -17,6 +17,7 @@ import DashboardTab from './components/DashboardTab';
 import ShiftManagementTab from './components/ShiftManagementTab';
 import FuelStockTab from './components/FuelStockTab';
 import OilStorageTab from './components/OilStorageTab';
+import GasStorageTab from './components/GasStorageTab';
 import PurchasesTab from './components/PurchasesTab';
 import DailySalesTab from './components/DailySalesTab';
 import ReportsTab from './components/ReportsTab';
@@ -250,17 +251,8 @@ export default function App() {
   const [deliveries, setDeliveries] = useState<StockDelivery[]>([]);
   const [priceSchedules, setPriceSchedules] = useState<PriceSchedule[]>([]);
 
-  // Customer & Credit states
-  const [customers, setCustomers] = useState<Customer[]>(() => {
-    try {
-      const stored = localStorage.getItem('fms_customers');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && !parsed.some((c: any) => c.id === 'CUST-101')) return parsed;
-      }
-    } catch (_) {}
-    return [];
-  });
+  // Customer & Credit states (strictly live Supabase data - no mock data)
+  const [customers, setCustomers] = useState<Customer[]>([]);
 
   const [creditTransactions, setCreditTransactions] = useState<CreditTransaction[]>(() => {
     try {
@@ -628,6 +620,41 @@ export default function App() {
             id: s.id, fuelType: s.fueltype, newPrice: s.newprice, effectiveDate: s.effectivedate, status: s.status
           }));
           setPriceSchedules(mappedSchedules as PriceSchedule[]);
+        }
+
+        // Fetch customers from Supabase (100% pure live data)
+        try {
+          const { data: customersData, error: custError } = await supabase
+            .from('customers')
+            .select('*')
+            .order('created_at', { ascending: false });
+
+          if (!custError && customersData) {
+            const mappedCustomers = customersData.map((c: any) => ({
+              id: c.id,
+              name: c.name || '',
+              phone: c.phone || c.contact_number || '',
+              customerType: (c.customer_type || c.account_type || c.customerType || 'Credit').toString().toLowerCase() === 'deposit' ? 'Deposit' : 'Credit',
+              category: c.category || 'Business',
+              email: c.email || '',
+              address: c.address || '',
+              notes: c.notes || '',
+              creditLimit: Number(c.credit_limit !== undefined ? c.credit_limit : c.creditLimit) || 0,
+              currentBalance: Number(c.current_balance !== undefined ? c.current_balance : c.currentBalance) || 0,
+              depositBalance: Number(c.deposit_balance !== undefined ? c.deposit_balance : (c.initial_deposit !== undefined ? c.initial_deposit : c.depositBalance)) || 0,
+              allowedCreditDays: Number(c.allowed_days !== undefined ? c.allowed_days : (c.allowed_credit_days !== undefined ? c.allowed_credit_days : c.allowedCreditDays)) || 30,
+              status: c.status ? (c.status.charAt(0).toUpperCase() + c.status.slice(1).toLowerCase() as any) : 'Active',
+              vehicleNumbers: Array.isArray(c.vehicle_numbers) 
+                ? c.vehicle_numbers 
+                : (Array.isArray(c.registered_vehicles) ? c.registered_vehicles : (c.vehicle_numbers ? String(c.vehicle_numbers).split(',').map((s: string) => s.trim()) : [])),
+              createdAt: c.created_at || new Date().toISOString()
+            }));
+            setCustomers(mappedCustomers);
+          } else {
+            setCustomers([]);
+          }
+        } catch (_) {
+          setCustomers([]);
         }
 
         setTimeout(() => {
@@ -1522,6 +1549,15 @@ export default function App() {
               <OilStorageTab
                 oilTanks={oilTanks}
                 setOilTanks={setOilTanks}
+                employees={employees}
+                user={user}
+              />
+            )}
+
+            {(activeTab === 'gas_storage' || activeTab === 'gas-storage') && (
+              <GasStorageTab
+                setActiveTab={setActiveTab}
+                customers={customers}
                 employees={employees}
                 user={user}
               />

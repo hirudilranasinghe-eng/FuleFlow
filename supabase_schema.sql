@@ -96,17 +96,44 @@ CREATE TABLE shift_logs (
 );
 
 -- Customers Table
-CREATE TABLE customers (
+CREATE TABLE IF NOT EXISTS customers (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     phone TEXT NOT NULL,
     customer_type TEXT NOT NULL CHECK (customer_type IN ('Cash', 'Credit', 'Deposit')),
+    category TEXT DEFAULT 'Business',
+    email TEXT,
+    address TEXT,
+    notes TEXT,
     credit_limit NUMERIC DEFAULT 0,
     deposit_balance NUMERIC DEFAULT 0,
     current_balance NUMERIC DEFAULT 0,
     allowed_days INTEGER DEFAULT 30,
-    status TEXT NOT NULL CHECK (status IN ('Active', 'Suspended', 'Overdue')),
+    status TEXT NOT NULL CHECK (status IN ('Active', 'Suspended', 'Overdue', 'Blocked')),
     vehicle_numbers TEXT[] DEFAULT '{}',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Customer Ledgers Table (Deposit top-ups, settlements, fuel deductions & statement transactions)
+CREATE TABLE IF NOT EXISTS customer_ledgers (
+    id TEXT PRIMARY KEY,
+    customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+    customer_name TEXT,
+    transaction_date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    transaction_type TEXT NOT NULL CHECK (transaction_type IN ('DEPOSIT_TOPUP', 'CREDIT_PAYMENT', 'FUEL_DISPENSE', 'ADJUSTMENT', 'INITIAL_DEPOSIT')),
+    description TEXT,
+    reference_no TEXT,
+    vehicle_no TEXT,
+    fuel_type TEXT,
+    liters NUMERIC DEFAULT 0,
+    rate_per_liter NUMERIC DEFAULT 0,
+    debit NUMERIC DEFAULT 0,
+    credit NUMERIC DEFAULT 0,
+    amount NUMERIC NOT NULL DEFAULT 0,
+    running_balance NUMERIC DEFAULT 0,
+    payment_mode TEXT,
+    notes TEXT,
+    created_by TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -235,6 +262,7 @@ ALTER TABLE credit_sales DISABLE ROW LEVEL SECURITY;
 ALTER TABLE card_sales DISABLE ROW LEVEL SECURITY;
 ALTER TABLE payment_settlements DISABLE ROW LEVEL SECURITY;
 ALTER TABLE pumper_non_cash_sales DISABLE ROW LEVEL SECURITY;
+ALTER TABLE customer_ledgers DISABLE ROW LEVEL SECURITY;
 
 -- Disable RLS for fuel_tank if it exists
 DO $$

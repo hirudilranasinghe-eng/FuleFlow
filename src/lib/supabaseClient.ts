@@ -1,5 +1,5 @@
 import { supabase, getTanksTableName } from './supabase';
-import { PumpReading, FuelTank, OilTank } from '../types';
+import { PumpReading, FuelTank, OilTank, Customer, CustomerLedgerEntry } from '../types';
 
 export { supabase };
 
@@ -654,4 +654,135 @@ export async function deleteOilTank(client: any, tankId: string) {
     return { data: null, error: err };
   }
 }
+
+/**
+ * Upserts a Customer record to Supabase 'customers' table with column fallbacks.
+ */
+export async function saveCustomer(client: any, customer: Customer) {
+  if (!customer || !customer.id) return { data: null, error: null };
+
+  const snakePayload: any = {
+    id: customer.id,
+    name: customer.name?.trim(),
+    phone: customer.phone?.trim(),
+    contact_number: customer.phone?.trim(),
+    email: customer.email?.trim() ? customer.email.trim() : null,
+    customer_type: customer.customerType,
+    account_type: customer.customerType?.toLowerCase() || 'credit',
+    credit_limit: Number(customer.creditLimit) || 0,
+    deposit_balance: Number(customer.depositBalance) || 0,
+    initial_deposit: Number(customer.depositBalance) || 0,
+    current_balance: Number(customer.currentBalance) || 0,
+    allowed_days: Number(customer.allowedCreditDays) || 30,
+    status: customer.status || 'Active',
+    vehicle_numbers: customer.vehicleNumbers || [],
+    registered_vehicles: customer.vehicleNumbers || [],
+    created_at: customer.createdAt || new Date().toISOString()
+  };
+
+  if (customer.category) snakePayload.category = customer.category;
+  if (customer.address) snakePayload.address = customer.address;
+  if (customer.notes) snakePayload.notes = customer.notes;
+
+  try {
+    let { data, error } = await client.from('customers').upsert([snakePayload]);
+    
+    if (error && (error.code === '42703' || error.message?.includes('column'))) {
+      // Fallback without extended fields
+      const basicPayload = {
+        id: customer.id,
+        name: customer.name?.trim(),
+        phone: customer.phone?.trim(),
+        email: customer.email && customer.email.trim().length > 0 ? customer.email.trim() : null,
+        customer_type: customer.customerType,
+        credit_limit: Number(customer.creditLimit) || 0,
+        deposit_balance: Number(customer.depositBalance) || 0,
+        current_balance: Number(customer.currentBalance) || 0,
+        allowed_days: Number(customer.allowedCreditDays) || 30,
+        status: customer.status || 'Active',
+        vehicle_numbers: customer.vehicleNumbers || []
+      };
+      const retry = await client.from('customers').upsert([basicPayload]);
+      data = retry.data;
+      error = retry.error;
+    }
+
+    if (error) {
+      console.error("Supabase customer insert error:", error);
+    }
+
+    return { data, error };
+  } catch (err: any) {
+    console.warn("saveCustomer sync notice:", err?.message || err);
+    return { data: null, error: err };
+  }
+}
+
+/**
+ * Deletes a Customer record from Supabase 'customers' table.
+ */
+export async function deleteCustomer(client: any, customerId: string) {
+  if (!customerId) return { data: null, error: null };
+  try {
+    const { data, error } = await client.from('customers').delete().eq('id', customerId);
+    return { data, error };
+  } catch (err: any) {
+    console.warn("deleteCustomer sync notice:", err?.message || err);
+    return { data: null, error: err };
+  }
+}
+
+/**
+ * Saves a Customer Ledger Transaction record to Supabase 'customer_ledgers' table with fallback.
+ */
+export async function saveCustomerLedgerEntry(client: any, entry: CustomerLedgerEntry) {
+  if (!entry || !entry.id || !entry.customerId) return { data: null, error: null };
+
+  const payload: any = {
+    id: entry.id,
+    customer_id: entry.customerId,
+    customer_name: entry.customerName || '',
+    transaction_date: entry.transactionDate || new Date().toISOString(),
+    transaction_type: entry.transactionType,
+    description: entry.description,
+    reference_no: entry.referenceNo || '',
+    vehicle_no: entry.vehicleNo || '',
+    fuel_type: entry.fuelType || '',
+    liters: Number(entry.liters) || 0,
+    rate_per_liter: Number(entry.ratePerLiter) || 0,
+    debit: Number(entry.debit) || 0,
+    credit: Number(entry.credit) || 0,
+    amount: Number(entry.amount) || 0,
+    running_balance: Number(entry.runningBalance) || 0,
+    payment_mode: entry.paymentMode || '',
+    notes: entry.notes || '',
+    created_by: entry.createdBy || 'System',
+    created_at: entry.createdAt || new Date().toISOString()
+  };
+
+  try {
+    let { data, error } = await client.from('customer_ledgers').upsert([payload]);
+    
+    // If customer_ledgers table doesn't exist yet, also record payment settlements if applicable
+    if (error && (entry.transactionType === 'DEPOSIT_TOPUP' || entry.transactionType === 'CREDIT_PAYMENT')) {
+      try {
+        await client.from('payment_settlements').insert([{
+          id: entry.id,
+          customer_id: entry.customerId,
+          payment_mode: entry.paymentMode === 'Cheque' ? 'Cheque' : entry.paymentMode === 'Bank Transfer' ? 'Bank Transfer' : 'Cash',
+          amount: entry.amount,
+          reference_no: entry.referenceNo || '',
+          payment_date: entry.transactionDate,
+          notes: entry.notes || entry.description
+        }]);
+      } catch (_) {}
+    }
+
+    return { data, error };
+  } catch (err: any) {
+    console.warn("saveCustomerLedgerEntry sync notice:", err?.message || err);
+    return { data: null, error: err };
+  }
+}
+
 

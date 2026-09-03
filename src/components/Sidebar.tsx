@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Clock, Fuel, BarChart3, FileText, Users, 
   ShieldCheck, ChevronLeft, ChevronRight, ChevronDown,
   Droplet, CreditCard, TrendingUp, Droplets, Truck,
-  Database, Gauge, Tag, ArrowLeftRight
+  Database, Gauge, Tag, ArrowLeftRight, Flame
 } from 'lucide-react';
 
 import { AuthUser, resolveUserRole } from '../types';
@@ -66,6 +66,7 @@ export default function Sidebar({
     { id: 'shift', name: 'Shift Management', icon: Clock },
     { id: 'stock', name: 'Fuel Stock', icon: Fuel },
     { id: 'oil-storage', name: 'Oil (Lubricant) Storage', icon: Droplets },
+    { id: 'gas_storage', name: 'Gas Storage', icon: Flame },
     { id: 'purchases', name: 'Purchases', icon: Truck },
     { id: 'manual-dip-record', name: 'Manual Dip Record', icon: Droplet },
     { id: 'reports', name: 'Reports', icon: FileText },
