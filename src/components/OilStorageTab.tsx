@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { OilTank, PackagedOilItem, Employee, AuthUser } from '../types';
 import { supabase } from '../lib/supabase';
+import { isAdmin } from '../lib/auth';
 import {
   fetchPackagedLubricants,
   savePackagedLubricant,
@@ -189,16 +190,10 @@ export default function OilStorageTab({
   const [itemFormPrice, setItemFormPrice] = useState<number>(0);
   const [itemFormLocation, setItemFormLocation] = useState('Front Rack');
 
-  // 4. Refill Forecourt Dispenser Chamber Modal
-  const [isRefillModalOpen, setIsRefillModalOpen] = useState(false);
-  const [refillTargetChamberId, setRefillTargetChamberId] = useState('');
-  const [refillSourceDrumId, setRefillSourceDrumId] = useState('');
-  const [refillLiters, setRefillLiters] = useState<number>(20);
-
   // Submitting States
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Group Oil Tanks into Forecourt 4-Chamber Unit & Back Store 210L Drums
+  // Group Oil Tanks into Forecourt Dispenser Chambers
   const forecourtChambers = useMemo(() => {
     const seen = new Set<string>();
     const chambers: OilTank[] = [];
@@ -212,145 +207,6 @@ export default function OilStorageTab({
     }
     return chambers.sort((a, b) => (a.chamberNumber || 0) - (b.chamberNumber || 0) || (a.name || a.id).localeCompare(b.name || b.id));
   }, [oilTanks]);
-
-  const backStoreDrums = useMemo(() => {
-    const seen = new Set<string>();
-    const drums: OilTank[] = [];
-    for (const t of oilTanks) {
-      if (!t || !t.id) continue;
-      if (seen.has(t.id)) continue;
-      if (t.type === 'drum' || t.name.toLowerCase().includes('drum') || t.name.toLowerCase().includes('barrel') || t.id.includes('drum')) {
-        seen.add(t.id);
-        drums.push(t);
-      }
-    }
-    return drums.sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
-  }, [oilTanks]);
-
-  // Refill Modal Helpers
-  const selectedTargetChamber = forecourtChambers.find(c => c.id === refillTargetChamberId) || forecourtChambers[0];
-  const selectedSourceDrum = backStoreDrums.find(d => d.id === refillSourceDrumId) || backStoreDrums[0];
-
-  const handleOpenRefillModal = (targetChamberId?: string, sourceDrumId?: string) => {
-    const targetId = targetChamberId || forecourtChambers[0]?.id || '';
-    setRefillTargetChamberId(targetId);
-    const targetChamber = forecourtChambers.find(c => c.id === targetId) || forecourtChambers[0];
-    
-    if (sourceDrumId) {
-      setRefillSourceDrumId(sourceDrumId);
-    } else if (targetChamber) {
-      const matchingDrum = backStoreDrums.find(d => d.grade === targetChamber.grade) || backStoreDrums[0];
-      if (matchingDrum) setRefillSourceDrumId(matchingDrum.id);
-    } else {
-      setRefillSourceDrumId(backStoreDrums[0]?.id || '');
-    }
-
-    if (targetChamber) {
-      const availableSpace = Math.max(0, targetChamber.capacity - targetChamber.currentLevel);
-      setRefillLiters(Math.min(20, Math.max(1, availableSpace)));
-    } else {
-      setRefillLiters(20);
-    }
-    setIsRefillModalOpen(true);
-  };
-
-  const handleSaveRefillSubmit = async () => {
-    const targetChamber = forecourtChambers.find(c => c.id === refillTargetChamberId) || forecourtChambers[0];
-    const sourceDrum = backStoreDrums.find(d => d.id === refillSourceDrumId) || backStoreDrums[0];
-
-    if (!targetChamber) {
-      alert('Please select a valid Forecourt Chamber.');
-      return;
-    }
-    if (!sourceDrum) {
-      alert('Please select a valid Back Store Drum.');
-      return;
-    }
-    if (refillLiters <= 0) {
-      alert('Refill volume must be greater than 0 liters.');
-      return;
-    }
-    if (sourceDrum.currentLevel < refillLiters) {
-      alert(`Insufficient stock in ${sourceDrum.name}. Only ${sourceDrum.currentLevel}L available.`);
-      return;
-    }
-
-    const spaceInChamber = targetChamber.capacity - targetChamber.currentLevel;
-    const actualTransferLiters = Math.min(refillLiters, spaceInChamber, sourceDrum.currentLevel);
-    if (actualTransferLiters <= 0) {
-      alert('Chamber is already at maximum capacity.');
-      return;
-    }
-
-    setIsSubmitting(true);
-    const updatedTargetChamber: OilTank = {
-      ...targetChamber,
-      currentLevel: targetChamber.currentLevel + actualTransferLiters
-    };
-
-    const updatedSourceDrum: OilTank = {
-      ...sourceDrum,
-      currentLevel: Math.max(0, sourceDrum.currentLevel - actualTransferLiters)
-    };
-
-    const nextTanks = oilTanks.map(t => {
-      if (t.id === updatedTargetChamber.id) return updatedTargetChamber;
-      if (t.id === updatedSourceDrum.id) return updatedSourceDrum;
-      return t;
-    });
-
-    setOilTanks(nextTanks);
-    
-    const unitRate = targetChamber.pricePerLiter || sourceDrum.pricePerLiter || 0;
-    const totalTransferValue = actualTransferLiters * unitRate;
-    const transferredBy = user?.name || (employees.length > 0 ? employees[0].name : 'Rumesh Anjana');
-
-    try {
-      const { error: transferError } = await supabase.from('bulk_oil_transfers').insert([{
-        transfer_date: new Date().toISOString(),
-        source_drum_id: sourceDrum.id,
-        source_drum_name: sourceDrum.name,
-        target_chamber_id: targetChamber.id,
-        target_chamber_name: targetChamber.name,
-        oil_grade: sourceDrum.grade || targetChamber.grade || 'Standard',
-        transferred_liters: Number(actualTransferLiters),
-        source_drum_remaining_liters: Number(sourceDrum.currentLevel) - Number(actualTransferLiters),
-        target_chamber_new_level: Number(targetChamber.currentLevel) + Number(actualTransferLiters),
-        unit_rate: Number(sourceDrum.pricePerLiter || targetChamber.pricePerLiter || 0),
-        total_transfer_value: Number(actualTransferLiters) * Number(sourceDrum.pricePerLiter || targetChamber.pricePerLiter || 0),
-        transferred_by: transferredBy,
-        remarks: 'Forecourt refill'
-      }]);
-      if (transferError) console.error("Error recording transfer log:", transferError);
-    } catch (err) {
-      console.error("Error executing transfer log insertion:", err);
-    }
-
-    await Promise.all([
-      saveBulkLubricant(updatedTargetChamber),
-      saveBulkLubricant(updatedSourceDrum),
-      recordBulkOilTransfer({
-        transfer_date: new Date().toISOString(),
-        source_drum_id: sourceDrum.id,
-        source_drum_name: sourceDrum.name,
-        target_chamber_id: targetChamber.id,
-        target_chamber_name: targetChamber.name,
-        oil_grade: sourceDrum.grade || targetChamber.grade || 'Standard',
-        transferred_liters: actualTransferLiters,
-        source_drum_remaining_liters: updatedSourceDrum.currentLevel,
-        target_chamber_new_level: updatedTargetChamber.currentLevel,
-        unit_rate: unitRate,
-        total_transfer_value: totalTransferValue,
-        transferred_by: transferredBy,
-        notes: `Transfer of ${actualTransferLiters}L from ${sourceDrum.name} to ${targetChamber.name}`,
-        remarks: 'Forecourt refill'
-      })
-    ]);
-
-    setIsSubmitting(false);
-    setIsRefillModalOpen(false);
-    showToast(`Refilled +${actualTransferLiters}L into ${targetChamber.name.split(':')[0]} (${targetChamber.grade}) from ${sourceDrum.name}`);
-  };
 
   // -------------------------------------------------------------
   // MODAL OPENERS & FORM SUBMISSIONS
@@ -579,7 +435,7 @@ export default function OilStorageTab({
           }`}
         >
           <Droplets className="w-4 h-4 text-amber-500" />
-          <span>Bulk Oil & Barrels ({oilTanks.length})</span>
+          <span>Forecourt Dispenser Chambers ({forecourtChambers.length})</span>
         </button>
 
         <button
@@ -607,7 +463,7 @@ export default function OilStorageTab({
       ) : (
         <>
           {/* ========================================================================= */}
-          {/* VIEW 1: FORECOURT 4-CHAMBER DISPENSER & BACK STORE DRUM STORAGE */}
+          {/* VIEW 1: FORECOURT 4-CHAMBER DISPENSER STORAGE */}
           {/* ========================================================================= */}
           {activeSubTab === 'bulk' && (
             <div className="space-y-6">
@@ -635,7 +491,7 @@ export default function OilStorageTab({
                     <Droplets className="w-8 h-8 text-gray-300 mx-auto" />
                     <h4 className="text-xs font-bold text-slate-700">No Forecourt Dispenser Chambers Configured</h4>
                     <p className="text-[11px] text-gray-500 max-w-md mx-auto">
-                      Dispenser chambers are provisioned in the <strong>Admin Control</strong> tab under <em>Bulk Oil & Lubricants</em>. Once configured, real-time liquid levels and refill controls will appear here.
+                      Dispenser chambers are provisioned in the <strong>Admin Control</strong> tab under <em>Bulk Oil & Lubricants</em>. Once configured, real-time liquid levels and sales meters will appear here.
                     </p>
                   </div>
                 ) : (
@@ -698,112 +554,6 @@ export default function OilStorageTab({
                               <span className="text-gray-500 font-medium">Stock Value:</span>
                               <span className="font-extrabold text-emerald-700 tabular-nums">{formatCurrency(stockVal)}</span>
                             </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* 2. BACK STORE DRUM / BARREL STORAGE */}
-              <div className="space-y-3 pt-4">
-                <div className="flex items-center justify-between gap-2 pb-1 border-b border-gray-100">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h2 className="text-sm font-extrabold text-[#1C1C1C] uppercase tracking-wide">
-                        Back Store Drum / Barrel Storage
-                      </h2>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-50 text-blue-800 border border-blue-200">
-                        {backStoreDrums.length} {backStoreDrums.length === 1 ? 'Drum' : 'Drums'}
-                      </span>
-                    </div>
-                    <p className="text-xs text-gray-500 mt-0.5 font-medium">
-                      Wholesale barrels (210L) used for forecourt dispenser replenishment and bulk sales
-                    </p>
-                  </div>
-                </div>
-
-                {backStoreDrums.length === 0 ? (
-                  <div className="bg-white p-8 text-center rounded-2xl border border-gray-100 space-y-2">
-                    <Layers className="w-8 h-8 text-gray-300 mx-auto" />
-                    <h4 className="text-xs font-bold text-slate-700">No Back Store Drums Configured</h4>
-                    <p className="text-[11px] text-gray-500 max-w-md mx-auto">
-                      Storage drums are provisioned in <strong>Admin Control</strong> or automatically created when accepting bulk purchases in <strong>Receive Stock (GRN)</strong>.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                    {backStoreDrums.map((drum) => {
-                      const capacity = drum.capacity || 210;
-                      const pct = capacity > 0 ? Math.round((drum.currentLevel / capacity) * 100) : 0;
-                      const totalStockVal = (drum.currentLevel || 0) * (drum.pricePerLiter || 0);
-
-                      return (
-                        <div key={drum.id} className="bg-white rounded-2xl border border-gray-100 p-4 space-y-3 shadow-xs hover:border-gray-200 transition-all">
-                          <div className="flex items-start justify-between">
-                            <div className="flex items-center gap-2.5">
-                              <div className="w-9 h-9 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center font-bold">
-                                <Layers className="w-4 h-4" />
-                              </div>
-                              <div>
-                                <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-slate-100 text-slate-800 border border-slate-200">
-                                  {drum.grade}
-                                </span>
-                                <h4 className="text-xs font-extrabold text-[#1C1C1C] mt-0.5">{drum.name}</h4>
-                              </div>
-                            </div>
-
-                            <div className="text-right tabular-nums">
-                              <span className={`text-xs font-extrabold ${pct < 25 ? 'text-rose-600' : pct < 50 ? 'text-amber-600' : 'text-emerald-600'}`}>
-                                {pct}%
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* Drum Level Bar */}
-                          <div className="space-y-1">
-                            <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden">
-                              <div 
-                                className={`h-full rounded-full transition-all duration-500 ${
-                                  pct < 25 ? 'bg-rose-500' : pct < 50 ? 'bg-amber-500' : 'bg-blue-600'
-                                }`}
-                                style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
-                              />
-                            </div>
-                            <div className="flex justify-between text-[11px] text-gray-500 font-medium">
-                              <span>Stock: <strong className="text-slate-900 tabular-nums">{drum.currentLevel} L</strong></span>
-                              <span>Capacity: <strong className="text-slate-700 tabular-nums">{capacity} L</strong></span>
-                            </div>
-                          </div>
-
-                          {/* Metrics */}
-                          <div className="grid grid-cols-2 gap-2 pt-2 border-t border-gray-100 text-[11px]">
-                            <div>
-                              <span className="text-[10px] text-gray-400 font-bold block">Rate / L</span>
-                              <span className="font-bold text-slate-800 tabular-nums">{formatCurrency(drum.pricePerLiter)}</span>
-                            </div>
-                            <div className="text-right">
-                              <span className="text-[10px] text-gray-400 font-bold block">Total Stock</span>
-                              <span className="font-extrabold text-emerald-700 tabular-nums">{formatCurrency(totalStockVal)}</span>
-                            </div>
-                          </div>
-
-                          {/* Operational Actions - Single clean action button */}
-                          <div className="pt-1">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const matchingChamber = forecourtChambers.find(c => c.grade === drum.grade) || forecourtChambers[0];
-                                handleOpenRefillModal(matchingChamber?.id, drum.id);
-                              }}
-                              disabled={forecourtChambers.length === 0 || drum.currentLevel <= 0}
-                              className="w-full py-2 px-3 bg-blue-50 hover:bg-blue-100 disabled:opacity-40 disabled:cursor-not-allowed text-blue-800 font-bold rounded-xl text-xs transition-colors border border-blue-200 flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
-                              title="Transfer to Forecourt Chamber"
-                            >
-                              <Zap className="w-3.5 h-3.5 text-blue-600" />
-                              <span>⚡ Transfer to Chamber</span>
-                            </button>
                           </div>
                         </div>
                       );
@@ -933,19 +683,31 @@ export default function OilStorageTab({
                               <td className="py-3 px-4 text-right">
                                 <div className="flex items-center justify-end gap-1.5">
                                   <button
-                                    onClick={() => handleOpenEditItemModal(item)}
-                                    className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      e.preventDefault();
+                                      handleOpenEditItemModal(item);
+                                    }}
+                                    className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer z-30"
                                     title="Edit Product"
                                   >
                                     <Edit2 className="w-3.5 h-3.5" />
                                   </button>
-                                  <button
-                                    onClick={() => handleDeleteItem(item.id)}
-                                    className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                                    title="Delete Product"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
+                                  {isAdmin(user?.role) && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        e.preventDefault();
+                                        handleDeleteItem(item.id);
+                                      }}
+                                      className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer z-30"
+                                      title="Delete Product"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
                                 </div>
                               </td>
                             </tr>
@@ -1202,147 +964,6 @@ export default function OilStorageTab({
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* MODAL: REFILL FORECOURT DISPENSER CHAMBER */}
-      {/* ========================================================================= */}
-      {isRefillModalOpen && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl animate-scale-up">
-            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
-              <h3 className="text-base font-extrabold text-[#1C1C1C] flex items-center gap-2">
-                <Droplets className="w-5 h-5 text-amber-500" />
-                <span>Refill Dispenser Chamber</span>
-              </h3>
-              <button 
-                onClick={() => setIsRefillModalOpen(false)}
-                className="p-1 text-gray-400 hover:text-gray-600 rounded-lg cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-3.5 text-xs">
-              <div>
-                <label className="font-bold text-gray-700 block mb-1">Target Forecourt Chamber</label>
-                <select
-                  value={refillTargetChamberId}
-                  onChange={(e) => {
-                    const targetId = e.target.value;
-                    setRefillTargetChamberId(targetId);
-                    const targetChamber = forecourtChambers.find(c => c.id === targetId);
-                    if (targetChamber) {
-                      const matchingDrum = backStoreDrums.find(d => d.grade === targetChamber.grade);
-                      if (matchingDrum) setRefillSourceDrumId(matchingDrum.id);
-                      const availableSpace = Math.max(0, targetChamber.capacity - targetChamber.currentLevel);
-                      setRefillLiters(Math.min(20, Math.max(1, availableSpace)));
-                    }
-                  }}
-                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-semibold"
-                >
-                  {forecourtChambers.map(ch => (
-                    <option key={ch.id} value={ch.id}>
-                      {ch.name} (Current: {ch.currentLevel} / {ch.capacity} L)
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="font-bold text-gray-700 block mb-1">Source Back Store Drum</label>
-                <select
-                  value={refillSourceDrumId}
-                  onChange={(e) => setRefillSourceDrumId(e.target.value)}
-                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-semibold"
-                >
-                  {backStoreDrums.map(drum => (
-                    <option key={drum.id} value={drum.id}>
-                      {drum.name} ({drum.grade}) - Avail: {drum.currentLevel} L
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="font-bold text-gray-700">Refill Volume (Liters)</label>
-                  <span className="text-[10px] text-gray-400 font-medium">
-                    Available Space: {selectedTargetChamber ? Math.max(0, selectedTargetChamber.capacity - selectedTargetChamber.currentLevel) : 0} L
-                  </span>
-                </div>
-                <input
-                  type="number"
-                  min="1"
-                  max={selectedTargetChamber ? selectedTargetChamber.capacity - selectedTargetChamber.currentLevel : 100}
-                  value={refillLiters}
-                  onChange={(e) => setRefillLiters(Math.max(1, Number(e.target.value) || 0))}
-                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-slate-900 font-bold tabular-nums"
-                />
-              </div>
-
-              {/* Quick fill buttons */}
-              <div className="flex gap-1.5 pt-0.5">
-                {[10, 20, 30].map(amt => (
-                  <button
-                    key={amt}
-                    type="button"
-                    onClick={() => setRefillLiters(amt)}
-                    className="flex-1 py-1 px-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-lg text-[11px] transition-colors cursor-pointer"
-                  >
-                    +{amt}L
-                  </button>
-                ))}
-                {selectedTargetChamber && (
-                  <button
-                    type="button"
-                    onClick={() => setRefillLiters(Math.max(1, selectedTargetChamber.capacity - selectedTargetChamber.currentLevel))}
-                    className="flex-1 py-1 px-2 bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold rounded-lg text-[11px] transition-colors border border-amber-200 cursor-pointer"
-                  >
-                    Fill to {selectedTargetChamber.capacity}L
-                  </button>
-                )}
-              </div>
-
-              {/* Live Preview Summary */}
-              {selectedTargetChamber && selectedSourceDrum && (
-                <div className="p-3 bg-amber-50/70 border border-amber-200/80 rounded-xl space-y-1.5 text-xs text-amber-950">
-                  <div className="flex justify-between font-medium">
-                    <span>Target Chamber ({selectedTargetChamber.name.split(':')[0]}):</span>
-                    <span className="font-bold tabular-nums">
-                      {selectedTargetChamber.currentLevel} L &rarr; <span className="text-emerald-700 font-extrabold">{Math.min(selectedTargetChamber.capacity, selectedTargetChamber.currentLevel + refillLiters)} L</span> / {selectedTargetChamber.capacity} L
-                    </span>
-                  </div>
-                  <div className="flex justify-between font-medium">
-                    <span>Source Drum Stock:</span>
-                    <span className="font-bold tabular-nums">
-                      {selectedSourceDrum.currentLevel} L &rarr; <span className="text-rose-700 font-extrabold">{Math.max(0, selectedSourceDrum.currentLevel - refillLiters)} L</span>
-                    </span>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="flex gap-3 pt-2">
-              <button
-                type="button"
-                disabled={isSubmitting}
-                onClick={() => setIsRefillModalOpen(false)}
-                className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={isSubmitting}
-                onClick={handleSaveRefillSubmit}
-                className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5"
-              >
-                {isSubmitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                <span>{isSubmitting ? 'Refilling...' : 'Confirm Refill'}</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

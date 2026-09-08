@@ -10,11 +10,14 @@ import {
   Landmark, Edit2, Search, Phone, X, RefreshCcw,
   Layers, Info, Tag, Calendar, Clock, Save, Gauge, Droplets
 } from 'lucide-react';
-import { Employee, FuelTank, FuelType, Pump, PumpMachine, PriceSchedule, OilTank } from '../types';
+import { Employee, FuelTank, FuelType, Pump, PumpMachine, PriceSchedule, OilTank, AuthUser } from '../types';
 import { supabase, getTanksTableName } from '../lib/supabase';
 import { savePumpMachine, deletePumpMachine, saveNozzle, deleteNozzle, saveFuelTank, deleteFuelTank, saveOilTank, deleteOilTank } from '../lib/supabaseClient';
 import { saveBulkLubricant, deleteBulkLubricant } from '../lib/lubricantsClient';
 import { SUPABASE_SQL } from '../lib/sqlSchema';
+import { isAdmin } from '../lib/auth';
+import LubricantStorageTab from './admin/LubricantStorageTab';
+import UndergroundTanksTab from './admin/UndergroundTanksTab';
 
 interface AdminControlTabProps {
   activeSubTab?: 'tanks' | 'oils' | 'mapping' | 'employees' | 'price' | 'system';
@@ -32,6 +35,8 @@ interface AdminControlTabProps {
   priceSchedules?: PriceSchedule[];
   setPriceSchedules?: React.Dispatch<React.SetStateAction<PriceSchedule[]>>;
   onResetAllData: () => void;
+  user?: AuthUser | null;
+  userRole?: string;
 }
 
 export default function AdminControlTab({
@@ -49,7 +54,9 @@ export default function AdminControlTab({
   setEmployees,
   priceSchedules = [],
   setPriceSchedules,
-  onResetAllData
+  onResetAllData,
+  user,
+  userRole
 }: AdminControlTabProps) {
   // Active sub-tab inside Admin Control: 'tanks' | 'oils' | 'mapping' | 'employees' | 'price' | 'system'
   const [internalAdminSection, setInternalAdminSection] = useState<'tanks' | 'oils' | 'mapping' | 'employees' | 'price' | 'system'>('tanks');
@@ -84,31 +91,6 @@ export default function AdminControlTab({
 
   const effectiveOilTanks = oilTanks ?? localOilTanks;
   const setEffectiveOilTanks = setOilTanks ?? setLocalOilTanks;
-
-  // Natural numerical sorting and ID deduplication of oil tanks
-  const sortedOilTanks = useMemo(() => {
-    const seen = new Set<string>();
-    const unique: OilTank[] = [];
-    for (const t of effectiveOilTanks) {
-      if (!t || !t.id) continue;
-      if (seen.has(t.id)) continue;
-      seen.add(t.id);
-      unique.push(t);
-    }
-    return unique.sort((a, b) => (a.name || a.id || '').localeCompare(b.name || b.id || '', undefined, { numeric: true, sensitivity: 'base' }));
-  }, [effectiveOilTanks]);
-
-  // Oil Tank Grade styling helper
-  const getOilGradeBadgeStyle = (grade: string) => {
-    const g = (grade || '').toLowerCase();
-    if (g.includes('20w') || g.includes('15w') || g.includes('engine')) return 'bg-amber-500/10 text-amber-800 border-amber-500/20';
-    if (g.includes('2t') || g.includes('two stroke')) return 'bg-emerald-500/10 text-emerald-800 border-emerald-500/20';
-    if (g.includes('hydraulic') || g.includes('68')) return 'bg-blue-500/10 text-blue-800 border-blue-500/20';
-    if (g.includes('coolant') || g.includes('radiator')) return 'bg-cyan-500/10 text-cyan-800 border-cyan-500/20';
-    if (g.includes('gear') || g.includes('90') || g.includes('140')) return 'bg-purple-500/10 text-purple-800 border-purple-500/20';
-    if (g.includes('brake') || g.includes('dot')) return 'bg-rose-500/10 text-rose-800 border-rose-500/20';
-    return 'bg-slate-500/10 text-slate-800 border-slate-500/20';
-  };
 
   // -------------------------------------------------------------
   // A) UNDERGROUND TANKS MANAGEMENT (Add, Edit, Delete)
@@ -224,152 +206,6 @@ export default function AdminControlTab({
   };
 
   // -------------------------------------------------------------
-  // B) OIL (LUBRICANT) STORAGE TANKS MANAGEMENT (Add, Edit, Delete)
-  // -------------------------------------------------------------
-  const [isAddOilTankModalOpen, setIsAddOilTankModalOpen] = useState(false);
-  const [editingOilTank, setEditingOilTank] = useState<OilTank | null>(null);
-
-  // Form fields for Oil Tank Add/Edit
-  const [oilTankFormType, setOilTankFormType] = useState<'chamber' | 'drum'>('chamber');
-  const [oilTankFormChamberNo, setOilTankFormChamberNo] = useState<number>(1);
-  const [oilTankFormName, setOilTankFormName] = useState('');
-  const [oilTankFormGrade, setOilTankFormGrade] = useState('Lanka 2T Super');
-  const [oilTankFormCapacity, setOilTankFormCapacity] = useState<number>(100);
-  const [oilTankFormCurrentLevel, setOilTankFormCurrentLevel] = useState<number>(0);
-  const [oilTankFormPrice, setOilTankFormPrice] = useState<number>(0);
-  const [oilTankModalError, setOilTankModalError] = useState<string | null>(null);
-
-  // 1. Open Modal for Forecourt Dispenser Chamber (50L / 100L)
-  const handleOpenAddChamberModal = () => {
-    setEditingOilTank(null);
-    setOilTankFormType('chamber');
-    const existingChambers = effectiveOilTanks.filter(t => t.type === 'chamber' || t.name.toLowerCase().includes('chamber') || t.id.includes('chamber'));
-    const nextChamberNo = existingChambers.length + 1;
-    setOilTankFormChamberNo(nextChamberNo);
-    setOilTankFormName(`Chamber 0${nextChamberNo}`);
-    setOilTankFormGrade('Lanka 2T Super');
-    setOilTankFormCapacity(100);
-    setOilTankFormCurrentLevel(0);
-    setOilTankFormPrice(0);
-    setOilTankModalError(null);
-    setIsAddOilTankModalOpen(true);
-  };
-
-  // 2. Open Modal for Back Store Storage Drum / Tank (210L)
-  const handleOpenAddDrumModal = () => {
-    setEditingOilTank(null);
-    setOilTankFormType('drum');
-    setOilTankFormChamberNo(1);
-    setOilTankFormName(`Back Store Drum - Caltex 20W-50`);
-    setOilTankFormGrade('Caltex 20W-50');
-    setOilTankFormCapacity(210);
-    setOilTankFormCurrentLevel(0);
-    setOilTankFormPrice(0);
-    setOilTankModalError(null);
-    setIsAddOilTankModalOpen(true);
-  };
-
-  const handleOpenEditOilTankModal = (oilTank: OilTank) => {
-    setEditingOilTank(oilTank);
-    const isChamber = oilTank.type === 'chamber' || oilTank.name.toLowerCase().includes('chamber') || oilTank.id.includes('chamber');
-    setOilTankFormType(isChamber ? 'chamber' : 'drum');
-    setOilTankFormChamberNo(oilTank.chamberNumber || 1);
-    setOilTankFormName(oilTank.name);
-    setOilTankFormGrade(oilTank.grade);
-    setOilTankFormCapacity(oilTank.capacity);
-    setOilTankFormCurrentLevel(oilTank.currentLevel);
-    setOilTankFormPrice(oilTank.pricePerLiter);
-    setOilTankModalError(null);
-    setIsAddOilTankModalOpen(true);
-  };
-
-  const handleSaveOilTankSubmit = async () => {
-    if (!oilTankFormName.trim()) {
-      setOilTankModalError('Name / identifier is required (e.g. Chamber 01 or Back Store Drum 01).');
-      return;
-    }
-    if (!oilTankFormGrade.trim()) {
-      setOilTankModalError('Oil grade / product name is required (e.g. Lanka 2T Super, Caltex 20W-50).');
-      return;
-    }
-    if (oilTankFormCapacity <= 0) {
-      setOilTankModalError('Capacity must be greater than 0 liters.');
-      return;
-    }
-    if (oilTankFormCurrentLevel < 0) {
-      setOilTankModalError('Current volume cannot be negative.');
-      return;
-    }
-    if (oilTankFormPrice < 0) {
-      setOilTankModalError('Price per liter cannot be negative.');
-      return;
-    }
-
-    const capVal = Number(oilTankFormCapacity) || 0;
-    const curVal = Math.min(Number(oilTankFormCurrentLevel) || 0, capVal);
-    const priceVal = Number(oilTankFormPrice) || 0;
-
-    if (editingOilTank) {
-      const updatedOilTank: OilTank = {
-        ...editingOilTank,
-        name: oilTankFormName.trim(),
-        grade: oilTankFormGrade.trim(),
-        capacity: capVal,
-        currentLevel: curVal,
-        pricePerLiter: priceVal,
-        type: oilTankFormType,
-        chamberNumber: oilTankFormType === 'chamber' ? Number(oilTankFormChamberNo) : undefined
-      };
-
-      const nextOilTanks = effectiveOilTanks.map(t => t.id === editingOilTank.id ? updatedOilTank : t);
-      setEffectiveOilTanks(nextOilTanks);
-
-      await saveBulkLubricant(updatedOilTank);
-
-      setIsAddOilTankModalOpen(false);
-      showToast(`${oilTankFormType === 'chamber' ? 'Dispenser Chamber' : 'Storage Drum'} "${updatedOilTank.name}" updated.`);
-    } else {
-      const uniqueSuffix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-      const newOilTank: OilTank = {
-        id: oilTankFormType === 'chamber' 
-          ? `forecourt-chamber-${uniqueSuffix}`
-          : `drum-store-${uniqueSuffix}`,
-        name: oilTankFormName.trim(),
-        grade: oilTankFormGrade.trim(),
-        capacity: capVal,
-        currentLevel: curVal,
-        pricePerLiter: priceVal,
-        type: oilTankFormType,
-        chamberNumber: oilTankFormType === 'chamber' ? Number(oilTankFormChamberNo) : undefined
-      };
-
-      const nextOilTanks = [...effectiveOilTanks.filter(t => t.id !== newOilTank.id), newOilTank];
-      setEffectiveOilTanks(nextOilTanks);
-
-      await saveBulkLubricant(newOilTank);
-
-      setIsAddOilTankModalOpen(false);
-      showToast(`${oilTankFormType === 'chamber' ? 'Dispenser Chamber' : 'Storage Drum'} "${newOilTank.name}" created in database.`);
-    }
-  };
-
-  const handleDeleteOilTank = async (oilTankId: string) => {
-    const targetTank = effectiveOilTanks.find(t => t.id === oilTankId);
-    if (!targetTank) return;
-
-    if (!confirm(`Are you sure you want to delete "${targetTank.name} - ${targetTank.grade}" from database? This action cannot be undone.`)) {
-      return;
-    }
-
-    const nextOilTanks = effectiveOilTanks.filter(t => t.id !== oilTankId);
-    setEffectiveOilTanks(nextOilTanks);
-
-    await deleteBulkLubricant(oilTankId);
-
-    showToast(`Deleted "${targetTank.name}" from database.`);
-  };
-
-  // -------------------------------------------------------------
   // C) FUEL NOZZLES MANAGEMENT (Add, Edit, Save, Delete)
   // -------------------------------------------------------------
   // Nozzle Modal State
@@ -462,7 +298,7 @@ export default function AdminControlTab({
     const target = pumps.find(p => p.id === nozzleId);
     if (!target) return;
 
-    if (!confirm(`Are you sure you want to delete nozzle "${target.name}"?`)) {
+    if (!window.confirm(`Are you sure you want to delete nozzle "${target.name}"?`)) {
       return;
     }
 
@@ -479,7 +315,7 @@ export default function AdminControlTab({
     const pump = pumps.find(p => p.id === pumpId);
     if (!pump) return;
 
-    if (confirm(`Are you sure you want to delete "${pump.name}" (${pump.id})?`)) {
+    if (window.confirm(`Are you sure you want to delete "${pump.name}" (${pump.id})?`)) {
       try {
         const { error } = await supabase.from('pumps').delete().eq('id', pumpId);
         if (error) console.warn("Supabase delete pump error:", error);
@@ -637,7 +473,7 @@ export default function AdminControlTab({
     const emp = employees.find(e => e.id === empId);
     if (!emp) return;
 
-    if (confirm(`Are you sure you want to remove staff member "${emp.name}"?`)) {
+    if (window.confirm(`Are you sure you want to remove staff member "${emp.name}"?`)) {
       setEmployees(prev => prev.filter(e => e.id !== empId));
       try {
         await supabase.from('employees').delete().eq('id', empId);
@@ -722,7 +558,7 @@ export default function AdminControlTab({
   };
 
   const handleCancelSchedule = async (id: string) => {
-    if (!confirm("Are you sure you want to cancel this pending price schedule?")) return;
+    if (!window.confirm("Are you sure you want to cancel this pending price schedule?")) return;
 
     try {
       await supabase.from('price_schedules').delete().eq('id', id);
@@ -809,7 +645,7 @@ export default function AdminControlTab({
         return {
           icon: Droplets,
           title: 'Bulk Oil & Lubricant Storage',
-          subtitle: `Bulk lubricant chambers, oil drums, and storage bay setup (${effectiveOilTanks.length} Units)`
+          subtitle: `Forecourt dispenser chamber units and lubricant storage setup`
         };
       case 'employees':
         return {
@@ -874,290 +710,30 @@ export default function AdminControlTab({
       {/* SECTION A: UNDERGROUND FUEL TANKS MANAGEMENT */}
       {/* ========================================================================= */}
       {adminSection === 'tanks' && (
-        <div className="space-y-6">
-          <div className="flex justify-end">
-            <button
-              onClick={handleOpenAddTankModal}
-              className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Add Storage Tank</span>
-            </button>
-          </div>
-
-          {/* Tanks Grid */}
-          {tanks.length === 0 ? (
-            <div className="bg-white p-12 text-center rounded-2xl border border-gray-100 space-y-4 shadow-sm">
-              <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mx-auto">
-                <Database className="w-6 h-6" />
-              </div>
-              <div className="space-y-1">
-                <h3 className="text-sm font-bold text-[#1C1C1C]">No Underground Storage Tanks Configured</h3>
-                <p className="text-xs text-gray-500 max-w-sm mx-auto">
-                  Click '+ Add Storage Tank' to create your first storage tank (e.g. LAD Tank, New 92 Tank).
-                </p>
-              </div>
-              <button
-                onClick={handleOpenAddTankModal}
-                className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Add Storage Tank</span>
-              </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {sortedTanks.map((tank) => {
-                const pct = tank.capacity > 0 ? Math.round((tank.currentLevel / tank.capacity) * 100) : 0;
-                const mappedPumpsList = pumps.filter(p => p.tankId === tank.id || (!p.tankId && p.fuelType === tank.fuelType));
-
-                const getFuelTypeBadgeStyle = (fuelType: string) => {
-                  if (fuelType.includes('92')) return 'bg-amber-500/10 text-amber-700 border-amber-500/20';
-                  if (fuelType.includes('95')) return 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20';
-                  if (fuelType.includes('Super Diesel')) return 'bg-purple-500/10 text-purple-700 border-purple-500/20';
-                  if (fuelType.includes('Auto Diesel')) return 'bg-blue-500/10 text-blue-700 border-blue-500/20';
-                  if (fuelType.includes('Ordinary') || fuelType.includes('LAD')) return 'bg-teal-500/10 text-teal-700 border-teal-500/20';
-                  return 'bg-slate-500/10 text-slate-700 border-slate-500/20';
-                };
-
-                return (
-                  <div key={tank.id} className="bg-white rounded-xl border border-gray-100 p-4 space-y-3 shadow-sm hover:border-gray-200 transition-all">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0 font-bold">
-                          <Database className="w-4 h-4" />
-                        </div>
-                        <div>
-                          <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${getFuelTypeBadgeStyle(tank.fuelType)}`}>
-                            {tank.fuelType}
-                          </span>
-                          <h3 className="text-sm font-extrabold text-[#1C1C1C] leading-snug mt-0.5">{tank.name}</h3>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          onClick={() => handleOpenEditTankModal(tank)}
-                          className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                          title="Edit Tank"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteTank(tank.id)}
-                          className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                          title="Delete Tank"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Level Progress Bar */}
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-xs font-bold">
-                        <span className="text-gray-500">Current Fill Volume</span>
-                        <span className={`tabular-nums ${pct < 20 ? 'text-rose-600 font-extrabold' : 'text-[#1C1C1C]'}`}>
-                          {pct}% ({tank.currentLevel.toLocaleString()} L)
-                        </span>
-                      </div>
-                      <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden">
-                        <div 
-                          className={`h-full rounded-full transition-all duration-500 ${
-                            pct < 20 ? 'bg-rose-500' : pct < 40 ? 'bg-amber-500' : 'bg-emerald-500'
-                          }`}
-                          style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Details Matrix */}
-                    <div className="grid grid-cols-2 gap-2 text-xs border-t border-gray-100 pt-2">
-                      <div className="bg-gray-50 p-2 rounded-lg">
-                        <span className="text-gray-400 font-semibold block text-[9px] uppercase">Total Capacity</span>
-                        <span className="text-[#1C1C1C] font-bold tabular-nums text-xs">{tank.capacity.toLocaleString()} L</span>
-                      </div>
-
-                      <div className="bg-gray-50 p-2 rounded-lg">
-                        <span className="text-gray-400 font-semibold block text-[9px] uppercase">Price / Liter</span>
-                        <span className="text-blue-600 font-bold tabular-nums text-xs">{formatCurrency(tank.pricePerLiter)}</span>
-                      </div>
-                    </div>
-
-                    {/* Connected Pumps Badge */}
-                    <div className="flex items-center justify-between text-xs text-gray-500 bg-blue-50/50 p-2 rounded-lg border border-blue-100/50">
-                      <span className="font-medium text-gray-600 flex items-center gap-1.5 text-[11px]">
-                        <Gauge className="w-3.5 h-3.5 text-blue-600" />
-                        <span>Mapped Nozzles ({mappedPumpsList.length}):</span>
-                      </span>
-                      <span className="font-bold text-blue-700 truncate max-w-[160px] text-xs">
-                        {mappedPumpsList.length > 0 ? mappedPumpsList.map(p => p.name).join(', ') : 'None'}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+        <UndergroundTanksTab
+          tanks={tanks}
+          setTanks={setTanks}
+          pumps={pumps}
+          setPumps={setPumps}
+          showToast={showToast}
+          formatCurrency={formatCurrency}
+          user={user}
+          userRole={userRole}
+        />
       )}
 
       {/* ========================================================================= */}
       {/* SECTION: OIL (LUBRICANT) STORAGE TANKS MANAGEMENT */}
       {/* ========================================================================= */}
       {adminSection === 'oils' && (
-        <div className="space-y-6 animate-fade-in">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
-            <div>
-              <h2 className="text-sm font-extrabold text-[#1C1C1C]">Bulk Oil & Lubricants Configuration</h2>
-              <p className="text-xs text-gray-500 mt-0.5">
-                Manage Forecourt 4-Chamber Dispenser units and Back Store 210L wholesale drums stored in Supabase
-              </p>
-            </div>
-            <div className="flex items-center gap-2 flex-wrap self-start sm:self-auto">
-              <button
-                onClick={handleOpenAddChamberModal}
-                className="flex items-center gap-1.5 px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm cursor-pointer"
-              >
-                <Droplets className="w-3.5 h-3.5" />
-                <span>+ Add Dispenser Chamber</span>
-              </button>
-              <button
-                onClick={handleOpenAddDrumModal}
-                className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm cursor-pointer"
-              >
-                <Layers className="w-3.5 h-3.5" />
-                <span>+ Add Storage Drum / Tank</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Oil Tanks Grid */}
-          {sortedOilTanks.length === 0 ? (
-            <div className="bg-white p-12 text-center rounded-2xl border border-gray-100 space-y-4 shadow-sm">
-              <div className="w-12 h-12 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center mx-auto">
-                <Droplets className="w-6 h-6" />
-              </div>
-              <div className="space-y-1">
-                <h3 className="text-sm font-bold text-[#1C1C1C]">No Bulk Oil Chambers or Drums Configured</h3>
-                <p className="text-xs text-gray-500 max-w-md mx-auto">
-                  Add Forecourt Dispenser Chambers (50L/100L) or Back Store Storage Drums (210L) to establish your station's bulk lubricant infrastructure.
-                </p>
-              </div>
-              <div className="flex items-center justify-center gap-3 pt-2 flex-wrap">
-                <button
-                  onClick={handleOpenAddChamberModal}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm cursor-pointer"
-                >
-                  <Droplets className="w-4 h-4" />
-                  <span>+ Add Dispenser Chamber</span>
-                </button>
-                <button
-                  onClick={handleOpenAddDrumModal}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm cursor-pointer"
-                >
-                  <Layers className="w-4 h-4" />
-                  <span>+ Add Storage Drum / Tank</span>
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {sortedOilTanks.map((oilTank) => {
-                const isChamber = oilTank.type === 'chamber' || oilTank.name.toLowerCase().includes('chamber') || oilTank.id.includes('chamber');
-                const pct = oilTank.capacity > 0 ? Math.round((oilTank.currentLevel / oilTank.capacity) * 100) : 0;
-                const totalStockVal = oilTank.currentLevel * (oilTank.pricePerLiter || 0);
-
-                return (
-                  <div key={oilTank.id} className="bg-white rounded-2xl border border-gray-100 p-4 space-y-3.5 shadow-sm hover:border-gray-200 transition-all">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2.5">
-                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 font-bold ${
-                          isChamber ? 'bg-amber-50 text-amber-600 border border-amber-200/60' : 'bg-blue-50 text-blue-600 border border-blue-200/60'
-                        }`}>
-                          {isChamber ? <Droplets className="w-4 h-4" /> : <Layers className="w-4 h-4" />}
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-1.5">
-                            <span className={`inline-flex px-2 py-0.5 rounded-md text-[9px] font-extrabold uppercase tracking-wide border ${
-                              isChamber 
-                                ? 'bg-amber-50 text-amber-800 border-amber-200' 
-                                : 'bg-blue-50 text-blue-800 border-blue-200'
-                            }`}>
-                              {isChamber ? `Chamber ${oilTank.chamberNumber ? `0${oilTank.chamberNumber}` : ''} (Forecourt)` : 'Back Store Drum'}
-                            </span>
-                            <span className={`inline-flex px-2 py-0.5 rounded-md text-[9px] font-extrabold border ${getOilGradeBadgeStyle(oilTank.grade)}`}>
-                              {oilTank.grade}
-                            </span>
-                          </div>
-                          <h3 className="text-sm font-extrabold text-[#1C1C1C] leading-snug mt-1">{oilTank.name}</h3>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => handleOpenEditOilTankModal(oilTank)}
-                          className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
-                          title="Edit Configuration"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteOilTank(oilTank.id)}
-                          className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                          title="Delete from Database"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Level Progress Bar */}
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-xs font-bold">
-                        <span className="text-gray-500">Current Volume Level</span>
-                        <div className="flex items-center gap-1.5 tabular-nums">
-                          <span className={`text-xs font-extrabold ${pct < 20 ? 'text-rose-600' : pct < 40 ? 'text-amber-600' : 'text-emerald-700'}`}>
-                            {pct}%
-                          </span>
-                          <span className="text-gray-400">({oilTank.currentLevel.toLocaleString()} L)</span>
-                        </div>
-                      </div>
-                      <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden">
-                        <div 
-                          className={`h-full rounded-full transition-all duration-500 ${
-                            pct < 20 ? 'bg-rose-500' : pct < 40 ? 'bg-amber-500' : 'bg-emerald-500'
-                          }`}
-                          style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
-                        />
-                      </div>
-                      <div className="flex justify-between text-[11px] text-gray-500 font-medium">
-                        <span>Current: <strong className="text-gray-900 tabular-nums">{oilTank.currentLevel.toLocaleString()} L</strong></span>
-                        <span>Capacity: <strong className="text-gray-900 tabular-nums">{oilTank.capacity.toLocaleString()} L</strong></span>
-                      </div>
-                    </div>
-
-                    {/* Rates & Stock Valuation Footer */}
-                    <div className="grid grid-cols-2 gap-2 pt-2 border-t border-gray-100 text-xs">
-                      <div className="bg-gray-50/70 p-2 rounded-lg border border-gray-100/80">
-                        <span className="text-[10px] text-gray-400 uppercase tracking-wider block font-bold">Rate / Liter</span>
-                        <span className="font-bold text-slate-900 tabular-nums text-xs">
-                          {formatCurrency(oilTank.pricePerLiter || 0)}
-                        </span>
-                      </div>
-                      <div className="bg-gray-50/70 p-2 rounded-lg border border-gray-100/80 text-right">
-                        <span className="text-[10px] text-gray-400 uppercase tracking-wider block font-bold">Total Stock Value</span>
-                        <span className="font-bold text-emerald-700 tabular-nums text-xs">
-                          {formatCurrency(totalStockVal)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+        <LubricantStorageTab
+          oilTanks={effectiveOilTanks}
+          setOilTanks={setEffectiveOilTanks}
+          showToast={showToast}
+          formatCurrency={formatCurrency}
+          user={user}
+          userRole={userRole}
+        />
       )}
 
       {/* ========================================================================= */}
@@ -1248,19 +824,31 @@ export default function AdminControlTab({
 
                                   <div className="flex items-center gap-1">
                                     <button
-                                      onClick={() => handleOpenEditNozzleModal(nozzle)}
-                                      className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        e.preventDefault();
+                                        handleOpenEditNozzleModal(nozzle);
+                                      }}
+                                      className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors cursor-pointer z-30"
                                       title="Edit Pump"
                                     >
                                       <Edit2 className="w-3.5 h-3.5" />
                                     </button>
-                                    <button
-                                      onClick={() => handleDeleteNozzle(nozzle.id)}
-                                      className="p-1 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors"
-                                      title="Delete Pump"
-                                    >
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
+                                    {isAdmin(user?.role || userRole) && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          e.preventDefault();
+                                          handleDeleteNozzle(nozzle.id);
+                                        }}
+                                        className="p-1 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors cursor-pointer z-30"
+                                        title="Delete Pump"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
                                   </div>
                                 </div>
 
@@ -1340,19 +928,19 @@ export default function AdminControlTab({
               return (
                 <div className="bg-white rounded-2xl border border-gray-200/80 shadow-2xs overflow-hidden">
                   <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
+                    <table className="w-full min-w-[700px] text-left text-xs">
                       <thead>
                         <tr className="bg-gray-50/80 border-b border-gray-200/80 text-gray-500 font-bold uppercase tracking-wider text-[10px]">
                           <th className="py-3 px-4">Name</th>
                           <th className="py-3 px-4">Role</th>
                           <th className="py-3 px-4">Contact Number</th>
                           <th className="py-3 px-4">Status</th>
-                          <th className="py-3 px-4 text-right">Actions</th>
+                          <th className="py-3 px-4 text-right sticky right-0 bg-gray-50 z-10">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100 font-medium">
                         {empList.map((emp) => (
-                          <tr key={emp.id} className="hover:bg-blue-50/40 transition-colors">
+                          <tr key={emp.id} className="hover:bg-blue-50/40 transition-colors group">
                             <td className="py-3 px-4">
                               <div className="flex items-center gap-3">
                                 <div className={`w-8 h-8 rounded-xl ${emp.avatarColor || 'bg-blue-500'} text-white flex items-center justify-center font-extrabold text-xs shadow-2xs flex-shrink-0`}>
@@ -1376,7 +964,12 @@ export default function AdminControlTab({
                             </td>
                             <td className="py-3 px-4">
                               <button
-                                onClick={() => handleToggleEmpStatus(emp.id)}
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  e.preventDefault();
+                                  handleToggleEmpStatus(emp.id);
+                                }}
                                 className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold transition-colors cursor-pointer ${
                                   emp.status === 'Active' 
                                     ? 'bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 hover:bg-emerald-500/20' 
@@ -1386,22 +979,34 @@ export default function AdminControlTab({
                                 {emp.status}
                               </button>
                             </td>
-                            <td className="py-3 px-4 text-right">
+                            <td className="py-3 px-4 text-right sticky right-0 bg-white group-hover:bg-blue-50/40 z-10 whitespace-nowrap shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.03)]">
                               <div className="flex items-center justify-end gap-1">
                                 <button
-                                  onClick={() => handleOpenEditEmpModal(emp)}
-                                  className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    e.preventDefault();
+                                    handleOpenEditEmpModal(emp);
+                                  }}
+                                  className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer z-30"
                                   title="Edit Staff Member"
                                 >
                                   <Edit2 className="w-3.5 h-3.5" />
                                 </button>
-                                <button
-                                  onClick={() => handleDeleteEmployee(emp.id)}
-                                  className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                                  title="Remove Staff Member"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
+                                {isAdmin(user?.role || userRole) && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      e.preventDefault();
+                                      handleDeleteEmployee(emp.id);
+                                    }}
+                                    className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer z-30"
+                                    title="Remove Staff Member"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -1640,10 +1245,15 @@ export default function AdminControlTab({
                           </span>
                         </td>
                         <td className="py-4 px-6 text-center">
-                          {sched.status === 'Pending' && (
+                          {sched.status === 'Pending' && isAdmin(user?.role || userRole) && (
                             <button
-                              onClick={() => handleCancelSchedule(sched.id)}
-                              className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg transition-colors font-bold text-xs flex items-center justify-center gap-1.5 w-full"
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                e.preventDefault();
+                                handleCancelSchedule(sched.id);
+                              }}
+                              className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg transition-colors font-bold text-xs flex items-center justify-center gap-1.5 w-full cursor-pointer z-30"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                               <span>Cancel</span>
@@ -1781,17 +1391,19 @@ export default function AdminControlTab({
             <p className="text-xs text-rose-600">
               Clear custom station logs, pump readings, and restore initial demo tank levels and staff records.
             </p>
-            <button
-              onClick={() => {
-                if (confirm("Reset all station logs and data back to initial defaults?")) {
-                  onResetAllData();
-                  window.location.reload();
-                }
-              }}
-              className="px-4 py-2 bg-rose-600 text-white rounded-xl text-xs font-bold hover:bg-rose-700 transition-colors shadow-sm cursor-pointer"
-            >
-              Reset All Station Data
-            </button>
+            {isAdmin(user?.role || userRole) && (
+              <button
+                onClick={() => {
+                  if (confirm("Reset all station logs and data back to initial defaults?")) {
+                    onResetAllData();
+                    window.location.reload();
+                  }
+                }}
+                className="px-4 py-2 bg-rose-600 text-white rounded-xl text-xs font-bold hover:bg-rose-700 transition-colors shadow-sm cursor-pointer"
+              >
+                Reset All Station Data
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -2043,266 +1655,7 @@ export default function AdminControlTab({
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* MODAL: ADD / EDIT BULK OIL CHAMBER OR STORAGE DRUM */}
-      {/* ========================================================================= */}
-      {isAddOilTankModalOpen && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-6 max-w-md w-full space-y-5 shadow-2xl animate-scale-up">
-            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
-              <div className="flex items-center gap-2">
-                <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold ${
-                  oilTankFormType === 'chamber' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
-                }`}>
-                  {oilTankFormType === 'chamber' ? <Droplets className="w-4 h-4" /> : <Layers className="w-4 h-4" />}
-                </div>
-                <div>
-                  <h3 className="text-base font-extrabold text-[#1C1C1C]">
-                    {editingOilTank 
-                      ? (oilTankFormType === 'chamber' ? 'Edit Dispenser Chamber' : 'Edit Storage Drum / Tank') 
-                      : (oilTankFormType === 'chamber' ? 'Add Forecourt Dispenser Chamber' : 'Add Back Store Storage Drum')}
-                  </h3>
-                  <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
-                    {oilTankFormType === 'chamber' ? 'Forecourt 4-Chamber Dispenser Unit' : 'Back Store Wholesale Inventory'}
-                  </span>
-                </div>
-              </div>
-              <button 
-                onClick={() => setIsAddOilTankModalOpen(false)}
-                className="p-1 text-gray-400 hover:text-gray-600 rounded-lg cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
 
-            {/* Type selector toggle (Chamber vs Drum) */}
-            {!editingOilTank && (
-              <div className="grid grid-cols-2 gap-2 p-1 bg-gray-100 rounded-xl text-xs font-bold">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setOilTankFormType('chamber');
-                    setOilTankFormCapacity(100);
-                    setOilTankFormGrade('Lanka 2T Super');
-                    const existingChambers = effectiveOilTanks.filter(t => t.type === 'chamber' || t.name.toLowerCase().includes('chamber'));
-                    setOilTankFormName(`Chamber 0${existingChambers.length + 1}`);
-                  }}
-                  className={`py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                    oilTankFormType === 'chamber'
-                      ? 'bg-amber-600 text-white shadow-sm'
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
-                >
-                  <Droplets className="w-3.5 h-3.5" />
-                  <span>Dispenser Chamber</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setOilTankFormType('drum');
-                    setOilTankFormCapacity(210);
-                    setOilTankFormGrade('Caltex 20W-50');
-                    setOilTankFormName('Back Store Drum - Caltex 20W-50');
-                  }}
-                  className={`py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                    oilTankFormType === 'drum'
-                      ? 'bg-blue-600 text-white shadow-sm'
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
-                >
-                  <Layers className="w-3.5 h-3.5" />
-                  <span>Storage Drum / Tank</span>
-                </button>
-              </div>
-            )}
-
-            {oilTankModalError && (
-              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl font-medium flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-                <span>{oilTankModalError}</span>
-              </div>
-            )}
-
-            <div className="space-y-3.5 text-xs">
-              {oilTankFormType === 'chamber' && (
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="col-span-1">
-                    <label className="font-bold text-gray-600 block mb-1">Chamber #</label>
-                    <select
-                      value={oilTankFormChamberNo}
-                      onChange={(e) => {
-                        const num = Number(e.target.value);
-                        setOilTankFormChamberNo(num);
-                        setOilTankFormName(`Chamber 0${num}`);
-                      }}
-                      className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] font-bold"
-                    >
-                      {[1, 2, 3, 4, 5, 6, 7, 8].map(n => (
-                        <option key={n} value={n}>Chamber 0{n}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="col-span-2">
-                    <label className="font-bold text-gray-600 block mb-1">Display Identifier</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Chamber 01"
-                      value={oilTankFormName}
-                      onChange={(e) => setOilTankFormName(e.target.value)}
-                      className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] font-bold"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {oilTankFormType === 'drum' && (
-                <div>
-                  <label className="font-bold text-gray-600 block mb-1">Storage Drum / Tank Name</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Back Store Wholesale Drum - Caltex 20W-50"
-                    value={oilTankFormName}
-                    onChange={(e) => setOilTankFormName(e.target.value)}
-                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] font-semibold"
-                  />
-                </div>
-              )}
-
-              <div>
-                <label className="font-bold text-gray-600 block mb-1">Oil Grade / Lubricant Product</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Lanka 2T Super, Caltex 20W-50, 20W-40"
-                  value={oilTankFormGrade}
-                  onChange={(e) => setOilTankFormGrade(e.target.value)}
-                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] font-bold"
-                />
-                {/* Quick Grade Presets */}
-                <div className="flex flex-wrap gap-1.5 mt-1.5">
-                  {[
-                    'Lanka 2T Super',
-                    '20W-40',
-                    'Caltex 20W-50',
-                    'Hydraulic 68',
-                    'Engine Oil 15W-40',
-                    'Gear Oil EP 90'
-                  ].map((preset) => (
-                    <button
-                      key={preset}
-                      type="button"
-                      onClick={() => setOilTankFormGrade(preset)}
-                      className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition-colors cursor-pointer ${
-                        oilTankFormGrade === preset
-                          ? 'bg-amber-100 text-amber-800 border-amber-300'
-                          : 'bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-200'
-                      }`}
-                    >
-                      {preset}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <div className="flex justify-between items-center mb-1">
-                    <label className="font-bold text-gray-600">Total Capacity (L)</label>
-                    <div className="flex gap-1">
-                      {oilTankFormType === 'chamber' ? (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => setOilTankFormCapacity(50)}
-                            className="text-[9px] font-bold px-1 py-0.5 bg-gray-100 hover:bg-gray-200 rounded text-gray-700"
-                          >
-                            50L
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setOilTankFormCapacity(100)}
-                            className="text-[9px] font-bold px-1 py-0.5 bg-amber-100 hover:bg-amber-200 rounded text-amber-800"
-                          >
-                            100L
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => setOilTankFormCapacity(210)}
-                            className="text-[9px] font-bold px-1 py-0.5 bg-blue-100 hover:bg-blue-200 rounded text-blue-800"
-                          >
-                            210L
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setOilTankFormCapacity(1000)}
-                            className="text-[9px] font-bold px-1 py-0.5 bg-gray-100 hover:bg-gray-200 rounded text-gray-700"
-                          >
-                            1000L
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  <input
-                    type="number"
-                    value={oilTankFormCapacity}
-                    onFocus={(e) => e.target.select()}
-                    onChange={(e) => setOilTankFormCapacity(Number(e.target.value))}
-                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] tabular-nums font-bold"
-                  />
-                </div>
-
-                <div>
-                  <label className="font-bold text-gray-600 block mb-1">Current Volume (L)</label>
-                  <input
-                    type="number"
-                    value={oilTankFormCurrentLevel}
-                    onFocus={(e) => e.target.select()}
-                    onChange={(e) => setOilTankFormCurrentLevel(Number(e.target.value))}
-                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] tabular-nums font-bold"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="font-bold text-gray-600 block mb-1">Price / Tariff Rate (Rs. per Liter)</label>
-                <div className="relative">
-                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 font-bold text-xs">Rs.</span>
-                  <input
-                    type="number"
-                    step="any"
-                    value={oilTankFormPrice}
-                    onFocus={(e) => e.target.select()}
-                    onChange={(e) => setOilTankFormPrice(Number(e.target.value))}
-                    className="w-full pl-10 pr-3.5 py-2 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] tabular-nums font-bold"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="flex gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => setIsAddOilTankModalOpen(false)}
-                className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveOilTankSubmit}
-                className={`flex-1 py-2.5 text-white rounded-xl text-xs font-bold transition-colors shadow-sm cursor-pointer ${
-                  oilTankFormType === 'chamber' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'
-                }`}
-              >
-                {editingOilTank ? 'Update in Database' : 'Save to Supabase'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

@@ -1,16 +1,19 @@
 import React, { useState, useMemo } from 'react';
-import { FuelTank, FuelType, PriceSchedule } from '../types';
+import { FuelTank, FuelType, PriceSchedule, AuthUser } from '../types';
 import { Calendar, Trash2, Clock, Tag, Edit2, Save, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { isAdmin } from '../lib/auth';
 
 interface PriceManagementTabProps {
   tanks: FuelTank[];
   setTanks: React.Dispatch<React.SetStateAction<FuelTank[]>>;
   priceSchedules: PriceSchedule[];
   setPriceSchedules: React.Dispatch<React.SetStateAction<PriceSchedule[]>>;
+  user?: AuthUser | null;
+  userRole?: string;
 }
 
-export default function PriceManagementTab({ tanks, setTanks, priceSchedules, setPriceSchedules }: PriceManagementTabProps) {
+export default function PriceManagementTab({ tanks, setTanks, priceSchedules, setPriceSchedules, user, userRole }: PriceManagementTabProps) {
   const [editingTankId, setEditingTankId] = useState<string | null>(null);
   const [tempPrice, setTempPrice] = useState<number>(0);
 
@@ -36,6 +39,7 @@ export default function PriceManagementTab({ tanks, setTanks, priceSchedules, se
   };
 
   const handleCancelSchedule = async (id: string) => {
+    if (!window.confirm("Are you sure you want to cancel this price schedule?")) return;
     const isConfigured = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
     if (isConfigured) {
       try {
@@ -47,7 +51,9 @@ export default function PriceManagementTab({ tanks, setTanks, priceSchedules, se
     }
     const updated = priceSchedules.filter(s => s.id !== id);
     setPriceSchedules(updated);
-    localStorage.setItem('fms_priceSchedules', JSON.stringify(updated));
+    try {
+      localStorage.setItem('fms_priceSchedules', JSON.stringify(updated));
+    } catch (_) {}
   };
 
 
@@ -278,10 +284,15 @@ export default function PriceManagementTab({ tanks, setTanks, priceSchedules, se
                       </span>
                     </td>
                     <td className="py-4 px-6 text-center">
-                      {sched.status === 'Pending' && (
+                      {sched.status === 'Pending' && isAdmin(user?.role || userRole) && (
                         <button
-                          onClick={() => handleCancelSchedule(sched.id)}
-                          className="flex items-center justify-center gap-1.5 w-full px-3 py-1.5 bg-gray-50 hover:bg-red-50 text-gray-500 hover:text-red-600 border border-gray-200 hover:border-red-200 rounded-lg transition-colors font-medium text-xs cursor-pointer"
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            handleCancelSchedule(sched.id);
+                          }}
+                          className="flex items-center justify-center gap-1.5 w-full px-3 py-1.5 bg-gray-50 hover:bg-red-50 text-gray-500 hover:text-red-600 border border-gray-200 hover:border-red-200 rounded-lg transition-colors font-medium text-xs cursor-pointer z-30"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                           <span>Cancel</span>

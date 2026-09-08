@@ -10,59 +10,16 @@ import {
   Trash2, ArrowUpRight, CheckCircle, AlertCircle, AlertTriangle, ShieldCheck,
   ChevronDown, Check, X, Car, PlusCircle
 } from 'lucide-react';
-import { Customer, CreditTransaction, CreditPayment, FuelTank, CustomerLedgerEntry, CustomerType, CustomerStatus } from '../types';
+import { Customer, CreditTransaction, CreditPayment, FuelTank, CustomerLedgerEntry, CustomerType, CustomerStatus, AuthUser } from '../types';
 import { supabase, saveCustomer, deleteCustomer, saveCustomerLedgerEntry } from '../lib/supabaseClient';
 import { formatRs, formatLiters, exportCustomersToCSV } from '../lib/customerData';
+import { isAdmin } from '../lib/auth';
 
 import CustomerAddEditModal from './customers/CustomerAddEditModal';
 import CustomerPaymentModal from './customers/CustomerPaymentModal';
 import CustomerStatementModal from './customers/CustomerStatementModal';
 import CustomerAdjustmentModal from './customers/CustomerAdjustmentModal';
 import CustomerDeleteModal from './customers/CustomerDeleteModal';
-
-/**
- * Maps raw Supabase customer record into the strongly typed Customer interface.
- */
-function mapSupabaseCustomer(c: any): Customer {
-  const rawType = (c.customer_type || c.account_type || c.customerType || 'Credit').toString().toLowerCase();
-  const customerType: CustomerType = rawType === 'deposit' ? 'Deposit' : 'Credit';
-
-  const rawStatus = (c.status || 'Active').toString();
-  const status: CustomerStatus = rawStatus.toLowerCase() === 'overdue' 
-    ? 'Overdue' 
-    : (rawStatus.toLowerCase() === 'suspended' || rawStatus.toLowerCase() === 'blocked')
-    ? 'Suspended'
-    : 'Active';
-
-  let vehicleNumbers: string[] = [];
-  if (Array.isArray(c.vehicle_numbers)) {
-    vehicleNumbers = c.vehicle_numbers;
-  } else if (Array.isArray(c.registered_vehicles)) {
-    vehicleNumbers = c.registered_vehicles;
-  } else if (typeof c.vehicle_numbers === 'string' && c.vehicle_numbers.trim()) {
-    vehicleNumbers = c.vehicle_numbers.split(',').map((v: string) => v.trim()).filter(Boolean);
-  } else if (typeof c.registered_vehicles === 'string' && c.registered_vehicles.trim()) {
-    vehicleNumbers = c.registered_vehicles.split(',').map((v: string) => v.trim()).filter(Boolean);
-  }
-
-  return {
-    id: c.id,
-    name: c.name || '',
-    phone: c.phone || c.contact_number || '',
-    customerType,
-    category: c.category || 'Business',
-    email: c.email || '',
-    address: c.address || '',
-    notes: c.notes || '',
-    creditLimit: Number(c.credit_limit !== undefined ? c.credit_limit : c.creditLimit) || 0,
-    currentBalance: Number(c.current_balance !== undefined ? c.current_balance : c.currentBalance) || 0,
-    depositBalance: Number(c.deposit_balance !== undefined ? c.deposit_balance : (c.initial_deposit !== undefined ? c.initial_deposit : c.depositBalance)) || 0,
-    allowedCreditDays: Number(c.allowed_days !== undefined ? c.allowed_days : (c.allowed_credit_days !== undefined ? c.allowed_credit_days : c.allowedCreditDays)) || 30,
-    status,
-    vehicleNumbers,
-    createdAt: c.created_at || new Date().toISOString()
-  };
-}
 
 interface CustomersTabProps {
   customers?: Customer[];
@@ -72,29 +29,47 @@ interface CustomersTabProps {
   payments?: CreditPayment[];
   setPayments?: React.Dispatch<React.SetStateAction<CreditPayment[]>>;
   tanks?: FuelTank[];
+  user?: AuthUser | null;
+  userRole?: string;
 }
 
 export default function CustomersTab({
-  customers: externalCustomers = [],
+  customers: externalCustomers,
   setCustomers: externalSetCustomers,
   creditTransactions = [],
   setCreditTransactions,
   payments = [],
   setPayments,
-  tanks = []
+  tanks = [],
+  user,
+  userRole
 }: CustomersTabProps) {
-  // Pure live Supabase customer state - strictly empty array initially, zero mock data
-  const [internalCustomers, setInternalCustomers] = useState<Customer[]>([]);
-  const customers = externalCustomers && externalCustomers.length > 0 ? externalCustomers : internalCustomers;
-  const setCustomers = (action: React.SetStateAction<Customer[]>) => {
-    setInternalCustomers(action);
-    if (externalSetCustomers) {
-      externalSetCustomers(action);
-    }
-  };
+  // Local state for customers if not passed from parent or initialized
+  const [internalCustomers, setInternalCustomers] = useState<Customer[]>(() => {
+    try {
+      const stored = localStorage.getItem('fms_customers');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0 && !parsed.some((c: any) => c.id === 'CUST-101')) return parsed;
+      }
+    } catch (_) {}
+    return [];
+  });
 
-  // Ledger transactions state - strictly empty array initially, zero mock data
-  const [ledgerEntries, setLedgerEntries] = useState<CustomerLedgerEntry[]>([]);
+  const customers = externalCustomers !== undefined ? externalCustomers : internalCustomers;
+  const setCustomers = externalSetCustomers || setInternalCustomers;
+
+  // Ledger transactions state
+  const [ledgerEntries, setLedgerEntries] = useState<CustomerLedgerEntry[]>(() => {
+    try {
+      const stored = localStorage.getItem('fms_customer_ledgers');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0 && !parsed.some((l: any) => l.id?.startsWith('TX-') || l.id === 'LEDGER-001')) return parsed;
+      }
+    } catch (_) {}
+    return [];
+  });
 
   // Filter & Search states
   const [searchQuery, setSearchQuery] = useState('');
@@ -118,31 +93,89 @@ export default function CustomersTab({
     setTimeout(() => setToastMessage(null), 4000);
   };
 
+  // Sync to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('fms_customers', JSON.stringify(customers));
+    } catch (_) {}
+  }, [customers]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('fms_customer_ledgers', JSON.stringify(ledgerEntries));
+    } catch (_) {}
+  }, [ledgerEntries]);
+
   // Fetch from Supabase and listen for Real-time changes
   const fetchSupabaseData = async () => {
     setIsRefreshing(true);
     try {
       // 1. Fetch customers directly from Supabase
+      let custData: any[] | null = null;
       const { data, error } = await supabase
         .from('customers')
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (!error && data) {
-        const mappedCustomers = data.map(mapSupabaseCustomer);
+      if (error) {
+        const retry = await supabase
+          .from('customers')
+          .select('*')
+          .order('name', { ascending: true });
+        if (!retry.error && retry.data) {
+          custData = retry.data;
+        }
+      } else if (data) {
+        custData = data;
+      }
+
+      if (custData && custData.length > 0) {
+        const mappedCustomers: Customer[] = custData.map((c: any) => ({
+          id: c.id,
+          name: c.name,
+          phone: c.phone || '',
+          customerType: c.customer_type || c.customerType || 'Credit',
+          category: c.category || 'Business',
+          email: c.email || '',
+          address: c.address || '',
+          notes: c.notes || '',
+          creditLimit: Number(c.credit_limit !== undefined ? c.credit_limit : c.creditLimit) || 0,
+          currentBalance: Number(c.current_balance !== undefined ? c.current_balance : c.currentBalance) || 0,
+          depositBalance: Number(c.deposit_balance !== undefined ? c.deposit_balance : c.depositBalance) || 0,
+          allowedCreditDays: Number(c.allowed_days !== undefined ? c.allowed_days : c.allowedCreditDays) || 30,
+          status: c.status || 'Active',
+          vehicleNumbers: Array.isArray(c.vehicle_numbers) 
+            ? c.vehicle_numbers 
+            : (c.vehicle_numbers ? String(c.vehicle_numbers).split(',').map((s: string) => s.trim()).filter(Boolean) : []),
+          createdAt: c.created_at || new Date().toISOString()
+        }));
+
         setCustomers(mappedCustomers);
         setIsRealtimeActive(true);
-      } else {
-        setCustomers([]);
       }
 
       // 2. Fetch customer ledgers
-      const { data: ledgerData, error: ledgerError } = await supabase
+      let ledgerData: any[] | null = null;
+      const { data: lData, error: ledgerError } = await supabase
         .from('customer_ledgers')
         .select('*')
         .order('transaction_date', { ascending: false });
 
-      if (!ledgerError && ledgerData && ledgerData.length > 0) {
+      if (ledgerError) {
+        try {
+          const retryLedger = await supabase
+            .from('customer_transactions')
+            .select('*')
+            .order('created_at', { ascending: false });
+          if (!retryLedger.error && retryLedger.data) {
+            ledgerData = retryLedger.data;
+          }
+        } catch (_) {}
+      } else if (lData) {
+        ledgerData = lData;
+      }
+
+      if (ledgerData && ledgerData.length > 0) {
         const mappedLedger: CustomerLedgerEntry[] = ledgerData.map((l: any) => ({
           id: l.id,
           customerId: l.customer_id || l.customerId,
@@ -166,12 +199,9 @@ export default function CustomersTab({
         }));
 
         setLedgerEntries(mappedLedger);
-      } else {
-        setLedgerEntries([]);
       }
     } catch (err) {
       console.warn("Supabase customer sync notice:", err);
-      setCustomers([]);
     } finally {
       setIsRefreshing(false);
     }
@@ -190,7 +220,25 @@ export default function CustomersTab({
         (payload: any) => {
           console.log('Realtime change on customers:', payload);
           if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-            const updated = mapSupabaseCustomer(payload.new);
+            const row = payload.new;
+            const updated: Customer = {
+              id: row.id,
+              name: row.name,
+              phone: row.phone || '',
+              customerType: row.customer_type || row.customerType || 'Credit',
+              category: row.category || 'Business',
+              email: row.email || '',
+              address: row.address || '',
+              notes: row.notes || '',
+              creditLimit: Number(row.credit_limit) || 0,
+              currentBalance: Number(row.current_balance) || 0,
+              depositBalance: Number(row.deposit_balance) || 0,
+              allowedCreditDays: Number(row.allowed_days) || 30,
+              status: row.status || 'Active',
+              vehicleNumbers: Array.isArray(row.vehicle_numbers) ? row.vehicle_numbers : [],
+              createdAt: row.created_at || new Date().toISOString()
+            };
+
             setCustomers(prev => {
               const exists = prev.some(c => c.id === updated.id);
               if (exists) {
@@ -317,7 +365,7 @@ export default function CustomersTab({
       };
 
       setLedgerEntries(prev => [initialEntry, ...prev]);
-      saveCustomerLedgerEntry(supabase, initialEntry);
+      await saveCustomerLedgerEntry(supabase, initialEntry);
     } else if (!isExisting && savedCustomer.customerType === 'Credit') {
       const initialEntry: CustomerLedgerEntry = {
         id: `LEDGER-${Date.now().toString().slice(-6)}`,
@@ -336,7 +384,7 @@ export default function CustomersTab({
       };
 
       setLedgerEntries(prev => [initialEntry, ...prev]);
-      saveCustomerLedgerEntry(supabase, initialEntry);
+      await saveCustomerLedgerEntry(supabase, initialEntry);
     }
 
     showToast(
@@ -347,7 +395,7 @@ export default function CustomersTab({
     );
 
     // Sync to Supabase
-    saveCustomer(supabase, savedCustomer);
+    await saveCustomer(supabase, savedCustomer);
   };
 
   // Handle Recording Top-up Deposit / Receive Payment
@@ -382,7 +430,7 @@ export default function CustomersTab({
 
     // Update customer state
     setCustomers(prev => prev.map(c => c.id === targetCustomer.id ? updatedCustomer : c));
-    saveCustomer(supabase, updatedCustomer);
+    await saveCustomer(supabase, updatedCustomer);
 
     // Create ledger transaction entry
     const ledgerEntry: CustomerLedgerEntry = {
@@ -405,7 +453,7 @@ export default function CustomersTab({
     };
 
     setLedgerEntries(prev => [ledgerEntry, ...prev]);
-    saveCustomerLedgerEntry(supabase, ledgerEntry);
+    await saveCustomerLedgerEntry(supabase, ledgerEntry);
 
     // If payments prop exists, record in credit payments
     if (setPayments) {
@@ -463,7 +511,7 @@ export default function CustomersTab({
     };
 
     setCustomers(prev => prev.map(c => c.id === targetCustomer.id ? updatedCustomer : c));
-    saveCustomer(supabase, updatedCustomer);
+    await saveCustomer(supabase, updatedCustomer);
 
     const ledgerEntry: CustomerLedgerEntry = {
       id: `LEDGER-${Date.now().toString().slice(-6)}`,
@@ -482,7 +530,7 @@ export default function CustomersTab({
     };
 
     setLedgerEntries(prev => [ledgerEntry, ...prev]);
-    saveCustomerLedgerEntry(supabase, ledgerEntry);
+    await saveCustomerLedgerEntry(supabase, ledgerEntry);
 
     showToast(`Manual ${adjustmentType} adjustment of ${formatRs(amount)} recorded for ${targetCustomer.name}.`, 'info');
   };
@@ -492,14 +540,13 @@ export default function CustomersTab({
     const cust = customers.find(c => c.id === customerId);
     const custName = cust?.name || customerId;
 
-    // Immediately update local state
     setCustomers(prev => prev.filter(c => c.id !== customerId));
-
-    // Delete the record directly from Supabase
+    
     try {
       await supabase.from('customers').delete().eq('id', customerId);
-    } catch (err) {
-      console.error("Supabase customer delete error:", err);
+      await deleteCustomer(supabase, customerId);
+    } catch (err: any) {
+      console.warn("Delete customer error:", err);
     }
 
     showToast(`Customer "${custName}" has been deleted from database.`, 'info');
@@ -673,7 +720,7 @@ export default function CustomersTab({
         className="bg-white rounded-2xl border border-gray-200/80 shadow-2xs overflow-hidden"
       >
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse">
+          <table className="w-full min-w-[920px] text-left text-xs border-collapse">
             <thead>
               <tr className="bg-slate-50/80 border-b border-gray-200 text-gray-500 font-bold uppercase tracking-wider text-[10px]">
                 <th className="py-3.5 px-4">Customer / Business</th>
@@ -683,7 +730,7 @@ export default function CustomersTab({
                 <th className="py-3.5 px-3 text-right">Deposit / Credit Limit (Rs.)</th>
                 <th className="py-3.5 px-3 text-right">Current Balance (Rs.)</th>
                 <th className="py-3.5 px-3 text-center">Status</th>
-                <th className="py-3.5 px-4 text-right">Actions</th>
+                <th className="py-3.5 px-4 text-right sticky right-0 bg-slate-50 z-10">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 font-sans">
@@ -873,12 +920,17 @@ export default function CustomersTab({
                       </td>
 
                       {/* 8. Actions */}
-                      <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                      <td className="py-3.5 px-4 text-right sticky right-0 bg-white group-hover:bg-slate-50 z-10 whitespace-nowrap shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.03)]">
                         <div className="flex items-center justify-end gap-1.5">
                           {/* Top-up / Receive Payment button */}
                           <button
-                            onClick={() => setPaymentCustomer(customer)}
-                            className={`px-2.5 py-1.5 rounded-xl text-xs font-bold shadow-2xs transition-all flex items-center gap-1 cursor-pointer ${
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              setPaymentCustomer(customer);
+                            }}
+                            className={`px-2.5 py-1.5 rounded-xl text-xs font-bold shadow-2xs transition-all flex items-center gap-1 cursor-pointer z-30 ${
                               isDeposit 
                                 ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200' 
                                 : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'
@@ -891,8 +943,13 @@ export default function CustomersTab({
 
                           {/* Statement / Ledger */}
                           <button
-                            onClick={() => setStatementCustomer(customer)}
-                            className="p-1.5 rounded-xl bg-gray-50 hover:bg-gray-100 text-gray-600 hover:text-slate-900 border border-gray-200 transition-colors cursor-pointer"
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              setStatementCustomer(customer);
+                            }}
+                            className="p-1.5 rounded-xl bg-gray-50 hover:bg-gray-100 text-gray-600 hover:text-slate-900 border border-gray-200 transition-colors cursor-pointer z-30"
                             title="View full account ledger & statement"
                           >
                             <FileText className="w-4 h-4" />
@@ -900,24 +957,34 @@ export default function CustomersTab({
 
                           {/* Edit / Manage */}
                           <button
-                            onClick={() => {
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
                               setEditingCustomer(customer);
                               setIsAddModalOpen(true);
                             }}
-                            className="p-1.5 rounded-xl bg-gray-50 hover:bg-gray-100 text-gray-600 hover:text-slate-900 border border-gray-200 transition-colors cursor-pointer"
+                            className="p-1.5 rounded-xl bg-gray-50 hover:bg-gray-100 text-gray-600 hover:text-slate-900 border border-gray-200 transition-colors cursor-pointer z-30"
                             title="Edit customer details & vehicles"
                           >
                             <Edit2 className="w-4 h-4" />
                           </button>
 
-                          {/* Delete */}
-                          <button
-                            onClick={() => setDeletingCustomer(customer)}
-                            className="p-1.5 rounded-xl bg-gray-50 hover:bg-rose-50 text-gray-400 hover:text-rose-600 border border-gray-200 transition-colors cursor-pointer"
-                            title="Delete customer"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {/* Delete (Admin Only) */}
+                          {isAdmin(user?.role || userRole) && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                e.preventDefault();
+                                setDeletingCustomer(customer);
+                              }}
+                              className="p-1.5 rounded-xl bg-gray-50 hover:bg-rose-50 text-gray-400 hover:text-rose-600 border border-gray-200 transition-colors cursor-pointer z-30"
+                              title="Delete customer"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -926,30 +993,22 @@ export default function CustomersTab({
               ) : (
                 <tr>
                   <td colSpan={8} className="py-16 text-center text-gray-500">
-                    <div className="max-w-md mx-auto space-y-3">
-                      <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
-                        <Users className="w-6 h-6" />
-                      </div>
-                      <div className="font-bold text-sm text-slate-900 font-sans">
-                        {searchQuery || accountTypeFilter !== 'ALL' || statusFilter !== 'ALL'
-                          ? "No Matching Customers Found"
-                          : "No customer accounts registered yet"}
-                      </div>
-                      <p className="text-xs text-gray-500 font-sans leading-relaxed">
+                    <div className="max-w-sm mx-auto space-y-3">
+                      <Users className="w-10 h-10 text-gray-300 mx-auto" />
+                      <div className="font-bold text-sm text-slate-800">No Customers Found</div>
+                      <p className="text-xs text-gray-400">
                         {searchQuery || accountTypeFilter !== 'ALL' || statusFilter !== 'ALL'
                           ? "No customer accounts match your search or active filters."
-                          : "No customer accounts registered yet. Click '+ Add New Customer' to register credit or prepaid deposit accounts."}
+                          : "No customer accounts are currently registered in your station."}
                       </p>
                       <button
-                        id="btn-empty-add-customer"
                         onClick={() => {
                           setEditingCustomer(null);
                           setIsAddModalOpen(true);
                         }}
-                        className="px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold shadow-2xs hover:bg-slate-800 transition-all flex items-center gap-1.5 mx-auto cursor-pointer"
+                        className="px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold shadow-2xs hover:bg-slate-800 cursor-pointer"
                       >
-                        <Plus className="w-4 h-4" />
-                        <span>+ Add New Customer</span>
+                        + Register First Customer
                       </button>
                     </div>
                   </td>

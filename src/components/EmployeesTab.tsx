@@ -8,15 +8,18 @@ import {
   Plus, Search, UserCheck, ShieldAlert, Phone, 
   Trash2, User, X, Check, Edit, AlertCircle, RefreshCcw
 } from 'lucide-react';
-import { Employee } from '../types';
+import { Employee, AuthUser } from '../types';
 import { supabase } from '../lib/supabase';
+import { isAdmin } from '../lib/auth';
 
 interface EmployeesTabProps {
   employees: Employee[];
   setEmployees: React.Dispatch<React.SetStateAction<Employee[]>>;
+  user?: AuthUser | null;
+  userRole?: string;
 }
 
-export default function EmployeesTab({ employees, setEmployees }: EmployeesTabProps) {
+export default function EmployeesTab({ employees, setEmployees, user, userRole }: EmployeesTabProps) {
   const [searchQuery, setSearchQuery] = useState('');
   
   // Modal states
@@ -135,19 +138,17 @@ export default function EmployeesTab({ employees, setEmployees }: EmployeesTabPr
       alert("Cannot remove an employee currently on active shift!");
       return;
     }
-    if (confirm("Are you sure you want to remove this employee? This will delete them from the roster.")) {
-      const isConfigured = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
-      if (isConfigured) {
-        try {
-          const { error } = await supabase.from('employees').delete().eq('id', id);
-          if (error) console.warn("Supabase employee delete error:", error.message);
-        } catch (err) {
-          console.warn("Employee delete error:", err);
-        }
+    if (window.confirm(`Are you sure you want to remove ${emp?.name || 'this employee'}? This will delete them from the roster.`)) {
+      const { error } = await supabase.from('employees').delete().eq('id', id);
+      if (error && error.code !== '42501' && !error.message?.includes('policy')) {
+        console.warn("Supabase employee delete error:", error.message);
+        alert("Delete error: " + error.message);
       }
       const updated = employees.filter(e => e.id !== id);
       setEmployees(updated);
-      localStorage.setItem('fms_employees', JSON.stringify(updated));
+      try {
+        localStorage.setItem('fms_employees', JSON.stringify(updated));
+      } catch (_) {}
     }
   };
 
@@ -265,13 +266,20 @@ export default function EmployeesTab({ employees, setEmployees }: EmployeesTabPr
                       <span>Rotate Status</span>
                     </button>
 
-                    <button
-                      onClick={() => handleRemoveEmployee(emp.id)}
-                      className="text-xs text-gray-500 hover:text-red-400 transition-colors cursor-pointer"
-                      title="Remove employee"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    {isAdmin(user?.role || userRole) && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          handleRemoveEmployee(emp.id);
+                        }}
+                        className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors cursor-pointer z-30"
+                        title="Remove employee"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
                 </div>
               );

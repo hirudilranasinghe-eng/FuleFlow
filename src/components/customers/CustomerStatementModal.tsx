@@ -33,11 +33,14 @@ export default function CustomerStatementModal({
   const [searchQuery, setSearchQuery] = useState('');
   const [dateFilter, setDateFilter] = useState<'ALL' | '30DAYS' | 'THIS_MONTH'>('ALL');
 
+  if (!isOpen || !customer) return null;
+
+  const isDeposit = customer.customerType === 'Deposit';
+
   // Filter entries for this specific customer
   const customerEntries = useMemo(() => {
-    if (!customer) return [];
     return ledgerEntries.filter(e => e.customerId === customer.id);
-  }, [ledgerEntries, customer?.id]);
+  }, [ledgerEntries, customer.id]);
 
   // Sort descending by date
   const sortedEntries = useMemo(() => {
@@ -88,10 +91,6 @@ export default function CustomerStatementModal({
 
     return list;
   }, [sortedEntries, filterType, dateFilter, searchQuery]);
-
-  if (!isOpen || !customer) return null;
-
-  const isDeposit = customer.customerType === 'Deposit';
 
   // Financial aggregates
   const totalDebits = customerEntries.reduce((sum, e) => sum + (Number(e.debit) || 0), 0);

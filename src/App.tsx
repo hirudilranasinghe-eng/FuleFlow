@@ -17,7 +17,6 @@ import DashboardTab from './components/DashboardTab';
 import ShiftManagementTab from './components/ShiftManagementTab';
 import FuelStockTab from './components/FuelStockTab';
 import OilStorageTab from './components/OilStorageTab';
-import GasStorageTab from './components/GasStorageTab';
 import PurchasesTab from './components/PurchasesTab';
 import DailySalesTab from './components/DailySalesTab';
 import ReportsTab from './components/ReportsTab';
@@ -251,8 +250,17 @@ export default function App() {
   const [deliveries, setDeliveries] = useState<StockDelivery[]>([]);
   const [priceSchedules, setPriceSchedules] = useState<PriceSchedule[]>([]);
 
-  // Customer & Credit states (strictly live Supabase data - no mock data)
-  const [customers, setCustomers] = useState<Customer[]>([]);
+  // Customer & Credit states
+  const [customers, setCustomers] = useState<Customer[]>(() => {
+    try {
+      const stored = localStorage.getItem('fms_customers');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && !parsed.some((c: any) => c.id === 'CUST-101')) return parsed;
+      }
+    } catch (_) {}
+    return [];
+  });
 
   const [creditTransactions, setCreditTransactions] = useState<CreditTransaction[]>(() => {
     try {
@@ -622,40 +630,40 @@ export default function App() {
           setPriceSchedules(mappedSchedules as PriceSchedule[]);
         }
 
-        // Fetch customers from Supabase (100% pure live data)
+        // Fetch customers from Supabase
         try {
-          const { data: customersData, error: custError } = await supabase
-            .from('customers')
-            .select('*')
-            .order('created_at', { ascending: false });
+          let customersData: any[] | null = null;
+          const { data: cData, error: custError } = await supabase.from('customers').select('*').order('created_at', { ascending: false });
+          if (custError) {
+            const { data: retryData } = await supabase.from('customers').select('*').order('name', { ascending: true });
+            if (retryData) customersData = retryData;
+          } else if (cData) {
+            customersData = cData;
+          }
 
-          if (!custError && customersData) {
+          if (customersData && customersData.length > 0) {
             const mappedCustomers = customersData.map((c: any) => ({
               id: c.id,
-              name: c.name || '',
-              phone: c.phone || c.contact_number || '',
-              customerType: (c.customer_type || c.account_type || c.customerType || 'Credit').toString().toLowerCase() === 'deposit' ? 'Deposit' : 'Credit',
+              name: c.name,
+              phone: c.phone || '',
+              customerType: c.customer_type || c.customerType || 'Credit',
               category: c.category || 'Business',
               email: c.email || '',
               address: c.address || '',
               notes: c.notes || '',
               creditLimit: Number(c.credit_limit !== undefined ? c.credit_limit : c.creditLimit) || 0,
               currentBalance: Number(c.current_balance !== undefined ? c.current_balance : c.currentBalance) || 0,
-              depositBalance: Number(c.deposit_balance !== undefined ? c.deposit_balance : (c.initial_deposit !== undefined ? c.initial_deposit : c.depositBalance)) || 0,
-              allowedCreditDays: Number(c.allowed_days !== undefined ? c.allowed_days : (c.allowed_credit_days !== undefined ? c.allowed_credit_days : c.allowedCreditDays)) || 30,
-              status: c.status ? (c.status.charAt(0).toUpperCase() + c.status.slice(1).toLowerCase() as any) : 'Active',
+              depositBalance: Number(c.deposit_balance !== undefined ? c.deposit_balance : c.depositBalance) || 0,
+              allowedCreditDays: Number(c.allowed_days !== undefined ? c.allowed_days : c.allowedCreditDays) || 30,
+              status: c.status || 'Active',
               vehicleNumbers: Array.isArray(c.vehicle_numbers) 
                 ? c.vehicle_numbers 
-                : (Array.isArray(c.registered_vehicles) ? c.registered_vehicles : (c.vehicle_numbers ? String(c.vehicle_numbers).split(',').map((s: string) => s.trim()) : [])),
+                : (c.vehicle_numbers ? String(c.vehicle_numbers).split(',').map((s: string) => s.trim()).filter(Boolean) : []),
               createdAt: c.created_at || new Date().toISOString()
             }));
             setCustomers(mappedCustomers);
-          } else {
-            setCustomers([]);
           }
-        } catch (_) {
-          setCustomers([]);
-        }
+        } catch (_) {}
 
         setTimeout(() => {
           isInitialLoad.current = false;
@@ -1554,15 +1562,6 @@ export default function App() {
               />
             )}
 
-            {(activeTab === 'gas_storage' || activeTab === 'gas-storage') && (
-              <GasStorageTab
-                setActiveTab={setActiveTab}
-                customers={customers}
-                employees={employees}
-                user={user}
-              />
-            )}
-
             {activeTab === 'purchases' && (
               <PurchasesTab
                 tanks={tanks}
@@ -1572,6 +1571,8 @@ export default function App() {
                 deliveries={deliveries}
                 setDeliveries={setDeliveries}
                 employees={employees}
+                user={user}
+                userRole={user?.role}
               />
             )}
 
@@ -1617,6 +1618,8 @@ export default function App() {
                 payments={payments}
                 setPayments={setPayments}
                 tanks={tanks}
+                user={user}
+                userRole={user?.role}
               />
             )}
 
@@ -1640,6 +1643,8 @@ export default function App() {
                 priceSchedules={priceSchedules}
                 setPriceSchedules={setPriceSchedules}
                 onResetAllData={handleResetAllData}
+                user={user}
+                userRole={user?.role}
               />
             )}
 
@@ -1660,6 +1665,8 @@ export default function App() {
                 priceSchedules={priceSchedules}
                 setPriceSchedules={setPriceSchedules}
                 onResetAllData={handleResetAllData}
+                user={user}
+                userRole={user?.role}
               />
             )}
 
@@ -1681,6 +1688,8 @@ export default function App() {
                 priceSchedules={priceSchedules}
                 setPriceSchedules={setPriceSchedules}
                 onResetAllData={handleResetAllData}
+                user={user}
+                userRole={user?.role}
               />
             )}
           </motion.div>

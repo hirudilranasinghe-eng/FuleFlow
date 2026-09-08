@@ -663,24 +663,20 @@ export async function saveCustomer(client: any, customer: Customer) {
 
   const snakePayload: any = {
     id: customer.id,
-    name: customer.name?.trim(),
-    phone: customer.phone?.trim(),
-    contact_number: customer.phone?.trim(),
-    email: customer.email?.trim() ? customer.email.trim() : null,
+    name: customer.name,
+    phone: customer.phone,
     customer_type: customer.customerType,
-    account_type: customer.customerType?.toLowerCase() || 'credit',
     credit_limit: Number(customer.creditLimit) || 0,
     deposit_balance: Number(customer.depositBalance) || 0,
-    initial_deposit: Number(customer.depositBalance) || 0,
     current_balance: Number(customer.currentBalance) || 0,
     allowed_days: Number(customer.allowedCreditDays) || 30,
     status: customer.status || 'Active',
     vehicle_numbers: customer.vehicleNumbers || [],
-    registered_vehicles: customer.vehicleNumbers || [],
     created_at: customer.createdAt || new Date().toISOString()
   };
 
   if (customer.category) snakePayload.category = customer.category;
+  if (customer.email) snakePayload.email = customer.email;
   if (customer.address) snakePayload.address = customer.address;
   if (customer.notes) snakePayload.notes = customer.notes;
 
@@ -691,9 +687,8 @@ export async function saveCustomer(client: any, customer: Customer) {
       // Fallback without extended fields
       const basicPayload = {
         id: customer.id,
-        name: customer.name?.trim(),
-        phone: customer.phone?.trim(),
-        email: customer.email && customer.email.trim().length > 0 ? customer.email.trim() : null,
+        name: customer.name,
+        phone: customer.phone,
         customer_type: customer.customerType,
         credit_limit: Number(customer.creditLimit) || 0,
         deposit_balance: Number(customer.depositBalance) || 0,
@@ -705,10 +700,6 @@ export async function saveCustomer(client: any, customer: Customer) {
       const retry = await client.from('customers').upsert([basicPayload]);
       data = retry.data;
       error = retry.error;
-    }
-
-    if (error) {
-      console.error("Supabase customer insert error:", error);
     }
 
     return { data, error };
