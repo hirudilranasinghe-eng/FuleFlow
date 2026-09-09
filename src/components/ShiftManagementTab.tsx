@@ -513,7 +513,12 @@ export default function ShiftManagementTab({
   };
 
   const formatCurrency = (val: number) => {
-    return `Rs. ${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val)}`;
+    if (Math.abs(val) < 0.005) {
+      return 'Rs. 0.00';
+    }
+    const isNegative = val < 0;
+    const formatted = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(val));
+    return isNegative ? `-Rs. ${formatted}` : `Rs. ${formatted}`;
   };
 
   const getPriceForFuelType = (type: string) => {
@@ -697,19 +702,18 @@ export default function ShiftManagementTab({
       let totalNetLiters = 0;
       let totalCreditSales = 0;
       let totalCardSales = 0;
-      let totalNetExpCash = 0;
       let totalActualCash = 0;
 
       pumper.readings.forEach(r => {
         const fuelPrice = getPriceForFuelType(r.fuelType);
-        const fuelSold = Math.max(0, r.endMeter - r.startMeter);
-        const netSold = Math.max(0, fuelSold - r.testingQty);
+        const isOil = r.pumpId === 'pump-oil-bay' || r.fuelType === 'Oil & Lubricants' || r.pumpName?.toLowerCase().includes('oil');
+        const fuelSold = isOil ? 0 : Math.max(0, r.endMeter - r.startMeter);
+        const netSold = isOil ? 0 : Math.max(0, fuelSold - r.testingQty);
         const grossFuelRev = netSold * fuelPrice;
         const oilSales = r.oilSalesAmount || 0;
         const grossTotalRev = grossFuelRev + oilSales;
         const creditVal = r.creditSalesAmount || 0;
         const cardVal = r.cardSalesAmount || 0;
-        const netExp = Math.max(0, grossTotalRev - (creditVal + cardVal));
         const actCash = r.actualCash || 0;
 
         totalFuelRevenue += grossFuelRev;
@@ -718,10 +722,11 @@ export default function ShiftManagementTab({
         totalNetLiters += netSold;
         totalCreditSales += creditVal;
         totalCardSales += cardVal;
-        totalNetExpCash += netExp;
         totalActualCash += actCash;
       });
 
+      const totalNonCash = totalCreditSales + totalCardSales;
+      const totalNetExpCash = Math.max(0, totalGrossRevenue - totalNonCash);
       const totalCashVariance = totalActualCash - totalNetExpCash;
 
       return {
@@ -730,6 +735,7 @@ export default function ShiftManagementTab({
         totalFuelRevenue,
         totalOilSales,
         totalNetLiters,
+        totalNonCash,
         totalCreditSales,
         totalCardSales,
         totalNetExpCash,
@@ -753,18 +759,21 @@ export default function ShiftManagementTab({
 
     const pumpData = pumperReadings.map(r => {
       const fuelPrice = getPriceForFuelType(r.fuelType);
-      const fuelSold = Math.max(0, r.endMeter - r.startMeter);
-      const netSold = Math.max(0, fuelSold - r.testingQty);
+      const isOil = r.pumpId === 'pump-oil-bay' || r.fuelType === 'Oil & Lubricants' || r.pumpName?.toLowerCase().includes('oil');
+      const fuelSold = isOil ? 0 : Math.max(0, r.endMeter - r.startMeter);
+      const netSold = isOil ? 0 : Math.max(0, fuelSold - r.testingQty);
       const grossFuelRev = netSold * fuelPrice;
       const oilSales = r.oilSalesAmount || 0;
       const grossTotalRev = grossFuelRev + oilSales;
       const creditVal = r.creditSalesAmount || 0;
       const cardVal = r.cardSalesAmount || 0;
-      const netExpCash = Math.max(0, grossTotalRev - (creditVal + cardVal));
-      return { pumpId: r.pumpId, netExpCash, status: r.status };
+      const rawNetExpCash = grossTotalRev - (creditVal + cardVal);
+      return { pumpId: r.pumpId, grossTotalRev, creditVal, cardVal, rawNetExpCash, status: r.status };
     });
 
-    const totalNetExpCash = pumpData.reduce((acc, p) => acc + p.netExpCash, 0);
+    const totalGrossRevenue = pumpData.reduce((acc, p) => acc + p.grossTotalRev, 0);
+    const totalNonCash = pumpData.reduce((acc, p) => acc + p.creditVal + p.cardVal, 0);
+    const totalNetExpCash = Math.max(0, totalGrossRevenue - totalNonCash);
 
     let allocatedSoFar = 0;
     const newCashPerPump: Record<string, number> = {};
@@ -774,8 +783,8 @@ export default function ShiftManagementTab({
         newCashPerPump[p.pumpId] = Math.max(0, Math.round((newTotalCash - allocatedSoFar) * 100) / 100);
       } else {
         let allocated = 0;
-        if (totalNetExpCash > 0) {
-          allocated = Math.round((p.netExpCash / totalNetExpCash) * newTotalCash * 100) / 100;
+        if (totalGrossRevenue > 0) {
+          allocated = Math.round((p.grossTotalRev / totalGrossRevenue) * newTotalCash * 100) / 100;
         } else {
           allocated = Math.round((newTotalCash / pumpData.length) * 100) / 100;
         }
@@ -784,18 +793,22 @@ export default function ShiftManagementTab({
       }
     });
 
+    const pumperHasExcessRevenue = totalGrossRevenue > totalNonCash;
+
     const updatedReadings = draftReadings.map(r => {
       if (r.assignedPumperId === pumperId && newCashPerPump[r.pumpId] !== undefined) {
         const actCash = newCashPerPump[r.pumpId];
         const fuelPrice = getPriceForFuelType(r.fuelType);
-        const fuelSold = Math.max(0, r.endMeter - r.startMeter);
-        const netSold = Math.max(0, fuelSold - r.testingQty);
+        const isOil = r.pumpId === 'pump-oil-bay' || r.fuelType === 'Oil & Lubricants' || r.pumpName?.toLowerCase().includes('oil');
+        const fuelSold = isOil ? 0 : Math.max(0, r.endMeter - r.startMeter);
+        const netSold = isOil ? 0 : Math.max(0, fuelSold - r.testingQty);
         const grossFuelRev = netSold * fuelPrice;
         const oilSales = r.oilSalesAmount || 0;
         const grossTotalRev = grossFuelRev + oilSales;
         const creditVal = r.creditSalesAmount || 0;
         const cardVal = r.cardSalesAmount || 0;
-        const netExpCash = Math.max(0, grossTotalRev - (creditVal + cardVal));
+        const rawNet = grossTotalRev - (creditVal + cardVal);
+        const netExpCash = (rawNet < 0 && pumperHasExcessRevenue) ? rawNet : Math.max(0, rawNet);
         const computedVariance = actCash - netExpCash;
 
         return {
@@ -867,7 +880,25 @@ export default function ShiftManagementTab({
         const netSold = Math.max(0, fuelSold - testQ);
         const grossFuelRevenue = netSold * fuelPrice;
         const totalGrossRevenue = grossFuelRevenue + oilVal;
-        const netExpectedCash = Math.max(0, totalGrossRevenue - (creditVal + cardVal));
+        const rawNetExpCash = totalGrossRevenue - (creditVal + cardVal);
+        let netExpectedCash = rawNetExpCash;
+        if (rawNetExpCash < 0) {
+          const otherPumpsExcess = draftReadings
+            .filter(dr => dr.pumpId !== pumpId && dr.assignedPumperId && dr.assignedPumperId === r.assignedPumperId)
+            .reduce((sum, dr) => {
+              const oPrice = getPriceForFuelType(dr.fuelType);
+              const oIsOil = dr.pumpId === 'pump-oil-bay' || dr.fuelType === 'Oil & Lubricants' || dr.pumpName?.toLowerCase().includes('oil');
+              const oSold = oIsOil ? 0 : Math.max(0, dr.endMeter - dr.startMeter);
+              const oNet = oIsOil ? 0 : Math.max(0, oSold - dr.testingQty);
+              const oGross = (oNet * oPrice) + (dr.oilSalesAmount || 0);
+              const oNonCash = (dr.creditSalesAmount || 0) + (dr.cardSalesAmount || 0);
+              return sum + Math.max(0, oGross - oNonCash);
+            }, 0);
+
+          if (otherPumpsExcess <= 0) {
+            netExpectedCash = 0;
+          }
+        }
         const computedVariance = actCash - netExpectedCash;
 
         const updated = {
@@ -1807,7 +1838,6 @@ export default function ShiftManagementTab({
       let totalNetLiters = 0;
       let totalCreditSales = 0;
       let totalCardSales = 0;
-      let totalExpectedCash = 0;
       let totalActualCash = 0;
 
       assignedReadings.forEach(r => {
@@ -1820,7 +1850,6 @@ export default function ShiftManagementTab({
         const grossTotalRev = grossFuelRev + oilSales;
         const creditVal = r.creditSalesAmount || 0;
         const cardVal = r.cardSalesAmount || 0;
-        const netExp = Math.max(0, grossTotalRev - (creditVal + cardVal));
         const actCash = r.actualCash || 0;
 
         totalFuelRevenue += grossFuelRev;
@@ -1829,11 +1858,11 @@ export default function ShiftManagementTab({
         totalNetLiters += netSold;
         totalCreditSales += creditVal;
         totalCardSales += cardVal;
-        totalExpectedCash += netExp;
         totalActualCash += actCash;
       });
 
       const totalNonCash = totalCreditSales + totalCardSales;
+      const totalExpectedCash = Math.max(0, totalGrossRevenue - totalNonCash);
       const cashVariance = totalActualCash - totalExpectedCash;
 
       return {
@@ -2472,7 +2501,26 @@ export default function ShiftManagementTab({
                               const totalPumpGross = fuelRevenue + oilRevenue;
                               const creditSales = r.creditSalesAmount || 0;
                               const cardSales = r.cardSalesAmount || 0;
-                              const pumpExpCash = Math.max(0, totalPumpGross - (creditSales + cardSales));
+                              const rawPumpExpCash = totalPumpGross - (creditSales + cardSales);
+
+                              // Calculate if other pumps assigned to this pumper have excess revenue to offset non-cash deductions
+                              const otherPumpsExcess = assignedReadings
+                                .filter(other => other.pumpId !== r.pumpId)
+                                .reduce((sum, other) => {
+                                  const oPrice = getPriceForFuelType(other.fuelType);
+                                  const oIsOil = other.pumpId === 'pump-oil-bay' || other.fuelType === 'Oil & Lubricants' || other.pumpName.toLowerCase().includes('oil');
+                                  const oFuelSold = oIsOil ? 0 : Math.max(0, other.endMeter - other.startMeter);
+                                  const oNetSold = oIsOil ? 0 : Math.max(0, oFuelSold - other.testingQty);
+                                  const oGross = (oNetSold * oPrice) + (other.oilSalesAmount || 0);
+                                  const oNonCash = (other.creditSalesAmount || 0) + (other.cardSalesAmount || 0);
+                                  return sum + Math.max(0, oGross - oNonCash);
+                                }, 0);
+
+                              // Do not clip individual pump expected cash to zero prematurely if another pump in the same pumper's shift has excess revenue to offset non-cash deductions
+                              const pumpExpCash = rawPumpExpCash < 0
+                                ? (otherPumpsExcess > 0 ? rawPumpExpCash : 0)
+                                : rawPumpExpCash;
+
                               const fuelBadge = getFuelBadgeStyles(r.fuelType);
 
                               return (
