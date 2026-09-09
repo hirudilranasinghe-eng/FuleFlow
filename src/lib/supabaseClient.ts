@@ -552,12 +552,15 @@ export async function updateNozzleMeterCarryover(client: any, readings: { pumpId
  */
 export async function saveFuelTank(client: any, tank: FuelTank) {
   if (!tank || !tank.id) return { data: null, error: null };
+  const stockVal = (tank as any).current_volume ?? (tank as any).current_stock ?? tank.currentLevel;
   const snakePayload = {
     id: tank.id,
     name: tank.name,
     fuel_type: tank.fuelType,
     capacity: tank.capacity,
-    current_level: tank.currentLevel,
+    current_level: stockVal,
+    current_volume: stockVal,
+    current_stock: stockVal,
     price_per_liter: tank.pricePerLiter
   };
   const lowerPayload = {
@@ -565,9 +568,23 @@ export async function saveFuelTank(client: any, tank: FuelTank) {
     name: tank.name,
     fueltype: tank.fuelType,
     capacity: tank.capacity,
-    currentlevel: tank.currentLevel,
+    currentlevel: stockVal,
     priceperliter: tank.pricePerLiter
   };
+
+  // Sync to underground_tanks table if exists
+  try {
+    await client.from('underground_tanks').upsert([{
+      id: tank.id,
+      name: tank.name,
+      fuel_type: tank.fuelType,
+      capacity: tank.capacity,
+      current_volume: stockVal,
+      current_stock: stockVal,
+      current_level: stockVal,
+      price_per_liter: tank.pricePerLiter
+    }]);
+  } catch (_) {}
 
   const tableName = getTanksTableName();
   try {

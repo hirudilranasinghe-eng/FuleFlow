@@ -53,6 +53,7 @@ export default function UndergroundTanksTab({
   const [tankFormName, setTankFormName] = useState('');
   const [tankFormFuelType, setTankFormFuelType] = useState<FuelType>('Petrol 92');
   const [tankFormCapacity, setTankFormCapacity] = useState<number>(15000);
+  const [tankFormCurrentStock, setTankFormCurrentStock] = useState<number>(0);
   const [tankModalError, setTankModalError] = useState<string | null>(null);
 
   const handleOpenAddTankModal = () => {
@@ -60,6 +61,7 @@ export default function UndergroundTanksTab({
     setTankFormName('');
     setTankFormFuelType('Petrol 92');
     setTankFormCapacity(15000);
+    setTankFormCurrentStock(0);
     setTankModalError(null);
     setIsAddTankModalOpen(true);
   };
@@ -69,6 +71,8 @@ export default function UndergroundTanksTab({
     setTankFormName(tank.name);
     setTankFormFuelType(tank.fuelType);
     setTankFormCapacity(tank.capacity);
+    const curStock = (tank as any).current_volume ?? (tank as any).current_stock ?? tank.currentLevel ?? 0;
+    setTankFormCurrentStock(curStock);
     setTankModalError(null);
     setIsAddTankModalOpen(true);
   };
@@ -84,33 +88,88 @@ export default function UndergroundTanksTab({
     }
 
     const capVal = Number(tankFormCapacity) || 0;
+    const stockVal = Number(tankFormCurrentStock) || 0;
+
+    if (stockVal < 0) {
+      setTankModalError('Current Stock Volume cannot be negative.');
+      return;
+    }
+
+    if (stockVal > capVal) {
+      setTankModalError(`Current Stock Volume (${stockVal.toLocaleString()} L) cannot exceed Max Capacity (${capVal.toLocaleString()} L).`);
+      return;
+    }
 
     if (editingTank) {
-      const updatedTank: FuelTank = {
+      const updatedTank: FuelTank & { current_volume?: number; current_stock?: number } = {
         ...editingTank,
         name: tankFormName.trim(),
         fuelType: tankFormFuelType,
         capacity: capVal,
-        currentLevel: Math.min(editingTank.currentLevel, capVal),
+        currentLevel: stockVal,
+        current_volume: stockVal,
+        current_stock: stockVal,
         pricePerLiter: editingTank.pricePerLiter || 0
       };
 
+      // Instantly recalculate and update UI state and fill percentage
       setTanks(prev => prev.map(t => t.id === editingTank.id ? updatedTank : t));
       try { 
         const next = tanks.map(t => t.id === editingTank.id ? updatedTank : t);
         localStorage.setItem('fms_tanks', JSON.stringify(next)); 
       } catch (_) {}
 
+      // Supabase Integration: Update current_volume, current_stock, and capacity in underground_tanks table
+      try {
+        let { error: ugError } = await supabase
+          .from('underground_tanks')
+          .update({
+            name: updatedTank.name,
+            fuel_type: updatedTank.fuelType,
+            capacity: capVal,
+            current_volume: stockVal,
+            current_stock: stockVal,
+            current_level: stockVal
+          })
+          .eq('id', updatedTank.id);
+
+        if (ugError) {
+          // Retry with current_volume and capacity
+          const retryRes = await supabase
+            .from('underground_tanks')
+            .update({
+              capacity: capVal,
+              current_volume: stockVal
+            })
+            .eq('id', updatedTank.id);
+
+          if (retryRes.error) {
+            // Retry with current_stock and capacity
+            await supabase
+              .from('underground_tanks')
+              .update({
+                capacity: capVal,
+                current_stock: stockVal
+              })
+              .eq('id', updatedTank.id);
+          }
+        }
+      } catch (err) {
+        console.warn('underground_tanks Supabase update notice:', err);
+      }
+
       await saveFuelTank(supabase, updatedTank);
       setIsAddTankModalOpen(false);
       showToast?.(`Underground Tank "${updatedTank.name}" updated successfully.`);
     } else {
-      const newTank: FuelTank = {
+      const newTank: FuelTank & { current_volume?: number; current_stock?: number } = {
         id: `tank-${Date.now().toString().slice(-6)}`,
         name: tankFormName.trim(),
         fuelType: tankFormFuelType,
         capacity: capVal,
-        currentLevel: 0,
+        currentLevel: stockVal,
+        current_volume: stockVal,
+        current_stock: stockVal,
         pricePerLiter: 0
       };
 
@@ -119,6 +178,23 @@ export default function UndergroundTanksTab({
         const next = [...tanks, newTank];
         localStorage.setItem('fms_tanks', JSON.stringify(next)); 
       } catch (_) {}
+
+      // Supabase Integration: Insert into underground_tanks table
+      try {
+        await supabase
+          .from('underground_tanks')
+          .upsert([{
+            id: newTank.id,
+            name: newTank.name,
+            fuel_type: newTank.fuelType,
+            capacity: capVal,
+            current_volume: stockVal,
+            current_stock: stockVal,
+            current_level: stockVal
+          }]);
+      } catch (err) {
+        console.warn('underground_tanks insert notice:', err);
+      }
 
       await saveFuelTank(supabase, newTank);
       setIsAddTankModalOpen(false);
@@ -217,7 +293,8 @@ export default function UndergroundTanksTab({
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {sortedTanks.map((tank) => {
-            const pct = tank.capacity > 0 ? Math.round((tank.currentLevel / tank.capacity) * 100) : 0;
+            const curVol = (tank as any).current_volume ?? (tank as any).current_stock ?? tank.currentLevel ?? 0;
+            const pct = tank.capacity > 0 ? Math.round((curVol / tank.capacity) * 100) : 0;
             const mappedPumpsList = pumps.filter(p => p.tankId === tank.id || (!p.tankId && p.fuelType === tank.fuelType));
 
             return (
@@ -270,7 +347,7 @@ export default function UndergroundTanksTab({
                   <div className="flex justify-between text-xs font-bold">
                     <span className="text-gray-500">Current Fill Volume</span>
                     <span className={`tabular-nums ${pct < 20 ? 'text-rose-600 font-extrabold' : 'text-[#1C1C1C]'}`}>
-                      {pct}% ({tank.currentLevel.toLocaleString()} L)
+                      {pct}% ({curVol.toLocaleString()} L)
                     </span>
                   </div>
                   <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden">
@@ -369,22 +446,75 @@ export default function UndergroundTanksTab({
                   type="number"
                   value={tankFormCapacity}
                   onFocus={(e) => e.target.select()}
-                  onChange={(e) => setTankFormCapacity(Number(e.target.value))}
+                  onChange={(e) => {
+                    const newCap = Number(e.target.value);
+                    setTankFormCapacity(newCap);
+                    if (tankFormCurrentStock > newCap) {
+                      setTankModalError(`Current Stock Volume cannot exceed Max Capacity (${newCap.toLocaleString()} L).`);
+                    } else if (tankModalError?.includes('Current Stock Volume cannot exceed Max Capacity')) {
+                      setTankModalError(null);
+                    }
+                  }}
                   className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-[#1C1C1C] focus:outline-none focus:border-blue-500 tabular-nums font-bold"
                 />
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="font-bold text-gray-600 block">Current Stock Volume (Liters)</label>
+                  {tankFormCapacity > 0 && (
+                    <span className="text-[11px] font-bold text-blue-600 tabular-nums">
+                      {Math.min(100, Math.max(0, Math.round((tankFormCurrentStock / tankFormCapacity) * 100)))}% fill
+                    </span>
+                  )}
+                </div>
+                <input
+                  type="number"
+                  step="any"
+                  min="0"
+                  max={tankFormCapacity}
+                  value={tankFormCurrentStock}
+                  onFocus={(e) => e.target.select()}
+                  onChange={(e) => {
+                    const val = parseFloat(e.target.value) || 0;
+                    setTankFormCurrentStock(val);
+                    if (val > tankFormCapacity) {
+                      setTankModalError(`Current Stock Volume cannot exceed Max Capacity (${tankFormCapacity.toLocaleString()} L).`);
+                    } else if (val < 0) {
+                      setTankModalError('Current Stock Volume cannot be negative.');
+                    } else if (tankModalError?.includes('Current Stock Volume')) {
+                      setTankModalError(null);
+                    }
+                  }}
+                  className={`w-full px-3.5 py-2.5 bg-gray-50 border rounded-xl text-[#1C1C1C] focus:outline-none tabular-nums font-bold transition-colors ${
+                    tankFormCurrentStock > tankFormCapacity
+                      ? 'border-rose-400 focus:border-rose-500 bg-rose-50/40 text-rose-900'
+                      : 'border-gray-200 focus:border-blue-500'
+                  }`}
+                  placeholder="e.g. 10000"
+                />
+                {tankFormCurrentStock > tankFormCapacity && (
+                  <p className="text-rose-600 text-[11px] font-bold mt-1.5 flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                    <span>Current Stock Volume cannot exceed Max Capacity ({tankFormCapacity.toLocaleString()} L).</span>
+                  </p>
+                )}
               </div>
             </div>
 
             <div className="flex gap-3 pt-2">
               <button
+                type="button"
                 onClick={() => setIsAddTankModalOpen(false)}
                 className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={handleSaveTankSubmit}
-                className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm cursor-pointer"
+                disabled={tankFormCurrentStock > tankFormCapacity || tankFormCurrentStock < 0}
+                className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold transition-colors shadow-sm cursor-pointer"
               >
                 {editingTank ? 'Update Tank' : 'Save Tank'}
               </button>

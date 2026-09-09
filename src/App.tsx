@@ -455,7 +455,12 @@ export default function App() {
 
         if (tanksData && tanksData.length > 0) {
           const mappedTanks = tanksData.map(t => ({
-            id: t.id, fuelType: t.fueltype, name: t.name, capacity: t.capacity, currentLevel: t.currentlevel, pricePerLiter: t.priceperliter
+            id: t.id,
+            fuelType: t.fueltype || t.fuel_type || 'Petrol 92',
+            name: t.name,
+            capacity: Number(t.capacity) || 0,
+            currentLevel: Number(t.current_volume ?? t.current_stock ?? t.currentlevel ?? t.current_level ?? 0),
+            pricePerLiter: Number(t.priceperliter ?? t.price_per_liter ?? 0)
           }));
           setTanks(sortTanksNaturally(mappedTanks as FuelTank[]));
         } else {
@@ -710,7 +715,7 @@ export default function App() {
                   name: row.name,
                   fuelType: row.fueltype || row.fuel_type || 'Petrol 92',
                   capacity: Number(row.capacity) || 0,
-                  currentLevel: Number(row.currentlevel ?? row.current_level) || 0,
+                  currentLevel: Number(row.current_volume ?? row.current_stock ?? row.currentlevel ?? row.current_level) || 0,
                   pricePerLiter: Number(row.priceperliter ?? row.price_per_liter) || 0,
                 };
                 setTanks((prev) => {
@@ -726,7 +731,7 @@ export default function App() {
                   name: row.name,
                   fuelType: row.fueltype || row.fuel_type || 'Petrol 92',
                   capacity: Number(row.capacity) || 0,
-                  currentLevel: Number(row.currentlevel ?? row.current_level) || 0,
+                  currentLevel: Number(row.current_volume ?? row.current_stock ?? row.currentlevel ?? row.current_level) || 0,
                   pricePerLiter: Number(row.priceperliter ?? row.price_per_liter) || 0,
                 };
                 setTanks((prev) =>
