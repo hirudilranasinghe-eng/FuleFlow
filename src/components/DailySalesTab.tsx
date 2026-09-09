@@ -336,7 +336,11 @@ export default function DailySalesTab({
             if (r.chamberReadings && Array.isArray(r.chamberReadings)) {
               r.chamberReadings.forEach((ch) => {
                 const chNum = ch.chamberNumber || 1;
-                const sold = ch.soldLiters || Math.max(0, (ch.openingLevel || 0) - (ch.closingLevel || 0));
+                const op = ch.openingLevel ?? ch.openingLiters ?? 0;
+                const cl = ch.closingLevel ?? ch.closingLiters ?? 0;
+                const sold = ch.soldLiters !== undefined 
+                  ? ch.soldLiters 
+                  : (!cl || cl <= 0 || cl === op ? 0 : (cl > op ? (cl - op) : (op - cl)));
                 const amt = ch.totalAmount || sold * (ch.ratePerLiter || 0);
 
                 if (!chamberMap.has(chNum)) {

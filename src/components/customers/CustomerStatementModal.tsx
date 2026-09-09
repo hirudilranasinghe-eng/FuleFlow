@@ -127,7 +127,7 @@ export default function CustomerStatementModal({
                     ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' 
                     : 'bg-indigo-100 text-indigo-800 border border-indigo-200'
                 }`}>
-                  {isDeposit ? 'Advance Deposit (Prepaid)' : 'Credit Facility'}
+                  {isDeposit ? 'Advance Deposit' : 'Credit Facility'}
                 </span>
               </div>
               <p className="text-xs text-gray-500 font-sans mt-0.5">

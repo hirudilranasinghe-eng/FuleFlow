@@ -189,7 +189,7 @@ export default function CustomerAddEditModal({
                   <CreditCard className="w-5 h-5" />
                 </div>
                 <div>
-                  <div className="font-bold text-xs text-slate-900">Commercial Credit (Postpaid)</div>
+                  <div className="font-bold text-xs text-slate-900">Commercial Credit</div>
                   <div className="text-[11px] text-gray-500 mt-0.5">Approved fuel on credit with fixed payment cycles (14/30 days)</div>
                 </div>
               </button>
@@ -207,7 +207,7 @@ export default function CustomerAddEditModal({
                   <Wallet className="w-5 h-5" />
                 </div>
                 <div>
-                  <div className="font-bold text-xs text-slate-900">Advance Deposit (Prepaid)</div>
+                  <div className="font-bold text-xs text-slate-900">Advance Deposit</div>
                   <div className="text-[11px] text-gray-500 mt-0.5">Prepaid customer pool balance deducted per shift dispense</div>
                 </div>
               </button>

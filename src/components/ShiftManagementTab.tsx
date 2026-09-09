@@ -29,6 +29,20 @@ interface ShiftManagementTabProps {
   onStartShift: (newShift: Omit<Shift, 'totalFuelSold' | 'totalNetSold' | 'totalNetSales'>) => void;
 }
 
+// Calculate sold liters supporting positive meter progression (closing > opening)
+// and stock depletion mode (closing < opening when closing > 0)
+export const calculateChamberSoldLiters = (opening: number, closing: number): number => {
+  if (closing === undefined || closing === null || closing <= 0 || closing === opening) {
+    return 0;
+  }
+  if (closing > opening) {
+    // Meter progression mode (e.g. Opening: 50, Closing: 60 -> Sold: 10 L)
+    return Number((closing - opening).toFixed(2));
+  }
+  // Stock depletion mode (e.g. Opening: 60 L, Closing: 50 L -> Sold: 10 L)
+  return Number((opening - closing).toFixed(2));
+};
+
 export default function ShiftManagementTab({
   employees,
   tanks,
@@ -205,25 +219,58 @@ export default function ShiftManagementTab({
   // Track settled pumpers per active shift
   const [settledPumperIds, setSettledPumperIds] = useState<Record<string, boolean>>({});
 
-  // Default 4-chamber dispenser configuration helper
-  const getDefaultChambers = (oilTanksList?: OilTank[]): ChamberReading[] => {
-    const chambers = (oilTanksList || []).filter(t => t.type === 'chamber');
-    if (chambers.length > 0) {
-      return chambers.map((ch, idx) => ({
+// Default 4-chamber dispenser configuration helper
+const getDefaultChambers = (oilTanksList?: OilTank[]): ChamberReading[] => {
+  const chambers = (oilTanksList || []).filter(t => t.type === 'chamber' || t.name.toLowerCase().includes('chamber'));
+  const defaultGrades = ['DS 40', 'DS 50', '2T', 'SP 4T'];
+  const defaultRates = [1050, 1100, 950, 1200];
+
+  if (chambers.length > 0) {
+    // Sort chambers numerically by chamber number or natural name
+    const sortedChambers = [...chambers].sort((a, b) => {
+      const numA = a.chamberNumber || parseInt((a.name || '').replace(/\D/g, ''), 10) || 0;
+      const numB = b.chamberNumber || parseInt((b.name || '').replace(/\D/g, ''), 10) || 0;
+      return numA - numB;
+    });
+
+    return sortedChambers.map((ch, idx) => {
+      const opLevel = ch.currentLevel !== undefined && ch.currentLevel > 0 ? ch.currentLevel : 60;
+      return {
         chamberId: ch.id,
         chamberNumber: ch.chamberNumber || (idx + 1),
-        grade: ch.grade,
-        openingLiters: ch.currentLevel,
-        closingLiters: ch.currentLevel,
-        openingLevel: ch.currentLevel,
-        closingLevel: ch.currentLevel,
+        grade: ch.grade || defaultGrades[idx % 4],
+        openingLiters: opLevel,
+        closingLiters: 0,
+        openingLevel: opLevel,
+        closingLevel: 0,
         soldLiters: 0,
-        ratePerLiter: ch.pricePerLiter,
+        ratePerLiter: ch.pricePerLiter || defaultRates[idx % 4],
         totalAmount: 0
-      }));
-    }
-    return [];
-  };
+      };
+    });
+  }
+
+  // Default 4 forecourt dispenser chambers (Ch 01 DS 40, Ch 02 DS 50, Ch 03 2T, Ch 04 SP 4T)
+  const defaultForecourtChambers = [
+    { id: 'ch-01', chamberNumber: 1, grade: 'DS 40', currentLevel: 60, pricePerLiter: 1050 },
+    { id: 'ch-02', chamberNumber: 2, grade: 'DS 50', currentLevel: 60, pricePerLiter: 1100 },
+    { id: 'ch-03', chamberNumber: 3, grade: '2T', currentLevel: 60, pricePerLiter: 950 },
+    { id: 'ch-04', chamberNumber: 4, grade: 'SP 4T', currentLevel: 60, pricePerLiter: 1200 }
+  ];
+
+  return defaultForecourtChambers.map(ch => ({
+    chamberId: ch.id,
+    chamberNumber: ch.chamberNumber,
+    grade: ch.grade,
+    openingLiters: ch.currentLevel,
+    closingLiters: 0,
+    openingLevel: ch.currentLevel,
+    closingLevel: 0,
+    soldLiters: 0,
+    ratePerLiter: ch.pricePerLiter,
+    totalAmount: 0
+  }));
+};
 
   // Sync draft states when activeShift changes
   React.useEffect(() => {
@@ -266,14 +313,38 @@ export default function ShiftManagementTab({
           const existing = readingMap.get(p.id)!;
           const isStartSaved = !!(existing.isStartSaved || initialLockedStarts[p.id] || (existing.isLocked && existing.startMeter !== undefined && existing.startMeter >= 0));
           const isCardFinalized = !!(existing.isCardFinalized || (existing.assignedPumperId && initialFinalized[existing.assignedPumperId]) || (existing.isLocked && existing.status === 'Completed'));
-          if (isOil && (!existing.chamberReadings || existing.chamberReadings.length === 0)) {
+          if (isOil) {
+            let chReadings = existing.chamberReadings;
+            if (!chReadings || chReadings.length === 0) {
+              chReadings = getDefaultChambers(oilTanks);
+            } else if (!isCardFinalized && existing.status !== 'Completed') {
+              // Ensure closing stock defaults to 0 instead of defaulting to opening stock (60)
+              chReadings = chReadings.map(ch => {
+                const op = ch.openingLevel ?? ch.openingLiters ?? 0;
+                const cl = ch.closingLevel ?? ch.closingLiters ?? 0;
+                // If closing was defaulted to opening (old 60 default) with no sales, reset closing to 0
+                const effectiveCl = (cl === op && (!ch.soldLiters || ch.soldLiters === 0)) ? 0 : cl;
+                const sold = calculateChamberSoldLiters(op, effectiveCl);
+                return {
+                  ...ch,
+                  openingLevel: op,
+                  openingLiters: op,
+                  closingLevel: effectiveCl,
+                  closingLiters: effectiveCl,
+                  soldLiters: sold,
+                  totalAmount: sold * (ch.ratePerLiter || 0)
+                };
+              });
+            }
+            const forecourtOilTotal = (chReadings || []).reduce((sum, ch) => sum + (ch.totalAmount || 0), 0);
             return {
               ...existing,
               isStartSaved,
               isCardFinalized,
               isLocked: isCardFinalized || !!existing.isLocked,
               pumpName: 'Forecourt Dispenser Station (4-Chamber Unit)',
-              chamberReadings: getDefaultChambers(oilTanks)
+              chamberReadings: chReadings,
+              oilSalesAmount: forecourtOilTotal
             };
           }
           return {
@@ -991,8 +1062,8 @@ export default function ShiftManagementTab({
         const updatedChambers = currentChambers.map(ch => {
           if (ch.chamberId === chamberId) {
             const opLevel = ch.openingLevel ?? ch.openingLiters ?? 0;
-            const soldLiters = Math.max(0, Number((opLevel - closingLevel).toFixed(2)));
-            const totalAmount = soldLiters * ch.ratePerLiter;
+            const soldLiters = calculateChamberSoldLiters(opLevel, closingLevel);
+            const totalAmount = soldLiters * (ch.ratePerLiter || 0);
             return {
               ...ch,
               openingLiters: opLevel,
@@ -1075,8 +1146,8 @@ export default function ShiftManagementTab({
         const updatedChambers = currentChambers.map(ch => {
           if (ch.chamberId === chamberId) {
             const clLevel = ch.closingLevel ?? ch.closingLiters ?? 0;
-            const soldLiters = Math.max(0, Number((openingLevel - clLevel).toFixed(2)));
-            const totalAmount = soldLiters * ch.ratePerLiter;
+            const soldLiters = calculateChamberSoldLiters(openingLevel, clLevel);
+            const totalAmount = soldLiters * (ch.ratePerLiter || 0);
             return {
               ...ch,
               openingLiters: openingLevel,
@@ -1842,7 +1913,7 @@ export default function ShiftManagementTab({
 
       assignedReadings.forEach(r => {
         const fuelPrice = getPriceForFuelType(r.fuelType);
-        const isOilBay = r.pumpId === 'pump-oil-bay' || r.fuelType === 'Oil & Lubricants' || r.pumpName.toLowerCase().includes('oil');
+        const isOilBay = r.pumpId === 'pump-oil-bay' || r.fuelType === 'Oil & Lubricants' || r.pumpName?.toLowerCase().includes('dispenser') || r.pumpName?.toLowerCase().includes('oil');
         const fuelSold = isOilBay ? 0 : Math.max(0, r.endMeter - r.startMeter);
         const netSold = isOilBay ? 0 : Math.max(0, fuelSold - r.testingQty);
         const grossFuelRev = netSold * fuelPrice;
@@ -2706,17 +2777,22 @@ export default function ShiftManagementTab({
                                             <tbody className="divide-y divide-amber-100/60">
                                               {(r.chamberReadings && r.chamberReadings.length > 0 ? r.chamberReadings : getDefaultChambers(oilTanks)).map((ch, chIdx) => {
                                                 const chamberNum = ch.chamberNumber || chIdx + 1;
-                                                const soldLiters = Math.max(0, Number((ch.openingLevel - ch.closingLevel).toFixed(2)));
-                                                const rowTotal = soldLiters * ch.ratePerLiter;
+                                                const opLiters = ch.openingLevel ?? ch.openingLiters ?? 0;
+                                                const clLiters = ch.closingLevel ?? ch.closingLiters ?? 0;
+                                                const soldLiters = calculateChamberSoldLiters(opLiters, clLiters);
+                                                const rowTotal = soldLiters * (ch.ratePerLiter || 0);
                                                 const isChamberOpeningLocked = !!r.isStartSaved || !!lockedStartMeters[r.pumpId] || isPumperFinalized;
 
                                                 return (
                                                   <tr key={ch.chamberId || `chamber-row-${chIdx}`} className="hover:bg-amber-50/40 transition-colors">
                                                     <td className="py-2 px-2.5 font-bold text-slate-800 whitespace-nowrap">
-                                                      <span className="inline-block px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-100 text-amber-900 border border-amber-300 mr-1.5">
-                                                        Ch 0{chamberNum}
-                                                      </span>
-                                                      <span>{ch.grade}</span>
+                                                      <div className="flex items-center gap-1.5">
+                                                        <span className="inline-block px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-100 text-amber-900 border border-amber-300">
+                                                          Ch 0{chamberNum}
+                                                        </span>
+                                                        <span>{ch.grade}</span>
+                                                        <span className="text-[10px] text-gray-500 font-medium">({formatCurrency(ch.ratePerLiter || 0)}/L)</span>
+                                                      </div>
                                                     </td>
                                                     <td className="py-2 px-2 text-right">
                                                       <div className="flex items-center justify-end gap-1">
@@ -2724,7 +2800,7 @@ export default function ShiftManagementTab({
                                                           type="number"
                                                           step="any"
                                                           disabled={isChamberOpeningLocked}
-                                                          value={ch.openingLevel ?? 0}
+                                                          value={opLiters}
                                                           onFocus={(e) => e.target.select()}
                                                           onChange={(e) => handleUpdateChamberOpeningLevel(r.pumpId, ch.chamberId, parseFloat(e.target.value) || 0)}
                                                           className="w-16 px-1.5 py-0.5 bg-slate-50 border border-slate-200 rounded text-right font-bold text-slate-900 tabular-nums focus:bg-white focus:outline-none focus:border-amber-500 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed text-[11px]"
@@ -2754,7 +2830,7 @@ export default function ShiftManagementTab({
                                                         type="number"
                                                         step="any"
                                                         disabled={isPumperFinalized}
-                                                        value={ch.closingLevel ?? 0}
+                                                        value={clLiters}
                                                         onFocus={(e) => e.target.select()}
                                                         onChange={(e) => handleUpdateChamberClosingLevel(r.pumpId, ch.chamberId, parseFloat(e.target.value) || 0)}
                                                         className="w-16 px-1.5 py-0.5 bg-white border border-amber-300 rounded text-right font-bold text-slate-900 tabular-nums focus:outline-none focus:border-amber-600 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed text-[11px]"
@@ -2776,7 +2852,11 @@ export default function ShiftManagementTab({
                                                   Total Forecourt Bulk Oil Sales:
                                                 </td>
                                                 <td className="py-2 px-2 text-right text-amber-950 font-extrabold tabular-nums">
-                                                  {((r.chamberReadings || getDefaultChambers(oilTanks)).reduce((sum, ch) => sum + Math.max(0, ch.openingLevel - ch.closingLevel), 0)).toFixed(2)} L
+                                                  {((r.chamberReadings || getDefaultChambers(oilTanks)).reduce((sum, ch) => {
+                                                    const op = ch.openingLevel ?? ch.openingLiters ?? 0;
+                                                    const cl = ch.closingLevel ?? ch.closingLiters ?? 0;
+                                                    return sum + calculateChamberSoldLiters(op, cl);
+                                                  }, 0)).toFixed(2)} L
                                                 </td>
                                                 <td className="py-2 px-2.5 text-right text-emerald-800 font-black tabular-nums text-xs">
                                                   {formatCurrency(r.oilSalesAmount || 0)}
@@ -3245,7 +3325,7 @@ export default function ShiftManagementTab({
                   Fixed Shift Cycle
                 </span>
                 <p className="font-extrabold text-gray-900 text-sm">
-                  Full Day Shift (08:00 AM - 08:00 AM Next Day)
+                  Full Day Shift (08:00 AM - 08:00 AM)
                 </p>
                 <p className="text-[11px] text-gray-500 font-medium">
                   Configured for a standard 24-hour continuous station cycle.
