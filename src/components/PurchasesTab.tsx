@@ -9,7 +9,7 @@ import {
   Calendar, Search, Filter, Plus, Trash2, AlertTriangle, 
   CheckCircle2, Download, X, ArrowDownRight, Layers,
   Database, RefreshCw, ChevronRight, Info, Building2, Tag, DollarSign,
-  Printer, Eye
+  Printer, Eye, Flame
 } from 'lucide-react';
 import { FuelTank, OilTank, StockDelivery, FuelType, Employee, PackagedOilItem, OilGRNRecord, ReceiptDesignerConfig, DEFAULT_RECEIPT_CONFIG, AuthUser } from '../types';
 import { supabase, getTanksTableName } from '../lib/supabase';
@@ -63,8 +63,8 @@ export default function PurchasesTab({
   user,
   userRole
 }: PurchasesTabProps) {
-  // Sub-tabs: 'fuel-bowser' | 'lubricants'
-  const [activeSubTab, setActiveSubTab] = useState<'fuel-bowser' | 'lubricants'>('fuel-bowser');
+  // Sub-tabs: 'fuel-bowser' | 'lubricants' | 'lp-gas'
+  const [activeSubTab, setActiveSubTab] = useState<'fuel-bowser' | 'lubricants' | 'lp-gas'>('fuel-bowser');
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -133,6 +133,150 @@ export default function PurchasesTab({
 
   const formatLiters = (val: number) => {
     return new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 }).format(val) + ' L';
+  };
+
+  const [lpGasDeliveries, setLPGasDeliveries] = useState<any[]>([]);
+  const [isLPGasModalOpen, setIsLPGasModalOpen] = useState(false);
+  const [lpGasForm, setLPGasForm] = useState({
+    size: '12.5 kg',
+    fullQuantity: '',
+    emptyReturned: '',
+    unitPrice: '',
+    supplier: 'Litro Gas Lanka',
+    invoiceNo: '',
+    date: new Date().toISOString().split('T')[0]
+  });
+  const [lpGasModalError, setLPGasModalError] = useState<string | null>(null);
+
+  const fetchLPGasDeliveries = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('lp_gas_purchases')
+        .select('*')
+        .order('date', { ascending: false });
+      if (error && error.code !== 'PGRST205') {
+        console.error('Error fetching LP Gas purchases:', error);
+      }
+      if (data) {
+        setLPGasDeliveries(data);
+      }
+    } catch (err: any) {
+      if (err?.code !== 'PGRST205') console.error('Error fetching LP Gas purchases:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchLPGasDeliveries();
+  }, []);
+
+  const handleSaveLPGasPurchase = async () => {
+    if (!lpGasForm.fullQuantity || !lpGasForm.unitPrice || !lpGasForm.invoiceNo) {
+      setLPGasModalError('Please fill all required fields');
+      return;
+    }
+
+    const fullQty = Number(lpGasForm.fullQuantity) || 0;
+    const emptyReturned = Number(lpGasForm.emptyReturned) || 0;
+    const unitPrice = Number(lpGasForm.unitPrice) || 0;
+    const totalCost = fullQty * unitPrice;
+    
+    const normalizeSize = (s: string) => s.toLowerCase().replace(/[^0-9.]/g, '');
+    const normSelectedSize = normalizeSize(lpGasForm.size);
+    const targetId = `gas-${normSelectedSize}kg`;
+
+    const purchaseEntry = {
+      id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 9),
+      date: lpGasForm.date,
+      size: lpGasForm.size,
+      full_quantity: fullQty,
+      empty_returned: emptyReturned,
+      unit_price: unitPrice,
+      total_cost: totalCost,
+      supplier: lpGasForm.supplier,
+      invoice_no: lpGasForm.invoiceNo,
+    };
+
+    // 1. Instantly update the local UI table
+    setLPGasDeliveries(prev => [purchaseEntry, ...prev]);
+    setIsLPGasModalOpen(false);
+    showToast('LP Gas Delivery added successfully');
+
+    setLPGasForm({
+      size: '12.5 kg',
+      fullQuantity: '',
+      emptyReturned: '',
+      unitPrice: '',
+      supplier: 'Litro Gas Lanka',
+      invoiceNo: '',
+      date: new Date().toISOString().split('T')[0]
+    });
+    setLPGasModalError(null);
+
+    // 3. Direct LocalStorage Sync
+    let updatedFull = fullQty;
+    let updatedEmpty = 0;
+    try {
+      const localDataRaw = localStorage.getItem('fuel_flow_gas_inventory');
+      let localData = localDataRaw ? JSON.parse(localDataRaw) : [];
+      let found = false;
+      localData = localData.map((item: any) => {
+        if (normalizeSize(item.size) === normSelectedSize || item.id === targetId) {
+          found = true;
+          updatedFull = (Number(item.full_count) || 0) + fullQty;
+          updatedEmpty = Math.max(0, (Number(item.empty_count) || 0) - emptyReturned);
+          return { ...item, full_count: updatedFull, empty_count: updatedEmpty, last_updated: new Date().toISOString() };
+        }
+        return item;
+      });
+      if (!found) {
+        updatedEmpty = Math.max(0, -emptyReturned);
+        localData.push({ id: targetId, size: lpGasForm.size, full_count: updatedFull, empty_count: updatedEmpty, last_updated: new Date().toISOString() });
+      }
+      localStorage.setItem('fuel_flow_gas_inventory', JSON.stringify(localData));
+      
+      // Dispatch update event
+      window.dispatchEvent(new CustomEvent('gas-inventory-updated', { 
+        detail: { updatedInventory: localData } 
+      }));
+    } catch (e) {
+      console.error('LocalStorage sync failed', e);
+    }
+
+    // 2. Perform DB operations safely in the background
+    try {
+      // Insert into lp_gas_purchases table
+      const { error: purchaseError } = await supabase
+        .from('lp_gas_purchases')
+        .insert([purchaseEntry]);
+        
+      if (purchaseError && purchaseError.code !== 'PGRST205') {
+         console.error('Error saving LP Gas purchase:', purchaseError);
+      }
+
+      // Update gas_inventory table
+      const { data: invData, error: invFetchError } = await supabase
+        .from('gas_inventory')
+        .select('*')
+        .eq('id', targetId)
+        .single();
+        
+      const currentFull = invData ? (Number(invData.full_count) || 0) : 0;
+      const currentEmpty = invData ? (Number(invData.empty_count) || 0) : 0;
+      const finalUpdatedFull = currentFull + fullQty;
+      const finalUpdatedEmpty = Math.max(0, currentEmpty - emptyReturned);
+      
+      await supabase
+        .from('gas_inventory')
+        .update({
+          full_count: finalUpdatedFull,
+          empty_count: finalUpdatedEmpty,
+          last_updated: new Date().toISOString()
+        })
+        .eq('id', targetId);
+
+    } catch (err: any) {
+      if (err?.code !== 'PGRST205') console.error('Error in save LP Gas:', err);
+    }
   };
 
   // -------------------------------------------------------------
@@ -734,6 +878,23 @@ export default function PurchasesTab({
               {grnRecords.length}
             </span>
           </button>
+
+          <button
+            onClick={() => setActiveSubTab('lp-gas')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+              activeSubTab === 'lp-gas'
+                ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/20'
+                : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200/70'
+            }`}
+          >
+            <Flame className="w-3.5 h-3.5" />
+            <span>LP Gas Deliveries</span>
+            <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
+              activeSubTab === 'lp-gas' ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-600'
+            }`}>
+              {lpGasDeliveries.length}
+            </span>
+          </button>
         </div>
 
         {/* Top Right Context-Specific Action Button */}
@@ -758,6 +919,17 @@ export default function PurchasesTab({
           <button
             id="btn-add-lube-purchase-top"
             onClick={() => handleOpenLubePurchaseModal('packaged')}
+            className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl transition-all shadow-xs cursor-pointer flex-shrink-0 self-start sm:self-auto"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Add Purchase</span>
+          </button>
+        )}
+
+        {activeSubTab === 'lp-gas' && (
+          <button
+            id="btn-add-lpgas-purchase-top"
+            onClick={() => setIsLPGasModalOpen(true)}
             className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl transition-all shadow-xs cursor-pointer flex-shrink-0 self-start sm:self-auto"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -1040,6 +1212,98 @@ export default function PurchasesTab({
                                 </button>
                               )}
                             </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* SUB-TAB 3: LP GAS DELIVERIES */}
+      {/* ========================================================================= */}
+      {activeSubTab === 'lp-gas' && (
+        <div className="space-y-4 animate-fade-in">
+          {/* LP Gas Purchases Records List Table */}
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+            <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Flame className="w-4 h-4 text-orange-600" />
+                <h3 className="text-sm font-bold text-slate-900">LP Gas Purchase Logs</h3>
+              </div>
+              <span className="text-xs text-gray-500 ">{lpGasDeliveries.length} Records</span>
+            </div>
+
+            {lpGasDeliveries.length === 0 ? (
+              <div className="p-8 text-center text-gray-400 space-y-2">
+                <Flame className="w-8 h-8 mx-auto text-gray-300" />
+                <p className="text-xs">No LP Gas deliveries logged yet.</p>
+                <button
+                  onClick={() => setIsLPGasModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-600 hover:underline cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Add First Delivery
+                </button>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm whitespace-nowrap">
+                  <thead className="bg-gray-50 text-gray-500 font-bold uppercase text-[10px] tracking-wider border-b border-gray-100">
+                    <tr>
+                      <th className="py-3 px-4">Date</th>
+                      <th className="py-3 px-4">Invoice No</th>
+                      <th className="py-3 px-4">Supplier</th>
+                      <th className="py-3 px-4">Cylinder Size</th>
+                      <th className="py-3 px-4 text-right">Full Qty</th>
+                      <th className="py-3 px-4 text-right">Empty Returned</th>
+                      <th className="py-3 px-4 text-right">Unit Rate (Rs.)</th>
+                      <th className="py-3 px-4 text-right">Total Amount (Rs.)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 text-slate-800">
+                    {lpGasDeliveries.map(del => {
+                      return (
+                        <tr key={del.id} className="hover:bg-blue-50/50 transition-colors group">
+                          <td className="py-3 px-4">
+                            <div className="flex flex-col">
+                              <span className="font-semibold text-slate-900 text-xs">
+                                {new Date(del.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className="font-mono text-xs font-semibold bg-gray-100 text-gray-700 px-2 py-0.5 rounded-lg border border-gray-200 group-hover:border-gray-300 transition-colors">
+                              {del.invoice_no}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-2">
+                              <Building2 className="w-3.5 h-3.5 text-gray-400" />
+                              <span className="text-xs font-medium text-slate-700">{del.supplier}</span>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className="text-xs font-bold text-orange-700 bg-orange-50 border border-orange-100 px-2 py-1 rounded-lg">
+                              {del.size}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <span className="font-bold text-slate-900">{del.full_quantity}</span>
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <span className="font-medium text-gray-500">{del.empty_returned}</span>
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <span className="font-medium text-gray-600 text-[11px]">{formatCurrency(del.unit_price)}</span>
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <span className="font-bold text-slate-900 text-xs">{formatCurrency(del.total_cost)}</span>
                           </td>
                         </tr>
                       );
@@ -1780,6 +2044,178 @@ export default function PurchasesTab({
                 className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-xs rounded-xl transition-all cursor-pointer"
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL 3: LP GAS PURCHASE MODAL */}
+      {/* ========================================================================= */}
+      {isLPGasModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gradient-to-r from-orange-50 to-white">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-orange-100 text-orange-600 rounded-xl">
+                  <Flame className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-slate-800">Add LP Gas Delivery</h2>
+                  <p className="text-xs text-gray-500 font-medium">Log new Litro Gas cylinders purchase</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsLPGasModalOpen(false)}
+                className="text-gray-400 hover:text-gray-600 p-2 rounded-xl hover:bg-gray-100 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto space-y-5">
+              {lpGasModalError && (
+                <div className="p-3 bg-red-50 border border-red-100 text-red-700 text-xs font-semibold rounded-xl flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                  {lpGasModalError}
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">
+                    Delivery Date
+                  </label>
+                  <div className="relative">
+                    <Calendar className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input 
+                      type="date"
+                      value={lpGasForm.date}
+                      onChange={e => setLPGasForm({...lpGasForm, date: e.target.value})}
+                      max={new Date().toISOString().split('T')[0]}
+                      className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all outline-none"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">
+                    Supplier
+                  </label>
+                  <div className="relative">
+                    <Building2 className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input 
+                      type="text"
+                      value={lpGasForm.supplier}
+                      onChange={e => setLPGasForm({...lpGasForm, supplier: e.target.value})}
+                      className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">
+                  Invoice / Reference No.
+                </label>
+                <div className="relative">
+                  <FileText className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input 
+                    type="text"
+                    value={lpGasForm.invoiceNo}
+                    onChange={e => setLPGasForm({...lpGasForm, invoiceNo: e.target.value})}
+                    placeholder="Enter invoice or delivery note number"
+                    className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">
+                  Cylinder Size
+                </label>
+                <select
+                  value={lpGasForm.size}
+                  onChange={e => setLPGasForm({...lpGasForm, size: e.target.value})}
+                  className="w-full px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all outline-none"
+                >
+                  <option value="12.5 kg">12.5 kg (Standard Household)</option>
+                  <option value="37.5 kg">37.5 kg (Commercial Industrial)</option>
+                  <option value="5.0 kg">5.0 kg (Buddy)</option>
+                  <option value="2.3 kg">2.3 kg (Portable)</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">
+                    Full Cylinders Received
+                  </label>
+                  <input 
+                    type="number"
+                    min="1"
+                    value={lpGasForm.fullQuantity}
+                    onChange={e => setLPGasForm({...lpGasForm, fullQuantity: e.target.value})}
+                    placeholder="E.g., 50"
+                    className="w-full px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">
+                    Empty Cylinders Returned
+                  </label>
+                  <input 
+                    type="number"
+                    min="0"
+                    value={lpGasForm.emptyReturned}
+                    onChange={e => setLPGasForm({...lpGasForm, emptyReturned: e.target.value})}
+                    placeholder="E.g., 50"
+                    className="w-full px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">
+                  Wholesale Unit Rate (Rs.)
+                </label>
+                <div className="relative">
+                  <span className="text-gray-500 font-bold text-sm absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">Rs.</span>
+                  <input 
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={lpGasForm.unitPrice}
+                    onChange={e => setLPGasForm({...lpGasForm, unitPrice: e.target.value})}
+                    placeholder="Price per cylinder"
+                    className="w-full pl-10 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm font-bold text-blue-700 focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all outline-none"
+                  />
+                </div>
+              </div>
+              
+              {(lpGasForm.fullQuantity && lpGasForm.unitPrice) ? (
+                <div className="p-4 bg-orange-50 border border-orange-100 rounded-xl flex items-center justify-between mt-2">
+                  <span className="text-xs font-bold text-orange-800">Total Purchase Value</span>
+                  <span className="text-lg font-black text-orange-700">
+                    {formatCurrency(parseInt(lpGasForm.fullQuantity) * parseFloat(lpGasForm.unitPrice))}
+                  </span>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-3 bg-gray-50/50">
+              <button 
+                onClick={() => setIsLPGasModalOpen(false)}
+                className="px-4 py-2.5 bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 font-bold text-xs rounded-xl transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={handleSaveLPGasPurchase}
+                className="px-6 py-2.5 bg-orange-600 hover:bg-orange-700 text-white font-bold text-xs rounded-xl transition-all shadow-md shadow-orange-500/20 cursor-pointer flex items-center gap-2"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                Confirm & Log Purchase
               </button>
             </div>
           </div>

@@ -17,6 +17,7 @@ import DashboardTab from './components/DashboardTab';
 import ShiftManagementTab from './components/ShiftManagementTab';
 import FuelStockTab from './components/FuelStockTab';
 import OilStorageTab from './components/OilStorageTab';
+import LPGasInventoryTab from './components/LPGasInventoryTab';
 import PurchasesTab from './components/PurchasesTab';
 import DailySalesTab from './components/DailySalesTab';
 import ReportsTab from './components/ReportsTab';
@@ -1565,6 +1566,10 @@ export default function App() {
                 employees={employees}
                 user={user}
               />
+            )}
+
+            {activeTab === 'gas-inventory' && (
+              <LPGasInventoryTab />
             )}
 
             {activeTab === 'purchases' && (

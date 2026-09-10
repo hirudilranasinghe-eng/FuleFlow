@@ -151,6 +151,37 @@ CREATE TABLE IF NOT EXISTS lubricant_grn_items (
     total_cost NUMERIC NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS gas_inventory (
+  id VARCHAR(50) PRIMARY KEY,
+  size VARCHAR(20) NOT NULL,
+  full_count INTEGER DEFAULT 0,
+  empty_count INTEGER DEFAULT 0,
+  last_updated TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS gas_adjustments (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  gas_item_id VARCHAR(50) REFERENCES gas_inventory(id),
+  full_count_change INTEGER NOT NULL,
+  empty_count_change INTEGER NOT NULL,
+  reason VARCHAR(255) NOT NULL,
+  adjusted_by VARCHAR(255),
+  timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS lp_gas_purchases (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  date DATE NOT NULL,
+  size VARCHAR(20) NOT NULL,
+  full_quantity INTEGER NOT NULL,
+  empty_returned INTEGER NOT NULL,
+  unit_price NUMERIC NOT NULL,
+  total_cost NUMERIC NOT NULL,
+  supplier VARCHAR(255) NOT NULL,
+  invoice_no VARCHAR(100) NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- Disable Row Level Security (RLS) for all tables to allow simple public access
 ALTER TABLE employees DISABLE ROW LEVEL SECURITY;
 ALTER TABLE fuel_tanks DISABLE ROW LEVEL SECURITY;
@@ -163,6 +194,10 @@ ALTER TABLE price_schedules DISABLE ROW LEVEL SECURITY;
 ALTER TABLE packaged_lubricants DISABLE ROW LEVEL SECURITY;
 ALTER TABLE bulk_lubricants DISABLE ROW LEVEL SECURITY;
 ALTER TABLE lubricant_grn_receipts DISABLE ROW LEVEL SECURITY;
+ALTER TABLE lubricant_grn_items DISABLE ROW LEVEL SECURITY;
+ALTER TABLE gas_inventory DISABLE ROW LEVEL SECURITY;
+ALTER TABLE gas_adjustments DISABLE ROW LEVEL SECURITY;
+ALTER TABLE lp_gas_purchases DISABLE ROW LEVEL SECURITY;
 ALTER TABLE lubricant_grn_items DISABLE ROW LEVEL SECURITY;
 
 -- Ensure tankid column exists on pumps table

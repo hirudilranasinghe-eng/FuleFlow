@@ -34,6 +34,24 @@ export interface Employee {
   avatarColor: string;
 }
 
+export interface LPGasItem {
+  id: string;
+  size: '12.5 kg' | '37.5 kg' | '5.0 kg' | '2.3 kg';
+  full_count: number;
+  empty_count: number;
+  last_updated?: string;
+}
+
+export interface LPGasAdjustment {
+  id: string;
+  gas_item_id: string;
+  full_count_change: number;
+  empty_count_change: number;
+  reason: string;
+  timestamp: string;
+  adjusted_by?: string;
+}
+
 export interface FuelTank {
   id: string;
   fuelType: FuelType;
